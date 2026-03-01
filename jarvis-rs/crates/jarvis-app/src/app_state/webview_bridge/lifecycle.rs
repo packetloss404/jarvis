@@ -265,6 +265,7 @@ impl JarvisApp {
         tracing::info!("Boot complete — loading panels");
         self.setup_default_layout();
         self.sync_webview_bounds();
+        self.broadcast_pane_list();
     }
 
     /// Sync all webview bounds to match the current tiling layout.
@@ -328,6 +329,60 @@ impl JarvisApp {
                         url = %url,
                         "WebView page load event"
                     );
+                    // When a page finishes loading in the focused pane,
+                    // re-give it native focus so the IPC keyboard forwarder
+                    // works (important after game exit navigation).
+                    if state == jarvis_webview::PageLoadState::Finished
+                        && pane_id == self.tiling.focused_id()
+                    {
+                        if let Some(ref registry) = self.webviews {
+                            if let Some(handle) = registry.get(pane_id) {
+                                let _ = handle.focus();
+                            }
+                        }
+                    }
+                    // KartBros: inject ad-blocker once the page has loaded.
+                    if state == jarvis_webview::PageLoadState::Finished
+                        && url.contains("kartbros")
+                    {
+                        if let Some(ref mut registry) = self.webviews {
+                            if let Some(handle) = registry.get_mut(pane_id) {
+                                let _ = handle.evaluate_script(concat!(
+                                    "(function(){",
+                                      "var s=document.createElement('style');",
+                                      "s.id='_jv_kb_adblock';",
+                                      "s.textContent='",
+                                        "html,body{overflow:hidden!important;margin:0!important;padding:0!important}",
+                                        "#unity-canvas{position:fixed!important;top:0!important;left:0!important;",
+                                        "width:100vw!important;height:100vh!important;z-index:9999!important}",
+                                        "#adContainerMainMenu,#adContainerTop,#adContainerBottom,",
+                                        "#adContainerPillars,#videoAdOverlay,",
+                                        "[id^=\"kartbros-io_\"],.info-section,",
+                                        "ins.adsbygoogle,[id^=\"google_ads\"],[id^=\"aswift\"]",
+                                        "{display:none!important;width:0!important;height:0!important}",
+                                      "';",
+                                      "(document.head||document.documentElement).appendChild(s);",
+                                      "var t;",
+                                      "function scrub(){",
+                                        "document.querySelectorAll(",
+                                          "'#adContainerMainMenu,#adContainerTop,",
+                                          "#adContainerBottom,#adContainerPillars,",
+                                          "#videoAdOverlay,[id^=\"kartbros-io_\"],",
+                                          ".info-section,ins.adsbygoogle,",
+                                          "[id^=\"google_ads\"],[id^=\"aswift\"]'",
+                                        ").forEach(function(el){el.remove();});",
+                                      "}",
+                                      "scrub();",
+                                      "new MutationObserver(function(){",
+                                        "clearTimeout(t);t=setTimeout(scrub,200);",
+                                      "}).observe(document.documentElement,",
+                                        "{childList:true,subtree:true});",
+                                    "})();"
+                                ));
+                                tracing::info!(pane_id, "KartBros ad-blocker injected");
+                            }
+                        }
+                    }
                 }
                 WebViewEvent::TitleChanged { pane_id, title } => {
                     tracing::debug!(pane_id, title = %title, "WebView title changed");

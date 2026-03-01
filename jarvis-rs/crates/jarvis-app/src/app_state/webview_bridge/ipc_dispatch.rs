@@ -98,11 +98,14 @@ impl JarvisApp {
                 }
             }
             "panel_focus" => {
+                let prev = self.tiling.focused_id();
                 self.tiling.focus_pane(pane_id);
+                tracing::info!(pane_id, prev_focused = prev, "panel_focus: switching focus");
                 self.notify_focus_changed();
                 self.needs_redraw = true;
             }
             "pty_input" => {
+                tracing::info!(pane_id, "pty_input received");
                 self.handle_pty_input(pane_id, &msg.payload);
             }
             "pty_resize" => {
@@ -194,6 +197,7 @@ impl JarvisApp {
                                 self.command_palette_open = false;
                                 self.command_palette = None;
                                 self.input.set_mode(jarvis_platform::input_processor::InputMode::Terminal);
+                                self.notify_overlay_state();
                                 self.needs_redraw = true;
                                 self.dispatch(action);
                             }
@@ -298,6 +302,7 @@ impl JarvisApp {
                     }
                 }
                 self.game_active = None;
+                self.notify_focus_changed();
                 return;
             }
         }

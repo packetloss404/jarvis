@@ -77,6 +77,7 @@ impl JarvisApp {
     /// and `status_update` with the active panel name to the status bar.
     pub(in crate::app_state) fn notify_focus_changed(&self) {
         let focused_id = self.tiling.focused_id();
+        tracing::info!(focused_id, "notify_focus_changed: will focus pane");
 
         if let Some(ref registry) = self.webviews {
             for pane_id in registry.active_panes() {
@@ -86,12 +87,14 @@ impl JarvisApp {
                     if let Err(e) = handle.send_ipc("focus_changed", &payload) {
                         tracing::warn!(pane_id, error = %e, "Failed to send focus_changed");
                     }
-                    // Give native focus to the focused webview so it receives
-                    // keyboard and mouse events (macOS first responder).
-                    if is_focused {
-                        let _ = handle.focus();
-                    }
                 }
+            }
+            // Give native OS focus to the focused pane so it receives
+            // keyboard events. No focus_parent() on inactive panes —
+            // focus() alone is sufficient and avoids the racing bug.
+            if let Some(handle) = registry.get(focused_id) {
+                tracing::info!(focused_id, "handle.focus() called");
+                let _ = handle.focus();
             }
         }
     }

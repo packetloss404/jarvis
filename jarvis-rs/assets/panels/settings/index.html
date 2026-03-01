@@ -1185,9 +1185,7 @@ sendIpc('settings_init', {});
 // FOCUS MANAGEMENT
 // =========================================================================
 
-document.addEventListener('mousedown', function() {
-  sendIpc('panel_focus', {});
-});
+// panel_focus is sent by IPC init script globally
 
 function setFocused(isFocused) {
   if (isFocused) {

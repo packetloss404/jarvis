@@ -122,6 +122,7 @@ pub const IPC_INIT_SCRIPT: &str = r#"
     // Diagnostic event logging (temporary)
     // =========================================================================
     document.addEventListener('mousedown', function(e) {
+        window.jarvis.ipc.send('panel_focus', {});
         window.jarvis.ipc.send('debug_event', {
             type: 'mousedown', x: e.clientX, y: e.clientY,
             target: e.target.tagName + (e.target.id ? '#' + e.target.id : '')

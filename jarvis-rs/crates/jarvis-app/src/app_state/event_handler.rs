@@ -187,7 +187,9 @@ impl JarvisApp {
                 self.dispatch(action);
             }
             InputResult::TerminalInput(_bytes) => {
-                // Will be forwarded to xterm.js webview in future phases
+                // Webviews intercept all input before winit sees it, so this
+                // branch rarely fires. Terminal typing is handled natively by
+                // xterm.js through the focused webview.
             }
             InputResult::Consumed => {}
         }
@@ -316,7 +318,6 @@ impl JarvisApp {
         if button != MouseButton::Left {
             return;
         }
-
         match state {
             ElementState::Pressed => {
                 let (x, y) = self.cursor_pos;
@@ -422,10 +423,6 @@ impl JarvisApp {
                                 self.tiling.focus_pane(pid);
                                 self.notify_focus_changed();
                                 self.needs_redraw = true;
-                            } else if let Some(ref registry) = self.webviews {
-                                if let Some(handle) = registry.get(pid) {
-                                    let _ = handle.focus();
-                                }
                             }
                         }
                     }
