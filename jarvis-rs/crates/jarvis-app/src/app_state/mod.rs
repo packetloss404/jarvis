@@ -9,6 +9,7 @@ mod core;
 mod dispatch;
 mod event_handler;
 mod init;
+mod menu;
 mod palette;
 mod polling;
 pub(super) mod pty_bridge;

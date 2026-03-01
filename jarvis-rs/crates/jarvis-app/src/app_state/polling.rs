@@ -20,6 +20,7 @@ impl JarvisApp {
             self.poll_pty_output();
             self.poll_mobile_commands();
             self.poll_relay_events();
+            self.poll_menu_events();
         }
 
         if self.needs_redraw {

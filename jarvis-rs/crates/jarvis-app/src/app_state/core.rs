@@ -96,6 +96,10 @@ pub struct JarvisApp {
 
     // Active game: (pane_id, original_url_before_game)
     pub(super) game_active: Option<(u32, String)>,
+
+    // Native menu bar
+    pub(super) _menu: Option<muda::Menu>,
+    pub(super) menu_ids: Option<super::menu::MenuIds>,
 }
 
 impl JarvisApp {
@@ -147,6 +151,8 @@ impl JarvisApp {
             cursor_pos: (0.0, 0.0),
             drag_state: None,
             game_active: None,
+            _menu: None,
+            menu_ids: None,
         }
     }
 }

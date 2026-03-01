@@ -103,6 +103,7 @@ impl JarvisApp {
         }
 
         self.window = Some(window);
+        self.initialize_menu();
         tracing::info!("Window created and renderer initialized");
         true
     }
