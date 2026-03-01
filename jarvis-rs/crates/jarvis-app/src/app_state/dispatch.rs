@@ -238,14 +238,20 @@ impl JarvisApp {
                 }
             }
             Action::OpenURL(ref url) => {
+                // Normalize: auto-prepend https:// if no scheme is provided
+                let normalized = if !url.contains("://") {
+                    format!("https://{}", url)
+                } else {
+                    url.clone()
+                };
                 let pane_id = self.tiling.focused_id();
                 if let Some(ref mut registry) = self.webviews {
                     if let Some(handle) = registry.get_mut(pane_id) {
                         let original_url = handle.current_url().to_string();
-                        if let Err(e) = handle.load_url(url) {
-                            tracing::warn!(error = %e, url = %url, "Failed to open URL");
+                        if let Err(e) = handle.load_url(&normalized) {
+                            tracing::warn!(error = %e, url = %normalized, "Failed to open URL");
                         } else {
-                            tracing::info!(pane_id, url = %url, "URL opened");
+                            tracing::info!(pane_id, url = %normalized, "URL navigation requested");
                             self.game_active = Some((pane_id, original_url));
                         }
                     }
@@ -276,9 +282,18 @@ impl JarvisApp {
                     ));
                 }
             },
-            Action::ScrollUp(_) | Action::ScrollDown(_) | Action::ClearTerminal => {
-                // Will be handled by xterm.js in webview panels
-                tracing::debug!("terminal action: will be handled by webview");
+            Action::ClearTerminal => {
+                let focused = self.tiling.focused_id();
+                if let Some(ref registry) = self.webviews {
+                    if let Some(handle) = registry.get(focused) {
+                        let _ = handle.evaluate_script(
+                            "(function(){if(window._xtermInstance&&window._xtermInstance.clear){window._xtermInstance.clear();}})()"
+                        );
+                    }
+                }
+            }
+            Action::ScrollUp(_) | Action::ScrollDown(_) => {
+                tracing::debug!("scroll action: will be handled by webview");
             }
             Action::Quit => {
                 self.event_bus.publish(Event::Shutdown);

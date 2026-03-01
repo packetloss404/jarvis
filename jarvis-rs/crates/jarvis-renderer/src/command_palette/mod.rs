@@ -103,4 +103,43 @@ mod tests {
         assert!(new_pane.is_some());
         assert!(new_pane.unwrap().keybind_display.is_some());
     }
+
+    #[test]
+    fn url_input_mode() {
+        let mut palette = make_palette();
+        assert_eq!(palette.mode(), PaletteMode::ActionSelect);
+
+        // Enter URL input mode
+        palette.enter_url_mode();
+        assert_eq!(palette.mode(), PaletteMode::UrlInput);
+        assert_eq!(palette.query(), "");
+        assert!(palette.visible_items().is_empty());
+
+        // Type a URL
+        for ch in "https://example.com".chars() {
+            palette.append_char(ch);
+        }
+        assert_eq!(palette.query(), "https://example.com");
+
+        // Confirm returns OpenURL with the typed URL
+        let action = palette.confirm();
+        assert_eq!(action, Some(Action::OpenURL("https://example.com".into())));
+    }
+
+    #[test]
+    fn url_input_mode_empty_returns_none() {
+        let mut palette = make_palette();
+        palette.enter_url_mode();
+        assert_eq!(palette.confirm(), None);
+    }
+
+    #[test]
+    fn palette_includes_open_url_prompt() {
+        let palette = make_palette();
+        let has_prompt = palette
+            .visible_items()
+            .iter()
+            .any(|item| item.action == Action::OpenURLPrompt);
+        assert!(has_prompt);
+    }
 }

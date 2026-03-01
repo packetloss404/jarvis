@@ -24,6 +24,7 @@ impl Action {
             Action::OpenCommandPalette => "Command Palette",
             Action::OpenSettings => "Open Settings",
             Action::CloseOverlay => "Close Overlay",
+            Action::OpenURLPrompt => "Open URL",
             Action::OpenAssistant => "Open Assistant",
             Action::OpenChat => "Open Chat",
             Action::PushToTalk => "Push to Talk",
@@ -40,7 +41,6 @@ impl Action {
             Action::SearchNext => "Find Next",
             Action::SearchPrev => "Find Previous",
             Action::ClearTerminal => "Clear Terminal",
-            Action::ResetTerminal => "Reset Terminal",
             Action::LaunchGame(ref name) => match name.as_str() {
                 "tetris" => "Play Tetris",
                 "asteroids" => "Play Asteroids",
@@ -65,6 +65,18 @@ impl Action {
                     "Play Wrestle Bros"
                 } else if url.contains("baseballbros") {
                     "Play Baseball Bros"
+                } else if url.contains("lichess") {
+                    "Play Lichess"
+                } else if url.contains("monkeytype") {
+                    "Open Monkeytype"
+                } else if url.contains("excalidraw") {
+                    "Open Excalidraw"
+                } else if url.contains("desmos") {
+                    "Open Desmos"
+                } else if url.contains("news.ycombinator") {
+                    "Open Hacker News"
+                } else if url.contains("spotify") {
+                    "Open Spotify"
                 } else {
                     "Open Website"
                 }
@@ -73,6 +85,67 @@ impl Action {
             Action::RevokeMobilePairing => "Revoke Mobile Pairing",
             Action::ReloadConfig => "Reload Config",
             Action::None => "None",
+        }
+    }
+
+    /// Category for grouping in the command palette.
+    pub fn category(&self) -> &'static str {
+        match self {
+            Action::NewPane
+            | Action::ClosePane
+            | Action::SplitHorizontal
+            | Action::SplitVertical
+            | Action::FocusPane(_)
+            | Action::FocusNextPane
+            | Action::FocusPrevPane
+            | Action::ZoomPane
+            | Action::SwapPane(_)
+            | Action::ResizePane { .. } => "Panes",
+
+            Action::ToggleFullscreen | Action::Quit => "Window",
+
+            Action::OpenSettings
+            | Action::OpenAssistant
+            | Action::OpenChat
+            | Action::OpenURLPrompt
+            | Action::OpenCommandPalette
+            | Action::CloseOverlay => "Apps",
+
+            Action::Copy
+            | Action::Paste
+            | Action::SelectAll
+            | Action::SearchOpen
+            | Action::SearchClose
+            | Action::SearchNext
+            | Action::SearchPrev
+            | Action::ScrollUp(_)
+            | Action::ScrollDown(_)
+            | Action::ScrollToTop
+            | Action::ScrollToBottom
+            | Action::ClearTerminal => "Terminal",
+
+            Action::LaunchGame(_) => "Games",
+
+            Action::OpenURL(ref url) => {
+                if url.contains("kartbros")
+                    || url.contains("basketbros")
+                    || url.contains("footballbros")
+                    || url.contains("soccerbros")
+                    || url.contains("wrestlebros")
+                    || url.contains("baseballbros")
+                    || url.contains("lichess")
+                {
+                    "Games"
+                } else {
+                    "Web"
+                }
+            }
+
+            Action::PairMobile
+            | Action::RevokeMobilePairing
+            | Action::ReloadConfig => "System",
+
+            Action::PushToTalk | Action::ReleasePushToTalk | Action::None => "System",
         }
     }
 
@@ -85,19 +158,16 @@ impl Action {
             Action::SplitVertical,
             Action::FocusNextPane,
             Action::FocusPrevPane,
-            Action::ZoomPane,
             Action::ToggleFullscreen,
             Action::OpenSettings,
-            Action::OpenAssistant,
             Action::OpenChat,
+            Action::OpenURLPrompt,
             Action::Copy,
             Action::Paste,
             Action::SelectAll,
-            Action::SearchOpen,
             Action::ScrollToTop,
             Action::ScrollToBottom,
             Action::ClearTerminal,
-            Action::ResetTerminal,
             Action::LaunchGame("tetris".into()),
             Action::LaunchGame("asteroids".into()),
             Action::LaunchGame("minesweeper".into()),
@@ -111,6 +181,12 @@ impl Action {
             Action::OpenURL("https://soccerbros.gg".into()),
             Action::OpenURL("https://wrestlebros.io".into()),
             Action::OpenURL("https://baseballbros.io".into()),
+            Action::OpenURL("https://lichess.org".into()),
+            Action::OpenURL("https://monkeytype.com".into()),
+            Action::OpenURL("https://excalidraw.com".into()),
+            Action::OpenURL("https://www.desmos.com/calculator".into()),
+            Action::OpenURL("https://news.ycombinator.com".into()),
+            Action::OpenURL("https://open.spotify.com".into()),
             Action::PairMobile,
             Action::RevokeMobilePairing,
             Action::ReloadConfig,

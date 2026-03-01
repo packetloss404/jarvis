@@ -1,5 +1,14 @@
 use jarvis_common::actions::Action;
 
+/// The current mode of the command palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteMode {
+    /// Filtering/selecting from the action list.
+    ActionSelect,
+    /// Typing a URL to navigate to.
+    UrlInput,
+}
+
 /// A single item in the command palette.
 #[derive(Debug, Clone)]
 pub struct PaletteItem {

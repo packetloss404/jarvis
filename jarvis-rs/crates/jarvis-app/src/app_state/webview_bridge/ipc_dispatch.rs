@@ -212,13 +212,19 @@ impl JarvisApp {
                         if let Some(ref mut palette) = self.command_palette {
                             palette.set_selected(idx as usize);
                             if let Some(action) = palette.confirm() {
-                                self.send_palette_hide();
-                                self.command_palette_open = false;
-                                self.command_palette = None;
-                                self.input.set_mode(jarvis_platform::input_processor::InputMode::Terminal);
-                                self.notify_overlay_state();
-                                self.needs_redraw = true;
-                                self.dispatch(action);
+                                if action == jarvis_common::actions::Action::OpenURLPrompt {
+                                    palette.enter_url_mode();
+                                    self.send_palette_to_webview("palette_update");
+                                    self.needs_redraw = true;
+                                } else {
+                                    self.send_palette_hide();
+                                    self.command_palette_open = false;
+                                    self.command_palette = None;
+                                    self.input.set_mode(jarvis_platform::input_processor::InputMode::Terminal);
+                                    self.notify_overlay_state();
+                                    self.needs_redraw = true;
+                                    self.dispatch(action);
+                                }
                             }
                         }
                     }
@@ -283,9 +289,16 @@ impl JarvisApp {
                 if let Ok(mut cb) = jarvis_platform::Clipboard::new() {
                     if let Ok(text) = cb.get_text() {
                         if let Some(ref mut palette) = self.command_palette {
+                            let url_mode = palette.mode()
+                                == jarvis_renderer::PaletteMode::UrlInput;
                             for ch in text.chars() {
                                 if ch.is_ascii_graphic() || ch == ' ' {
-                                    palette.append_char(ch.to_ascii_lowercase());
+                                    let ch = if url_mode {
+                                        ch
+                                    } else {
+                                        ch.to_ascii_lowercase()
+                                    };
+                                    palette.append_char(ch);
                                 }
                             }
                             self.send_palette_to_webview("palette_update");

@@ -263,13 +263,22 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             '._cp_item.selected{background:var(--color-primary,rgba(137,180,250,0.12))}',
             '._cp_label{color:var(--color-text,#cdd6f4);font-size:12px}',
             '._cp_kbd{color:var(--color-text-muted,#6c7086);font-size:10px;font-family:var(--font-mono,"JetBrains Mono",monospace);opacity:0.7}',
-            '#_cp_empty{padding:24px 16px;text-align:center;color:var(--color-text-muted,#6c7086);font-size:12px}'
+            '#_cp_empty{padding:24px 16px;text-align:center;color:var(--color-text-muted,#6c7086);font-size:12px}',
+            '._cp_header{padding:6px 16px 4px;color:var(--color-text-muted,#6c7086);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;pointer-events:none;user-select:none}',
+            '._cp_header:not(:first-child){margin-top:4px;border-top:1px solid var(--color-border,rgba(255,255,255,0.06));padding-top:8px}'
         ].join('');
             head.appendChild(style);
         }
 
-        function renderItems(container, items, selectedIndex) {
+        function renderItems(container, items, selectedIndex, mode, placeholder, query) {
             container.innerHTML = '';
+            if (mode === 'url_input') {
+                var hint = document.createElement('div');
+                hint.id = '_cp_empty';
+                hint.textContent = placeholder || 'Type a URL and press Enter';
+                container.appendChild(hint);
+                return;
+            }
             if (!items || items.length === 0) {
                 var empty = document.createElement('div');
                 empty.id = '_cp_empty';
@@ -277,7 +286,16 @@ pub const IPC_INIT_SCRIPT: &str = r#"
                 container.appendChild(empty);
                 return;
             }
+            var showHeaders = !query;
+            var lastCategory = '';
             for (var i = 0; i < items.length; i++) {
+                if (showHeaders && items[i].category && items[i].category !== lastCategory) {
+                    lastCategory = items[i].category;
+                    var header = document.createElement('div');
+                    header.className = '_cp_header';
+                    header.textContent = lastCategory;
+                    container.appendChild(header);
+                }
                 var row = document.createElement('div');
                 row.className = '_cp_item' + (i === selectedIndex ? ' selected' : '');
                 row.dataset.index = i;
@@ -332,7 +350,7 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             }
         }
 
-        window._showCommandPalette = function(items, query, selectedIndex) {
+        window._showCommandPalette = function(items, query, selectedIndex, mode, placeholder) {
             ensurePaletteStyles();
             if (!document.body) { console.warn('[JARVIS] palette: no document.body'); return; }
             // Remove existing if any
@@ -356,7 +374,8 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             search.id = '_cp_search';
             var icon = document.createElement('span');
             icon.className = 'icon';
-            icon.textContent = '>';
+            icon.id = '_cp_icon';
+            icon.textContent = (mode === 'url_input') ? 'url:' : '>';
             search.appendChild(icon);
             var queryEl = document.createElement('span');
             queryEl.id = '_cp_query';
@@ -367,7 +386,7 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             // Items list
             var itemsContainer = document.createElement('div');
             itemsContainer.id = '_cp_items';
-            renderItems(itemsContainer, items, selectedIndex);
+            renderItems(itemsContainer, items, selectedIndex, mode, placeholder, query);
             panel.appendChild(itemsContainer);
 
             overlay.appendChild(panel);
@@ -375,14 +394,18 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             attachPaletteKeys();
         };
 
-        window._updateCommandPalette = function(items, query, selectedIndex) {
+        window._updateCommandPalette = function(items, query, selectedIndex, mode, placeholder) {
+            var icon = document.getElementById('_cp_icon');
+            if (icon) {
+                icon.textContent = (mode === 'url_input') ? 'url:' : '>';
+            }
             var queryEl = document.getElementById('_cp_query');
             if (queryEl) {
                 queryEl.innerHTML = (query || '') + '<span class="cursor"></span>';
             }
             var itemsContainer = document.getElementById('_cp_items');
             if (itemsContainer) {
-                renderItems(itemsContainer, items, selectedIndex);
+                renderItems(itemsContainer, items, selectedIndex, mode, placeholder, query);
             }
         };
 
@@ -394,10 +417,10 @@ pub const IPC_INIT_SCRIPT: &str = r#"
 
         // IPC handlers
         window.jarvis.ipc.on('palette_show', function(p) {
-            window._showCommandPalette(p.items, p.query, p.selectedIndex);
+            window._showCommandPalette(p.items, p.query, p.selectedIndex, p.mode, p.placeholder);
         });
         window.jarvis.ipc.on('palette_update', function(p) {
-            window._updateCommandPalette(p.items, p.query, p.selectedIndex);
+            window._updateCommandPalette(p.items, p.query, p.selectedIndex, p.mode, p.placeholder);
         });
         window.jarvis.ipc.on('palette_hide', function() {
             window._hideCommandPalette();

@@ -1,7 +1,9 @@
 //! Command palette key handling and webview IPC bridge.
 
 use jarvis_common::actions::Action;
+use jarvis_platform::input::KeybindRegistry;
 use jarvis_platform::input_processor::InputMode;
+use jarvis_renderer::PaletteMode;
 
 use super::core::JarvisApp;
 
@@ -17,19 +19,33 @@ impl JarvisApp {
             None => return false,
         };
 
+        let mode = palette.mode();
+
         match key_name {
             "Escape" => {
-                self.dispatch(Action::CloseOverlay);
+                if mode == PaletteMode::UrlInput {
+                    // Go back to action select mode
+                    let registry = KeybindRegistry::from_config(&self.config.keybinds);
+                    self.command_palette = Some(jarvis_renderer::CommandPalette::new(&registry));
+                    self.send_palette_update();
+                } else {
+                    self.dispatch(Action::CloseOverlay);
+                }
                 true
             }
             "Enter" => {
                 if let Some(action) = palette.confirm() {
-                    self.send_palette_hide();
-                    self.command_palette_open = false;
-                    self.command_palette = None;
-                    self.input.set_mode(InputMode::Terminal);
-                    self.notify_overlay_state();
-                    self.dispatch(action);
+                    if action == Action::OpenURLPrompt {
+                        palette.enter_url_mode();
+                        self.send_palette_update();
+                    } else {
+                        self.send_palette_hide();
+                        self.command_palette_open = false;
+                        self.command_palette = None;
+                        self.input.set_mode(InputMode::Terminal);
+                        self.notify_overlay_state();
+                        self.dispatch(action);
+                    }
                 }
                 true
             }
@@ -57,7 +73,12 @@ impl JarvisApp {
                 if key_name.len() == 1 {
                     let ch = key_name.chars().next().unwrap();
                     if ch.is_ascii_graphic() || ch == ' ' {
-                        palette.append_char(ch.to_ascii_lowercase());
+                        let ch = if mode == PaletteMode::UrlInput {
+                            ch // preserve case for URLs
+                        } else {
+                            ch.to_ascii_lowercase()
+                        };
+                        palette.append_char(ch);
                         self.send_palette_update();
                         return true;
                     }
@@ -79,14 +100,21 @@ impl JarvisApp {
                         .map(|item| {
                             serde_json::json!({
                                 "label": item.label,
-                                "keybind": item.keybind_display
+                                "keybind": item.keybind_display,
+                                "category": item.action.category()
                             })
                         })
                         .collect();
+                    let (mode_str, placeholder) = match palette.mode() {
+                        PaletteMode::ActionSelect => ("action_select", ""),
+                        PaletteMode::UrlInput => ("url_input", "Type a URL and press Enter"),
+                    };
                     let payload = serde_json::json!({
                         "items": items,
                         "query": palette.query(),
-                        "selectedIndex": palette.selected_index()
+                        "selectedIndex": palette.selected_index(),
+                        "mode": mode_str,
+                        "placeholder": placeholder
                     });
                     let _ = handle.send_ipc(kind, &payload);
                 }

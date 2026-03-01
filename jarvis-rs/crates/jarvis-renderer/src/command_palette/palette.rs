@@ -1,10 +1,11 @@
 use jarvis_common::actions::Action;
 use jarvis_platform::input::KeybindRegistry;
 
-use super::types::PaletteItem;
+use super::types::{PaletteItem, PaletteMode};
 
 /// Command palette state: query, filtered items, selection.
 pub struct CommandPalette {
+    mode: PaletteMode,
     query: String,
     items: Vec<PaletteItem>,
     filtered: Vec<usize>,
@@ -29,6 +30,7 @@ impl CommandPalette {
         let filtered = (0..items.len()).collect();
 
         Self {
+            mode: PaletteMode::ActionSelect,
             query: String::new(),
             items,
             filtered,
@@ -46,15 +48,19 @@ impl CommandPalette {
     /// Append a character to the query.
     pub fn append_char(&mut self, c: char) {
         self.query.push(c);
-        self.filter();
-        self.selected = 0;
+        if self.mode == PaletteMode::ActionSelect {
+            self.filter();
+            self.selected = 0;
+        }
     }
 
     /// Remove the last character from the query.
     pub fn backspace(&mut self) {
         self.query.pop();
-        self.filter();
-        self.selected = 0;
+        if self.mode == PaletteMode::ActionSelect {
+            self.filter();
+            self.selected = 0;
+        }
     }
 
     /// Move selection down.
@@ -80,9 +86,33 @@ impl CommandPalette {
 
     /// Confirm the current selection, returning the action.
     pub fn confirm(&self) -> Option<Action> {
-        self.filtered
-            .get(self.selected)
-            .map(|&idx| self.items[idx].action.clone())
+        match self.mode {
+            PaletteMode::ActionSelect => self
+                .filtered
+                .get(self.selected)
+                .map(|&idx| self.items[idx].action.clone()),
+            PaletteMode::UrlInput => {
+                let url = self.query.trim().to_string();
+                if url.is_empty() {
+                    None
+                } else {
+                    Some(Action::OpenURL(url))
+                }
+            }
+        }
+    }
+
+    /// Get the current palette mode.
+    pub fn mode(&self) -> PaletteMode {
+        self.mode
+    }
+
+    /// Switch to URL input mode, clearing the query.
+    pub fn enter_url_mode(&mut self) {
+        self.mode = PaletteMode::UrlInput;
+        self.query.clear();
+        self.filtered.clear();
+        self.selected = 0;
     }
 
     /// The items currently visible after filtering.
