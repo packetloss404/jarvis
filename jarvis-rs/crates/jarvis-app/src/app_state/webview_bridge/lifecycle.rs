@@ -341,9 +341,12 @@ impl JarvisApp {
                             }
                         }
                     }
-                    // KartBros: inject ad-blocker once the page has loaded.
+                    // Bros games: inject ad-blocker once the page has loaded.
+                    let is_bros_game = ["kartbros", "basketbros", "footballbros", "soccerbros", "wrestlebros", "baseballbros"]
+                        .iter()
+                        .any(|domain| url.contains(domain));
                     if state == jarvis_webview::PageLoadState::Finished
-                        && url.contains("kartbros")
+                        && is_bros_game
                     {
                         if let Some(ref mut registry) = self.webviews {
                             if let Some(handle) = registry.get_mut(pane_id) {
@@ -379,7 +382,7 @@ impl JarvisApp {
                                         "{childList:true,subtree:true});",
                                     "})();"
                                 ));
-                                tracing::info!(pane_id, "KartBros ad-blocker injected");
+                                tracing::info!(pane_id, url = %url, "Bros game ad-blocker injected");
                             }
                         }
                     }

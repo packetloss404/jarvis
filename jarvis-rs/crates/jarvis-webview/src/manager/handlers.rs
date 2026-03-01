@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tracing::{debug, warn};
@@ -27,6 +28,11 @@ pub const ALLOWED_NAV_PREFIXES: &[&str] = &[
     "https://cdn.jsdelivr.net/",
     "https://unpkg.com/",
     "https://kartbros.io",
+    "https://basketbros.io",
+    "https://footballbros.io",
+    "https://soccerbros.gg",
+    "https://wrestlebros.io",
+    "https://baseballbros.io",
 ];
 
 /// Check whether a URL is allowed by the navigation allowlist.
@@ -103,10 +109,15 @@ impl WebViewManager {
     pub(super) fn attach_navigation_handler<'a>(
         builder: WebViewBuilder<'a>,
         events: Arc<Mutex<Vec<WebViewEvent>>>,
+        allow_open_url: Arc<AtomicBool>,
         pid: u32,
     ) -> WebViewBuilder<'a> {
         builder.with_navigation_handler(move |url| {
-            if !is_navigation_allowed(&url) {
+            // When allow_open_url is enabled, permit any https:// navigation
+            let open_url_allowed =
+                allow_open_url.load(Ordering::Relaxed) && url.starts_with("https://");
+
+            if !open_url_allowed && !is_navigation_allowed(&url) {
                 warn!(
                     pane_id = pid,
                     url = %url,
@@ -237,9 +248,14 @@ mod tests {
 
     #[test]
     fn allowlist_has_expected_entries() {
-        assert_eq!(ALLOWED_NAV_PREFIXES.len(), 6);
+        assert_eq!(ALLOWED_NAV_PREFIXES.len(), 12);
         assert!(ALLOWED_NAV_PREFIXES.contains(&"jarvis://"));
         assert!(ALLOWED_NAV_PREFIXES.contains(&"about:blank"));
         assert!(ALLOWED_NAV_PREFIXES.contains(&"https://kartbros.io"));
+        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://basketbros.io"));
+        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://footballbros.io"));
+        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://soccerbros.gg"));
+        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://wrestlebros.io"));
+        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://baseballbros.io"));
     }
 }

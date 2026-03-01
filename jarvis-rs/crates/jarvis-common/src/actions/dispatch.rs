@@ -55,6 +55,16 @@ impl Action {
             Action::OpenURL(ref url) => {
                 if url.contains("kartbros") {
                     "Play KartBros"
+                } else if url.contains("basketbros") {
+                    "Play Basket Bros"
+                } else if url.contains("footballbros") {
+                    "Play Football Bros"
+                } else if url.contains("soccerbros") {
+                    "Play Soccer Bros"
+                } else if url.contains("wrestlebros") {
+                    "Play Wrestle Bros"
+                } else if url.contains("baseballbros") {
+                    "Play Baseball Bros"
                 } else {
                     "Open Website"
                 }
@@ -96,6 +106,11 @@ impl Action {
             Action::LaunchGame("draw".into()),
             Action::LaunchGame("subway".into()),
             Action::OpenURL("https://kartbros.io".into()),
+            Action::OpenURL("https://basketbros.io".into()),
+            Action::OpenURL("https://footballbros.io".into()),
+            Action::OpenURL("https://soccerbros.gg".into()),
+            Action::OpenURL("https://wrestlebros.io".into()),
+            Action::OpenURL("https://baseballbros.io".into()),
             Action::PairMobile,
             Action::RevokeMobilePairing,
             Action::ReloadConfig,

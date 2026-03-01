@@ -53,7 +53,12 @@ impl WebViewManager {
         builder = Self::attach_title_handler(builder, Arc::clone(&events), pid);
 
         // Navigation handler — allowlist: only https:// and jarvis:// schemes
-        builder = Self::attach_navigation_handler(builder, Arc::clone(&events), pid);
+        builder = Self::attach_navigation_handler(
+            builder,
+            Arc::clone(&events),
+            Arc::clone(&self.allow_open_url),
+            pid,
+        );
 
         // Custom protocol for bundled content
         builder = self.attach_custom_protocol(builder);

@@ -263,6 +263,9 @@ impl JarvisApp {
                     self.registry =
                         jarvis_platform::input::KeybindRegistry::from_config(&c.keybinds);
                     self.chrome = jarvis_renderer::UiChrome::from_config(&c.layout);
+                    if let Some(ref registry) = self.webviews {
+                        registry.set_allow_open_url(c.games.allow_open_url);
+                    }
                     self.config = c;
                     self.inject_theme_into_all_webviews();
                     self.event_bus.publish(Event::ConfigReloaded);
