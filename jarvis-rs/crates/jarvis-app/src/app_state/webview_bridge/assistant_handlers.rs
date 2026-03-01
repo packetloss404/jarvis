@@ -115,7 +115,7 @@ impl JarvisApp {
                     tracing::warn!(pane_id, error = %e, "Failed to launch game");
                 } else {
                     tracing::info!(pane_id, game = %game_name, "Game launched");
-                    self.game_active = Some((pane_id, original_url));
+                    self.game_active.insert(pane_id, original_url);
                 }
             }
         }

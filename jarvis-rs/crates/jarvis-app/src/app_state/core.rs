@@ -1,5 +1,6 @@
 //! JarvisApp struct definition and constructor.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -94,8 +95,8 @@ pub struct JarvisApp {
     pub(super) cursor_pos: (f64, f64),
     pub(super) drag_state: Option<super::resize_drag::DragState>,
 
-    // Active game: (pane_id, original_url_before_game)
-    pub(super) game_active: Option<(u32, String)>,
+    // Active games/URLs: maps pane_id → original_url_before_navigation
+    pub(super) game_active: HashMap<u32, String>,
 
     // Native menu bar
     pub(super) _menu: Option<muda::Menu>,
@@ -150,7 +151,7 @@ impl JarvisApp {
             last_poll: Instant::now(),
             cursor_pos: (0.0, 0.0),
             drag_state: None,
-            game_active: None,
+            game_active: HashMap::new(),
             _menu: None,
             menu_ids: None,
         }

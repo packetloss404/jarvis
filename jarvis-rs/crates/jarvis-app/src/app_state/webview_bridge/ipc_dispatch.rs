@@ -326,17 +326,15 @@ impl JarvisApp {
             return;
         }
 
-        // When a game/URL is active, Escape navigates back to the original page
+        // When a game/URL is active on this pane, Escape navigates back
         if key == "Escape" {
-            if let Some((game_pane_id, ref original_url)) = self.game_active {
-                let url = original_url.clone();
-                tracing::info!(game_pane_id, "Exiting game, navigating back");
+            if let Some(original_url) = self.game_active.remove(&pane_id) {
+                tracing::info!(pane_id, "Exiting game, navigating back");
                 if let Some(ref mut registry) = self.webviews {
-                    if let Some(handle) = registry.get_mut(game_pane_id) {
-                        let _ = handle.load_url(&url);
+                    if let Some(handle) = registry.get_mut(pane_id) {
+                        let _ = handle.load_url(&original_url);
                     }
                 }
-                self.game_active = None;
                 self.notify_focus_changed();
                 return;
             }

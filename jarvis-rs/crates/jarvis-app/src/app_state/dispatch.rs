@@ -233,7 +233,7 @@ impl JarvisApp {
                             tracing::warn!(error = %e, "Failed to launch game");
                         } else {
                             tracing::info!(pane_id, game = %game, "Game launched");
-                            self.game_active = Some((pane_id, original_url));
+                            self.game_active.insert(pane_id, original_url);
                         }
                     }
                 }
@@ -253,7 +253,7 @@ impl JarvisApp {
                             tracing::warn!(error = %e, url = %normalized, "Failed to open URL");
                         } else {
                             tracing::info!(pane_id, url = %normalized, "URL navigation requested");
-                            self.game_active = Some((pane_id, original_url));
+                            self.game_active.insert(pane_id, original_url);
                         }
                     }
                 }
