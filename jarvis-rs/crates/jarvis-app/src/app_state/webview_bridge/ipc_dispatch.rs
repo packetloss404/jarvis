@@ -39,6 +39,7 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "window_drag",
     "keybind",
     "read_file",
+    "clipboard_copy",
     "clipboard_paste",
     "open_url",
     "palette_click",
@@ -175,6 +176,24 @@ impl JarvisApp {
             }
             "read_file" => {
                 self.handle_read_file(pane_id, &msg.payload);
+            }
+            "clipboard_copy" => {
+                if let IpcPayload::Json(ref v) = msg.payload {
+                    if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
+                        match jarvis_platform::Clipboard::new() {
+                            Ok(mut cb) => {
+                                if let Err(e) = cb.set_text(text) {
+                                    tracing::warn!(pane_id, error = %e, "clipboard_copy: failed to write");
+                                } else {
+                                    tracing::info!(pane_id, len = text.len(), "clipboard_copy: text copied");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(pane_id, error = %e, "clipboard_copy: clipboard unavailable");
+                            }
+                        }
+                    }
+                }
             }
             "clipboard_paste" => {
                 self.handle_clipboard_paste(pane_id, &msg.payload);

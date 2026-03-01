@@ -174,11 +174,13 @@ impl JarvisApp {
                 }
             }
             Action::Copy => {
+                // Ask the focused webview to grab its selection and send it
+                // back via clipboard_copy IPC (handled in ipc_dispatch.rs).
                 let focused = self.tiling.focused_id();
                 if let Some(ref registry) = self.webviews {
                     if let Some(handle) = registry.get(focused) {
                         let _ = handle.evaluate_script(
-                            "document.execCommand('copy')"
+                            "(function(){var t='';if(window._xtermInstance&&window._xtermInstance.getSelection){t=window._xtermInstance.getSelection();}if(!t){t=(window.getSelection()||'').toString();}if(t&&window.jarvis&&window.jarvis.ipc){window.jarvis.ipc.send('clipboard_copy',{text:t});}})()"
                         );
                     }
                 }

@@ -175,8 +175,21 @@ pub const IPC_INIT_SCRIPT: &str = r#"
         }
         if (e.metaKey && !e.repeat) {
             var key = e.key.toUpperCase();
+            // Copy: grab selection from xterm or DOM and send to Rust
+            if (key === 'C') {
+                var text = '';
+                if (window._xtermInstance && window._xtermInstance.getSelection) {
+                    text = window._xtermInstance.getSelection();
+                }
+                if (!text) { text = window.getSelection().toString(); }
+                if (text) {
+                    e.preventDefault();
+                    window.jarvis.ipc.send('clipboard_copy', { text: text });
+                }
+                return;
+            }
             // Skip shortcuts that should be handled natively by the webview
-            if (key === 'R' || key === 'L' || key === 'Q' || key === 'C' || key === 'V' || key === 'A' || key === 'X' || key === 'Z') return;
+            if (key === 'R' || key === 'L' || key === 'Q' || key === 'V' || key === 'A' || key === 'X' || key === 'Z') return;
             e.preventDefault();
             e.stopPropagation();
             window.jarvis.ipc.send('keybind', {
@@ -188,6 +201,20 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             });
         }
     }, true);
+
+    // =========================================================================
+    // Clipboard API polyfill
+    // =========================================================================
+    // WKWebView blocks navigator.clipboard access. Override writeText/readText
+    // to proxy through Rust via IPC so games and web apps can use the clipboard.
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText = function(text) {
+            return new Promise(function(resolve) {
+                window.jarvis.ipc.send('clipboard_copy', { text: text });
+                resolve();
+            });
+        };
+    }
 
     // =========================================================================
     // Command palette overlay system
