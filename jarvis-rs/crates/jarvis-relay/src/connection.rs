@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::protocol::{RelayHello, RelayResponse};
+use crate::rate_limit::RateLimiter;
 use crate::session::{Role, SessionStore};
 
 /// Handle a single WebSocket connection.
@@ -14,6 +15,7 @@ pub async fn handle_connection(
     ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     addr: SocketAddr,
     store: SessionStore,
+    limiter: &RateLimiter,
 ) {
     let (mut sink, mut stream) = ws.split();
 
@@ -23,11 +25,38 @@ pub async fn handle_connection(
         None => return,
     };
 
+    // Validate session ID length.
+    if session_id.len() > limiter.max_session_id_len() || session_id.is_empty() {
+        let _ = send_response(
+            &mut sink,
+            &RelayResponse::Error {
+                message: "invalid session ID".into(),
+            },
+        )
+        .await;
+        return;
+    }
+
     // For desktop_hello, create the session. For mobile_hello, it must already exist.
     match role {
         Role::Desktop => {
+            // Enforce global session cap.
+            if store.count().await >= limiter.max_total_sessions() {
+                // Check if this is a reconnect (session already exists).
+                if !store.exists(&session_id).await {
+                    let _ = send_response(
+                        &mut sink,
+                        &RelayResponse::Error {
+                            message: "server at capacity".into(),
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+
             if !store.create_session(&session_id).await {
-                // Session already exists — desktop is reconnecting. Allow it by
+                // Session already exists -- desktop is reconnecting. Allow it by
                 // unregistering the old desktop first.
                 store.unregister(&session_id, Role::Desktop).await;
                 store.create_session(&session_id).await;
@@ -95,21 +124,21 @@ pub async fn handle_connection(
     // 5. Forwarding loop.
     loop {
         tokio::select! {
-            // Messages from our receive channel → send to this client's WebSocket
+            // Messages from our receive channel -> send to this client's WebSocket
             Some(msg) = rx.recv() => {
                 if sink.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
             }
 
-            // Messages from this client's WebSocket → forward to peer
+            // Messages from this client's WebSocket -> forward to peer
             frame = stream.next() => {
                 match frame {
                     Some(Ok(Message::Text(text))) => {
                         // Forward to peer if connected
                         if let Some(peer) = store.get_peer_tx(&session_id, role).await {
                             if peer.send(text.to_string()).await.is_err() {
-                                // Peer's channel closed — they disconnected
+                                // Peer's channel closed -- they disconnected
                                 tracing::debug!(session = %session_id, "Peer channel closed");
                             }
                         }
