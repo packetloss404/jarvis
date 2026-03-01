@@ -297,6 +297,7 @@ body {
   padding: 3px 12px;
   border-bottom: var(--border-width) solid var(--color-border);
   transition: background var(--transition-speed) ease;
+  position: relative;
 }
 
 .msg:hover {
@@ -417,6 +418,86 @@ body {
 .msg-verify.unverified { color: var(--color-text-muted); opacity: 0.5; }
 .msg-verify.key-changed { color: var(--accent); opacity: 0.9; }
 .msg-verify.invalid { color: var(--danger); opacity: 0.9; }
+
+/* Reactions */
+.msg-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 12px 4px 58px;
+}
+.reaction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(0,212,255,0.06);
+  border: 1px solid rgba(0,212,255,0.12);
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.reaction-badge:hover {
+  background: rgba(0,212,255,0.12);
+  border-color: rgba(0,212,255,0.25);
+}
+.reaction-badge.own {
+  border-color: rgba(0,212,255,0.35);
+  background: rgba(0,212,255,0.1);
+}
+.reaction-badge .r-count {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+}
+.react-btn {
+  opacity: 0;
+  position: absolute;
+  right: 8px;
+  top: 2px;
+  background: rgba(0,212,255,0.06);
+  border: 1px solid rgba(0,212,255,0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  color: var(--color-text-muted);
+}
+.msg:hover .react-btn { opacity: 0.6; }
+.react-btn:hover { opacity: 1 !important; background: rgba(0,212,255,0.12); }
+.reaction-picker {
+  display: none;
+  position: absolute;
+  right: 8px;
+  top: -32px;
+  background: rgba(13,17,23,0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(0,212,255,0.15);
+  border-radius: 6px;
+  padding: 4px 6px;
+  z-index: 30;
+  gap: 2px;
+  flex-wrap: wrap;
+  max-width: 280px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.reaction-picker.open { display: flex; }
+.reaction-picker button {
+  background: none;
+  border: none;
+  font-size: 16px;
+  padding: 3px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.1s;
+  line-height: 1;
+}
+.reaction-picker button:hover { background: rgba(0,212,255,0.1); }
 
 .dm-btn {
   background: rgba(0, 212, 255, 0.06);
@@ -1240,10 +1321,11 @@ const UI = {
     this.myNick.textContent = nick;
   },
 
-  addMessage(nick, text, time, nickColor, verifyStatus) {
+  addMessage(nick, text, time, nickColor, verifyStatus, msgId) {
     this._hideEmpty();
     const row = document.createElement('div');
     row.className = 'msg';
+    if (msgId) row.setAttribute('data-msg-id', msgId);
 
     const timeEl = document.createElement('span');
     timeEl.className = 'msg-time';
@@ -1282,14 +1364,27 @@ const UI = {
     row.appendChild(verifyEl);
     row.appendChild(nickEl);
     row.appendChild(textEl);
+
+    if (msgId) {
+      var reactBtn = document.createElement('span');
+      reactBtn.className = 'react-btn';
+      reactBtn.textContent = '\u263A';
+      reactBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        Chat._showReactionPicker(msgId, reactBtn);
+      });
+      row.appendChild(reactBtn);
+    }
+
     this.messagesEl.appendChild(row);
     this._scrollToBottom();
   },
 
-  addImage(nick, dataUrl, time, nickColor, verifyStatus) {
+  addImage(nick, dataUrl, time, nickColor, verifyStatus, msgId) {
     this._hideEmpty();
     const row = document.createElement('div');
     row.className = 'msg';
+    if (msgId) row.setAttribute('data-msg-id', msgId);
 
     const timeEl = document.createElement('span');
     timeEl.className = 'msg-time';
@@ -1330,6 +1425,18 @@ const UI = {
     row.appendChild(verifyEl);
     row.appendChild(nickEl);
     row.appendChild(imgEl);
+
+    if (msgId) {
+      var reactBtn = document.createElement('span');
+      reactBtn.className = 'react-btn';
+      reactBtn.textContent = '\u263A';
+      reactBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        Chat._showReactionPicker(msgId, reactBtn);
+      });
+      row.appendChild(reactBtn);
+    }
+
     this.messagesEl.appendChild(row);
     this._scrollToBottom();
   },
@@ -1413,10 +1520,14 @@ const UI = {
   },
 
   _scrollToBottom() {
-    // Cap DOM nodes to prevent unbounded growth
-    const MAX_MESSAGES = 500;
-    while (this.messagesEl.children.length > MAX_MESSAGES) {
-      this.messagesEl.removeChild(this.messagesEl.firstChild);
+    // Cap DOM nodes to prevent unbounded growth (reactions add sibling rows)
+    const MAX_NODES = 600;
+    while (this.messagesEl.children.length > MAX_NODES) {
+      var first = this.messagesEl.firstChild;
+      if (first.nextElementSibling && first.nextElementSibling.classList.contains('msg-reactions')) {
+        this.messagesEl.removeChild(first.nextElementSibling);
+      }
+      this.messagesEl.removeChild(first);
     }
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   },
@@ -1473,6 +1584,14 @@ function replaceEmoji(text) {
     return EMOJI_MAP[match] || match;
   });
 }
+
+/** Reaction emoji set. */
+const REACTION_EMOJIS = [
+  '\u{1F44D}','\u{1F44E}','\u{2764}\u{FE0F}','\u{1F602}',
+  '\u{1F60E}','\u{1F914}','\u{1F440}','\u{1F525}',
+  '\u{1F680}','\u{1F389}','\u{1F4AF}','\u{2705}',
+  '\u{274C}','\u{1F480}','\u{1F64F}','\u{26A1}',
+];
 
 /** Check if a string is an image data URL. */
 function isImageDataUrl(text) {
@@ -1648,6 +1767,11 @@ const Chat = {
       self._onChannelMessage(channelId, payload.payload);
     });
 
+    // Reaction listener (unencrypted)
+    sub.on('broadcast', { event: 'reaction' }, function(payload) {
+      self._onReaction(channelId, payload.payload);
+    });
+
     // Presence listeners (only on primary)
     if (isPrimary) {
       sub.on('presence', { event: 'sync' }, function() {
@@ -1803,7 +1927,7 @@ const Chat = {
 
     var time = formatTime(payload.ts || Date.now());
     var msgType = isImage ? 'image' : 'msg';
-    var msgObj = { nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: msgType };
+    var msgObj = { id: payload.id, nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: msgType, reactions: {} };
 
     // Store in channel's message array
     var channelData = this._channels.get(channelId);
@@ -1815,9 +1939,9 @@ const Chat = {
     // Render or increment unread
     if (channelId === this._activeChannelId) {
       if (isImage) {
-        UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus);
+        UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
       } else {
-        UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus);
+        UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
       }
     } else {
       var current = this._unreadCounts.get(channelId) || 0;
@@ -1861,9 +1985,12 @@ const Chat = {
           if (m.type === 'system') {
             UI.addSystemMessage(m.text, m.systemType);
           } else if (m.type === 'image') {
-            UI.addImage(m.nick, m.text, m.time, m.color, m.verifyStatus);
+            UI.addImage(m.nick, m.text, m.time, m.color, m.verifyStatus, m.id);
           } else {
-            UI.addMessage(m.nick, m.text, m.time, m.color, m.verifyStatus);
+            UI.addMessage(m.nick, m.text, m.time, m.color, m.verifyStatus, m.id);
+          }
+          if (m.id && m.reactions && Object.keys(m.reactions).length > 0) {
+            this._renderReactions(m.id, m.reactions);
           }
         }
       }
@@ -2024,15 +2151,15 @@ const Chat = {
 
     // Store in local history
     var msgType = isImage ? 'image' : 'msg';
-    var msgObj = { nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: msgType };
+    var msgObj = { id: msgId, nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: msgType, reactions: {} };
     activeSub.messages.push(msgObj);
     if (activeSub.messages.length > 500) activeSub.messages.shift();
 
     // Render locally
     if (isImage) {
-      UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
+      UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
     } else {
-      UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
+      UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
     }
     UI.msgInput.value = '';
     UI.updateCharCount(0);
@@ -2134,6 +2261,9 @@ const Chat = {
     var self = this;
     sub.on('broadcast', { event: 'message' }, function(payload) {
       self._onReceiveDM(channelId, payload.payload);
+    });
+    sub.on('broadcast', { event: 'reaction' }, function(payload) {
+      self._onReaction(channelId, payload.payload);
     });
     sub.subscribe(function(status) {
       if (status === 'SUBSCRIBED') {
@@ -2248,14 +2378,14 @@ const Chat = {
     // Store in local history
     var dmIsImage = isImageDataUrl(text);
     var dmMsgType = dmIsImage ? 'image' : 'msg';
-    var msgObj = { nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: dmMsgType };
+    var msgObj = { id: msgId, nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: dmMsgType, reactions: {} };
     activeSub.messages.push(msgObj);
     if (activeSub.messages.length > 500) activeSub.messages.shift();
 
     if (dmIsImage) {
-      UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
+      UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
     } else {
-      UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
+      UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
     }
     UI.msgInput.value = '';
     UI.updateCharCount(0);
@@ -2308,7 +2438,7 @@ const Chat = {
 
     var time = formatTime(payload.ts || Date.now());
     var dmRxMsgType = dmRxIsImage ? 'image' : 'msg';
-    var msgObj = { nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: dmRxMsgType };
+    var msgObj = { id: payload.id, nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: dmRxMsgType, reactions: {} };
 
     var channelData = this._channels.get(channelId);
     if (channelData) {
@@ -2318,9 +2448,9 @@ const Chat = {
 
     if (channelId === this._activeChannelId) {
       if (dmRxIsImage) {
-        UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus);
+        UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
       } else {
-        UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus);
+        UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
       }
     } else {
       var current = this._unreadCounts.get(channelId) || 0;
@@ -2357,6 +2487,180 @@ const Chat = {
     var b = (otherFingerprint || '').replace(/:/g, '');
     var sorted = [a, b].sort();
     return CONFIG.DM_CHANNEL_PREFIX + sorted[0] + '-' + sorted[1];
+  },
+
+  // =================================================================
+  // REACTIONS
+  // =================================================================
+
+  _activePickerMsgId: null,
+
+  /** Handle incoming reaction broadcast. */
+  _onReaction(channelId, payload) {
+    if (!payload || !payload.msgId || !payload.emoji || !payload.userId) return;
+    if (payload.userId === this.userId) return;
+
+    var channelData = this._channels.get(channelId);
+    if (!channelData) return;
+
+    var msg = null;
+    for (var i = channelData.messages.length - 1; i >= 0; i--) {
+      if (channelData.messages[i].id === payload.msgId) {
+        msg = channelData.messages[i];
+        break;
+      }
+    }
+    if (!msg) return;
+    if (!msg.reactions) msg.reactions = {};
+
+    if (payload.action === 'add') {
+      if (!msg.reactions[payload.emoji]) msg.reactions[payload.emoji] = [];
+      if (msg.reactions[payload.emoji].indexOf(payload.userId) === -1) {
+        msg.reactions[payload.emoji].push(payload.userId);
+      }
+    } else if (payload.action === 'remove') {
+      if (msg.reactions[payload.emoji]) {
+        msg.reactions[payload.emoji] = msg.reactions[payload.emoji].filter(
+          function(uid) { return uid !== payload.userId; }
+        );
+        if (msg.reactions[payload.emoji].length === 0) {
+          delete msg.reactions[payload.emoji];
+        }
+      }
+    }
+
+    if (channelId === this._activeChannelId) {
+      this._renderReactions(payload.msgId, msg.reactions);
+    }
+  },
+
+  /** Send a reaction to a message (toggle). */
+  async sendReaction(msgId, emoji) {
+    var channelData = this._channels.get(this._activeChannelId);
+    if (!channelData) return;
+
+    var msg = null;
+    for (var i = channelData.messages.length - 1; i >= 0; i--) {
+      if (channelData.messages[i].id === msgId) {
+        msg = channelData.messages[i];
+        break;
+      }
+    }
+    if (!msg) return;
+    if (!msg.reactions) msg.reactions = {};
+
+    var action = 'add';
+    if (msg.reactions[emoji] && msg.reactions[emoji].indexOf(this.userId) !== -1) {
+      action = 'remove';
+      msg.reactions[emoji] = msg.reactions[emoji].filter(
+        function(uid) { return uid !== Chat.userId; }
+      );
+      if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji];
+    } else {
+      if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+      msg.reactions[emoji].push(this.userId);
+    }
+
+    this._renderReactions(msgId, msg.reactions);
+
+    var activeSub = channelData.sub;
+    if (!activeSub) return;
+    await activeSub.send({
+      type: 'broadcast',
+      event: 'reaction',
+      payload: {
+        msgId: msgId,
+        emoji: emoji,
+        userId: this.userId,
+        nick: this.nick,
+        action: action,
+      },
+    });
+  },
+
+  /** Render reaction badges below a message. */
+  _renderReactions(msgId, reactions) {
+    var msgRow = document.querySelector('[data-msg-id="' + msgId + '"]');
+    if (!msgRow) return;
+
+    var reactionsEl = msgRow.nextElementSibling;
+    if (!reactionsEl || !reactionsEl.classList.contains('msg-reactions')) {
+      reactionsEl = document.createElement('div');
+      reactionsEl.className = 'msg-reactions';
+      msgRow.parentNode.insertBefore(reactionsEl, msgRow.nextSibling);
+    }
+
+    while (reactionsEl.firstChild) reactionsEl.removeChild(reactionsEl.firstChild);
+
+    var emojiKeys = Object.keys(reactions);
+    if (emojiKeys.length === 0) {
+      reactionsEl.remove();
+      return;
+    }
+
+    for (var i = 0; i < emojiKeys.length; i++) {
+      var emoji = emojiKeys[i];
+      var users = reactions[emoji];
+      var badge = document.createElement('span');
+      badge.className = 'reaction-badge';
+      if (users.indexOf(this.userId) !== -1) badge.classList.add('own');
+      badge.textContent = emoji;
+
+      var count = document.createElement('span');
+      count.className = 'r-count';
+      count.textContent = users.length;
+      badge.appendChild(count);
+
+      (function(em, mid) {
+        badge.addEventListener('click', function() { Chat.sendReaction(mid, em); });
+      })(emoji, msgId);
+
+      reactionsEl.appendChild(badge);
+    }
+  },
+
+  /** Show the reaction picker near a message. */
+  _showReactionPicker(msgId, anchorEl) {
+    var existing = document.querySelector('.reaction-picker.open');
+    if (existing) {
+      existing.remove();
+      if (this._activePickerMsgId === msgId) {
+        this._activePickerMsgId = null;
+        return;
+      }
+    }
+    this._activePickerMsgId = msgId;
+
+    var picker = document.createElement('div');
+    picker.className = 'reaction-picker open';
+    var self = this;
+    for (var i = 0; i < REACTION_EMOJIS.length; i++) {
+      var btn = document.createElement('button');
+      btn.textContent = REACTION_EMOJIS[i];
+      (function(emoji) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          self.sendReaction(msgId, emoji);
+          picker.remove();
+          self._activePickerMsgId = null;
+        });
+      })(REACTION_EMOJIS[i]);
+      picker.appendChild(btn);
+    }
+
+    var msgRow = anchorEl.closest('.msg');
+    msgRow.appendChild(picker);
+
+    setTimeout(function() {
+      var dismiss = function(e) {
+        if (!picker.contains(e.target)) {
+          picker.remove();
+          self._activePickerMsgId = null;
+          document.removeEventListener('click', dismiss);
+        }
+      };
+      document.addEventListener('click', dismiss);
+    }, 0);
   },
 
   /** Cleanup on page unload. */

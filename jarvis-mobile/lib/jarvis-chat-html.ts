@@ -200,6 +200,7 @@ body {
   line-height: 1.5; word-break: break-word;
   padding: 3px 12px;
   border-bottom: var(--border-width) solid var(--color-border);
+  position: relative;
 }
 .msg.own { background: rgba(0,212,255,0.03); }
 .msg-time {
@@ -246,6 +247,49 @@ body {
 .msg-verify.unverified { color: var(--color-text-muted); opacity: 0.5; }
 .msg-verify.key-changed { color: var(--accent); opacity: 0.9; }
 .msg-verify.invalid { color: var(--danger); opacity: 0.9; }
+
+.msg-reactions {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 2px 12px 4px 58px;
+}
+.reaction-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: rgba(0,212,255,0.06);
+  border: 1px solid rgba(0,212,255,0.12);
+  border-radius: 10px; padding: 1px 6px;
+  font-size: 12px; cursor: pointer;
+  user-select: none; -webkit-user-select: none;
+}
+.reaction-badge.own {
+  border-color: rgba(0,212,255,0.35);
+  background: rgba(0,212,255,0.1);
+}
+.reaction-badge .r-count {
+  font-size: 10px; color: var(--color-text-muted);
+}
+.react-btn {
+  opacity: 0.4; position: absolute; right: 8px; top: 2px;
+  background: rgba(0,212,255,0.06);
+  border: 1px solid rgba(0,212,255,0.12);
+  border-radius: 4px; padding: 1px 5px;
+  font-size: 12px; cursor: pointer;
+  color: var(--color-text-muted);
+}
+.reaction-picker {
+  display: none; position: absolute; right: 8px; top: -32px;
+  background: rgba(13,17,23,0.95);
+  border: 1px solid rgba(0,212,255,0.15);
+  border-radius: 6px; padding: 4px 6px;
+  z-index: 30; gap: 2px; flex-wrap: wrap;
+  max-width: 280px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.reaction-picker.open { display: flex; }
+.reaction-picker button {
+  background: none; border: none;
+  font-size: 18px; padding: 4px 5px;
+  cursor: pointer; border-radius: 4px; line-height: 1;
+}
 
 .dm-btn {
   background: rgba(0,212,255,0.06);
@@ -825,10 +869,11 @@ var UI = {
     this.nickInput.select();
   },
   setMyNick: function(nick) { this.myNick.textContent = nick; },
-  addMessage: function(nick, text, time, nColor, verifyStatus) {
+  addMessage: function(nick, text, time, nColor, verifyStatus, msgId) {
     this._hideEmpty();
     var row = document.createElement('div');
     row.className = 'msg';
+    if (msgId) row.setAttribute('data-msg-id', msgId);
     var timeEl = document.createElement('span');
     timeEl.className = 'msg-time'; timeEl.textContent = time;
     var verifyEl = document.createElement('span');
@@ -853,13 +898,24 @@ var UI = {
     textEl.className = 'msg-text'; textEl.textContent = text;
     row.appendChild(timeEl); row.appendChild(verifyEl);
     row.appendChild(nickEl); row.appendChild(textEl);
+    if (msgId) {
+      var reactBtn = document.createElement('span');
+      reactBtn.className = 'react-btn';
+      reactBtn.textContent = '\\u263A';
+      reactBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        Chat._showReactionPicker(msgId, reactBtn);
+      });
+      row.appendChild(reactBtn);
+    }
     this.messagesEl.appendChild(row);
     this._scrollToBottom();
   },
-  addImage: function(nick, dataUrl, time, nColor, verifyStatus) {
+  addImage: function(nick, dataUrl, time, nColor, verifyStatus, msgId) {
     this._hideEmpty();
     var row = document.createElement('div');
     row.className = 'msg';
+    if (msgId) row.setAttribute('data-msg-id', msgId);
     var timeEl = document.createElement('span');
     timeEl.className = 'msg-time'; timeEl.textContent = time;
     var verifyEl = document.createElement('span');
@@ -885,6 +941,16 @@ var UI = {
     });
     row.appendChild(timeEl); row.appendChild(verifyEl);
     row.appendChild(nickEl); row.appendChild(imgEl);
+    if (msgId) {
+      var reactBtn = document.createElement('span');
+      reactBtn.className = 'react-btn';
+      reactBtn.textContent = '\\u263A';
+      reactBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        Chat._showReactionPicker(msgId, reactBtn);
+      });
+      row.appendChild(reactBtn);
+    }
     this.messagesEl.appendChild(row);
     this._scrollToBottom();
   },
@@ -943,8 +1009,14 @@ var UI = {
     if (this.emptyState) { this.emptyState.remove(); this.emptyState = null; }
   },
   _scrollToBottom: function() {
-    var MAX_MESSAGES = 500;
-    while (this.messagesEl.children.length > MAX_MESSAGES) this.messagesEl.removeChild(this.messagesEl.firstChild);
+    var MAX_NODES = 600;
+    while (this.messagesEl.children.length > MAX_NODES) {
+      var first = this.messagesEl.firstChild;
+      if (first.nextElementSibling && first.nextElementSibling.classList.contains('msg-reactions')) {
+        this.messagesEl.removeChild(first.nextElementSibling);
+      }
+      this.messagesEl.removeChild(first);
+    }
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   },
 };
@@ -989,6 +1061,13 @@ var EMOJI_MAP = {
 function replaceEmoji(text) {
   return text.replace(/:[a-z_]+:/g, function(match) { return EMOJI_MAP[match] || match; });
 }
+
+var REACTION_EMOJIS = [
+  '\\u{1F44D}','\\u{1F44E}','\\u{2764}\\u{FE0F}','\\u{1F602}',
+  '\\u{1F60E}','\\u{1F914}','\\u{1F440}','\\u{1F525}',
+  '\\u{1F680}','\\u{1F389}','\\u{1F4AF}','\\u{2705}',
+  '\\u{274C}','\\u{1F480}','\\u{1F64F}','\\u{26A1}',
+];
 
 function isImageDataUrl(text) {
   return typeof text === 'string' && text.startsWith('data:image/');
@@ -1130,6 +1209,10 @@ var Chat = {
       self._onChannelMessage(channelId, payload.payload);
     });
 
+    sub.on('broadcast', { event: 'reaction' }, function(payload) {
+      self._onReaction(channelId, payload.payload);
+    });
+
     if (isPrimary) {
       sub.on('presence', { event: 'sync' }, function() {
         var state = sub.presenceState();
@@ -1258,7 +1341,7 @@ var Chat = {
 
     var time = formatTime(payload.ts || Date.now());
     var msgType = isImage ? 'image' : 'msg';
-    var msgObj = { nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: msgType };
+    var msgObj = { id: payload.id, nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: msgType, reactions: {} };
 
     var channelData = this._channels.get(channelId);
     if (channelData) {
@@ -1267,8 +1350,8 @@ var Chat = {
     }
 
     if (channelId === this._activeChannelId) {
-      if (isImage) UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus);
-      else UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus);
+      if (isImage) UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
+      else UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
     } else {
       var current = this._unreadCounts.get(channelId) || 0;
       this._unreadCounts.set(channelId, current + 1);
@@ -1294,8 +1377,11 @@ var Chat = {
         for (var i = 0; i < messages.length; i++) {
           var m = messages[i];
           if (m.type === 'system') UI.addSystemMessage(m.text, m.systemType);
-          else if (m.type === 'image') UI.addImage(m.nick, m.text, m.time, m.color, m.verifyStatus);
-          else UI.addMessage(m.nick, m.text, m.time, m.color, m.verifyStatus);
+          else if (m.type === 'image') UI.addImage(m.nick, m.text, m.time, m.color, m.verifyStatus, m.id);
+          else UI.addMessage(m.nick, m.text, m.time, m.color, m.verifyStatus, m.id);
+          if (m.id && m.reactions && Object.keys(m.reactions).length > 0) {
+            this._renderReactions(m.id, m.reactions);
+          }
         }
       }
       UI.updateChannelName(this._getChannelDisplayName(channelId));
@@ -1401,12 +1487,12 @@ var Chat = {
     }
 
     var msgType = isImage ? 'image' : 'msg';
-    var msgObj = { nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: msgType };
+    var msgObj = { id: msgId, nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: msgType, reactions: {} };
     activeSub.messages.push(msgObj);
     if (activeSub.messages.length > 500) activeSub.messages.shift();
 
-    if (isImage) UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
-    else UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
+    if (isImage) UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
+    else UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
     UI.msgInput.value = '';
     UI.updateCharCount(0);
   },
@@ -1477,6 +1563,9 @@ var Chat = {
     sub.on('broadcast', { event: 'message' }, function(payload) {
       self._onReceiveDM(channelId, payload.payload);
     });
+    sub.on('broadcast', { event: 'reaction' }, function(payload) {
+      self._onReaction(channelId, payload.payload);
+    });
     sub.subscribe(function(status) {
       if (status === 'SUBSCRIBED') self._addSystemToChannel(channelId, 'Secure DM with ' + nick + ' established.', 'join');
       else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') self._addSystemToChannel(channelId, 'DM connection lost.', 'leave');
@@ -1546,12 +1635,12 @@ var Chat = {
     await activeSub.sub.send({ type: 'broadcast', event: 'message', payload: payload });
 
     var dmMsgType = isImage ? 'image' : 'msg';
-    var msgObj = { nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: dmMsgType };
+    var msgObj = { id: msgId, nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: dmMsgType, reactions: {} };
     activeSub.messages.push(msgObj);
     if (activeSub.messages.length > 500) activeSub.messages.shift();
 
-    if (isImage) UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
-    else UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self');
+    if (isImage) UI.addImage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
+    else UI.addMessage(this.nick, text, formatTime(ts), nickColor(this.nick), 'self', msgId);
     UI.msgInput.value = '';
     UI.updateCharCount(0);
   },
@@ -1590,7 +1679,7 @@ var Chat = {
 
     var time = formatTime(payload.ts || Date.now());
     var dmMsgType = isImage ? 'image' : 'msg';
-    var msgObj = { nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: dmMsgType };
+    var msgObj = { id: payload.id, nick: nick, text: plaintext, time: time, color: nickColor(nick), verifyStatus: verifyStatus, type: dmMsgType, reactions: {} };
 
     var channelData = this._channels.get(channelId);
     if (channelData) {
@@ -1599,8 +1688,8 @@ var Chat = {
     }
 
     if (channelId === this._activeChannelId) {
-      if (isImage) UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus);
-      else UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus);
+      if (isImage) UI.addImage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
+      else UI.addMessage(nick, plaintext, time, nickColor(nick), verifyStatus, payload.id);
     } else {
       var current = this._unreadCounts.get(channelId) || 0;
       this._unreadCounts.set(channelId, current + 1);
@@ -1630,6 +1719,122 @@ var Chat = {
     var b = (otherFingerprint || '').replace(/:/g, '');
     var sorted = [a, b].sort();
     return CONFIG.DM_CHANNEL_PREFIX + sorted[0] + '-' + sorted[1];
+  },
+
+  // =================================================================
+  // REACTIONS
+  // =================================================================
+
+  _activePickerMsgId: null,
+
+  _onReaction: function(channelId, payload) {
+    if (!payload || !payload.msgId || !payload.emoji || !payload.userId) return;
+    if (payload.userId === this.userId) return;
+    var channelData = this._channels.get(channelId);
+    if (!channelData) return;
+    var msg = null;
+    for (var i = channelData.messages.length - 1; i >= 0; i--) {
+      if (channelData.messages[i].id === payload.msgId) { msg = channelData.messages[i]; break; }
+    }
+    if (!msg) return;
+    if (!msg.reactions) msg.reactions = {};
+    if (payload.action === 'add') {
+      if (!msg.reactions[payload.emoji]) msg.reactions[payload.emoji] = [];
+      if (msg.reactions[payload.emoji].indexOf(payload.userId) === -1) msg.reactions[payload.emoji].push(payload.userId);
+    } else if (payload.action === 'remove') {
+      if (msg.reactions[payload.emoji]) {
+        msg.reactions[payload.emoji] = msg.reactions[payload.emoji].filter(function(uid) { return uid !== payload.userId; });
+        if (msg.reactions[payload.emoji].length === 0) delete msg.reactions[payload.emoji];
+      }
+    }
+    if (channelId === this._activeChannelId) this._renderReactions(payload.msgId, msg.reactions);
+  },
+
+  sendReaction: async function(msgId, emoji) {
+    var channelData = this._channels.get(this._activeChannelId);
+    if (!channelData) return;
+    var msg = null;
+    for (var i = channelData.messages.length - 1; i >= 0; i--) {
+      if (channelData.messages[i].id === msgId) { msg = channelData.messages[i]; break; }
+    }
+    if (!msg) return;
+    if (!msg.reactions) msg.reactions = {};
+    var action = 'add';
+    if (msg.reactions[emoji] && msg.reactions[emoji].indexOf(this.userId) !== -1) {
+      action = 'remove';
+      msg.reactions[emoji] = msg.reactions[emoji].filter(function(uid) { return uid !== Chat.userId; });
+      if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji];
+    } else {
+      if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+      msg.reactions[emoji].push(this.userId);
+    }
+    this._renderReactions(msgId, msg.reactions);
+    var activeSub = channelData.sub;
+    if (!activeSub) return;
+    await activeSub.send({
+      type: 'broadcast', event: 'reaction',
+      payload: { msgId: msgId, emoji: emoji, userId: this.userId, nick: this.nick, action: action },
+    });
+  },
+
+  _renderReactions: function(msgId, reactions) {
+    var msgRow = document.querySelector('[data-msg-id="' + msgId + '"]');
+    if (!msgRow) return;
+    var reactionsEl = msgRow.nextElementSibling;
+    if (!reactionsEl || !reactionsEl.classList.contains('msg-reactions')) {
+      reactionsEl = document.createElement('div');
+      reactionsEl.className = 'msg-reactions';
+      msgRow.parentNode.insertBefore(reactionsEl, msgRow.nextSibling);
+    }
+    while (reactionsEl.firstChild) reactionsEl.removeChild(reactionsEl.firstChild);
+    var emojiKeys = Object.keys(reactions);
+    if (emojiKeys.length === 0) { reactionsEl.remove(); return; }
+    for (var i = 0; i < emojiKeys.length; i++) {
+      var emoji = emojiKeys[i];
+      var users = reactions[emoji];
+      var badge = document.createElement('span');
+      badge.className = 'reaction-badge';
+      if (users.indexOf(this.userId) !== -1) badge.classList.add('own');
+      badge.textContent = emoji;
+      var count = document.createElement('span');
+      count.className = 'r-count'; count.textContent = users.length;
+      badge.appendChild(count);
+      (function(em, mid) { badge.addEventListener('click', function() { Chat.sendReaction(mid, em); }); })(emoji, msgId);
+      reactionsEl.appendChild(badge);
+    }
+  },
+
+  _showReactionPicker: function(msgId, anchorEl) {
+    var existing = document.querySelector('.reaction-picker.open');
+    if (existing) {
+      existing.remove();
+      if (this._activePickerMsgId === msgId) { this._activePickerMsgId = null; return; }
+    }
+    this._activePickerMsgId = msgId;
+    var picker = document.createElement('div');
+    picker.className = 'reaction-picker open';
+    var self = this;
+    for (var i = 0; i < REACTION_EMOJIS.length; i++) {
+      var btn = document.createElement('button');
+      btn.textContent = REACTION_EMOJIS[i];
+      (function(emoji) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          self.sendReaction(msgId, emoji);
+          picker.remove();
+          self._activePickerMsgId = null;
+        });
+      })(REACTION_EMOJIS[i]);
+      picker.appendChild(btn);
+    }
+    var msgRow = anchorEl.closest('.msg');
+    msgRow.appendChild(picker);
+    setTimeout(function() {
+      var dismiss = function(e) {
+        if (!picker.contains(e.target)) { picker.remove(); self._activePickerMsgId = null; document.removeEventListener('click', dismiss); }
+      };
+      document.addEventListener('click', dismiss);
+    }, 0);
   },
 
   destroy: function() {
