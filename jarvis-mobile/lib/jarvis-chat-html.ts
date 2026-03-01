@@ -515,13 +515,23 @@ body {
   </div>
 </div>
 
-<!-- SUPABASE CDN -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.97.0/dist/umd/supabase.min.js"
-        integrity="sha384-1+ItoWbWcmVSm+Y+dJaUt4SEWNA21/jxef+Z0TSHHVy/dEUxEUEnZ1bHn6GT5hj+"
-        crossorigin="anonymous"></script>
+<!-- SUPABASE CDN (loaded on demand at join time) -->
 
 <script>
 'use strict';
+
+// Polyfill crypto.randomUUID for WebViews that lack it
+if (typeof crypto.randomUUID !== 'function') {
+  crypto.randomUUID = function() {
+    var bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    var hex = [];
+    for (var i = 0; i < 16; i++) hex.push(bytes[i].toString(16).padStart(2, '0'));
+    return hex.slice(0,4).join('') + '-' + hex.slice(4,6).join('') + '-' + hex.slice(6,8).join('') + '-' + hex.slice(8,10).join('') + '-' + hex.slice(10).join('');
+  };
+}
 
 // =================================================================
 // CONFIG
@@ -665,7 +675,7 @@ var Crypto = {
       {
         name: 'PBKDF2',
         salt: encoder.encode('jarvis-livechat-salt-v1'),
-        iterations: 100000,
+        iterations: 10000,
         hash: 'SHA-256',
       },
       keyMaterial,
@@ -1132,11 +1142,30 @@ var Chat = {
     return channelId;
   },
 
+  _loadSupabase: function() {
+    if (this._supabasePromise) return this._supabasePromise;
+    this._supabasePromise = new Promise(function(resolve, reject) {
+      if (typeof supabase !== 'undefined' && supabase.createClient) { resolve(); return; }
+      var script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.97.0/dist/umd/supabase.min.js';
+      script.integrity = 'sha384-1+ItoWbWcmVSm+Y+dJaUt4SEWNA21/jxef+Z0TSHHVy/dEUxEUEnZ1bHn6GT5hj+';
+      script.crossOrigin = 'anonymous';
+      script.onload = resolve;
+      script.onerror = function() { reject(new Error('Failed to load Supabase library')); };
+      document.head.appendChild(script);
+    });
+    return this._supabasePromise;
+  },
+
   start: async function(nickname) {
-    if (typeof supabase === 'undefined' || !supabase.createClient) {
+    try {
+      UI.setStatus('connecting');
+      await this._loadSupabase();
+    } catch (_) {
       var errEl = _$('#nick-panel p');
       errEl.textContent = 'Supabase library failed to load. Check connection & retry.';
       errEl.style.color = 'var(--color-error)';
+      UI.setStatus('');
       return;
     }
 
@@ -1169,7 +1198,6 @@ var Chat = {
       realtime: { params: { eventsPerSecond: 10 } },
     });
 
-    UI.setStatus('connecting');
     UI.hideNickOverlay();
 
     this._channels = new Map();

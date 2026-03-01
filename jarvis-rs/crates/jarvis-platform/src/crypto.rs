@@ -74,7 +74,7 @@ impl CryptoService {
     pub fn derive_room_key(&mut self, room_name: &str) -> u32 {
         let salt = b"jarvis-livechat-salt-v1";
         let mut key = [0u8; 32];
-        pbkdf2::pbkdf2::<HmacSha256>(room_name.as_bytes(), salt, 100_000, &mut key)
+        pbkdf2::pbkdf2::<HmacSha256>(room_name.as_bytes(), salt, 10_000, &mut key)
             .expect("PBKDF2 output length is valid");
         self.store_key(key)
     }
