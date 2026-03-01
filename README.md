@@ -104,6 +104,12 @@ This activates the virtualenv and runs `main.py`, which launches the Metal front
 - **Cmd + G** — toggle hotkey overlay
 - **Escape** — quit
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| **[Plugin System](docs/plugins.md)** | Build custom panels, tools, and web apps that run inside Jarvis — bookmark plugins, local HTML/JS/CSS plugins with full IPC bridge access |
+
 ## Skills
 
 Jarvis routes voice input through Gemini, which can invoke tools to activate different skills:
