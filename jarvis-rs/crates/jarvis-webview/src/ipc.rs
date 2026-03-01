@@ -188,8 +188,28 @@ pub const IPC_INIT_SCRIPT: &str = r#"
                 }
                 return;
             }
+            // Paste: WKWebView blocks clipboard access, so proxy through Rust
+            if (key === 'V') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                window.jarvis.ipc.request('clipboard_paste', {}).then(function(resp) {
+                    if (resp.error) return;
+                    if (resp.kind === 'image' && resp.data_url) {
+                        document.dispatchEvent(new CustomEvent('jarvis:paste-image', { detail: resp }));
+                    } else if (resp.kind === 'text' && resp.text) {
+                        var a = document.activeElement;
+                        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) {
+                            a.focus();
+                            document.execCommand('insertText', false, resp.text);
+                        } else if (window._xtermInstance) {
+                            window.jarvis.ipc.send('pty_input', { data: resp.text });
+                        }
+                    }
+                });
+                return;
+            }
             // Skip shortcuts that should be handled natively by the webview
-            if (key === 'R' || key === 'L' || key === 'Q' || key === 'V' || key === 'A' || key === 'X' || key === 'Z') return;
+            if (key === 'R' || key === 'L' || key === 'Q' || key === 'A' || key === 'X' || key === 'Z') return;
             e.preventDefault();
             e.stopPropagation();
             window.jarvis.ipc.send('keybind', {

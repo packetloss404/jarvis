@@ -1223,9 +1223,6 @@ var Chat = {
   },
 
   _subscribeChannel: async function(channelId, isPrimary) {
-    await Crypto.deriveKey(channelId);
-    this._keyCache.set(channelId, Crypto._defaultKey);
-
     var channelConfig = { config: { broadcast: { self: false, ack: true } } };
     if (isPrimary) channelConfig.config.presence = { key: this.userId };
 
@@ -1325,20 +1322,10 @@ var Chat = {
   },
 
   _onChannelMessage: async function(channelId, payload) {
-    console.log('[chat-debug] _onChannelMessage called, channel:', channelId, 'has payload:', !!payload, 'has iv:', !!(payload && payload.iv), 'has ct:', !!(payload && payload.ct));
-    if (!payload || !payload.iv || !payload.ct) { console.warn('[chat-debug] DROP: missing payload/iv/ct'); return; }
+    if (!payload || !payload.text) { console.warn('[chat-debug] DROP: missing payload or text'); return; }
     if (payload.userId === this.userId) { console.log('[chat-debug] DROP: self-message'); return; }
 
-    var plaintext;
-    try {
-      if (channelId === this._activeChannelId && !this._dmMode) {
-        plaintext = await Crypto.decrypt(payload.iv, payload.ct);
-      } else {
-        var key = await this._deriveKeyForChannel(channelId);
-        plaintext = await Crypto.decrypt(payload.iv, payload.ct, key);
-      }
-      console.log('[chat-debug] decrypt OK, plaintext length:', plaintext.length);
-    } catch (err) { console.error('[chat-debug] DROP: decrypt failed:', err.message || err); return; }
+    var plaintext = payload.text;
 
     var isImage = isImageDataUrl(plaintext);
     if (!isImage) {
@@ -1353,7 +1340,7 @@ var Chat = {
 
     var verifyStatus = 'unverified';
     if (payload.sig && payload.pubkey && payload.fingerprint) {
-      var canonical = [payload.id, payload.userId, payload.nick, payload.ts, payload.iv, payload.ct].join('|');
+      var canonical = [payload.id, payload.userId, payload.nick, payload.ts, payload.text].join('|');
       try {
         var valid = await Identity.verify(canonical, payload.sig, payload.pubkey);
         if (valid) {
@@ -1393,8 +1380,6 @@ var Chat = {
     try {
       if (this._dmMode) this._closeDMChannel();
       this._activeChannelId = channelId;
-      var cachedKey = this._keyCache.get(channelId);
-      if (cachedKey != null) Crypto._defaultKey = cachedKey;
       this._unreadCounts.set(channelId, 0);
 
       UI.clearMessages();
@@ -1473,23 +1458,19 @@ var Chat = {
       if (!filterResult.ok) { UI.addBlockedNotice('Your message was blocked: ' + filterResult.reason); return; }
     }
 
-    var encrypted;
-    try { encrypted = await Crypto.encrypt(text); }
-    catch (err) { UI.addSystemMessage('Encryption error. Message not sent.'); return; }
-
     var ts = Date.now();
     var msgId = crypto.randomUUID();
     var sig = null;
     if (!this._signingDisabled) {
       try {
-        var canonical = [msgId, this.userId, this.nick, ts, encrypted.iv, encrypted.ct].join('|');
+        var canonical = [msgId, this.userId, this.nick, ts, text].join('|');
         sig = await Identity.sign(canonical);
       } catch (err) { console.warn('Signing failed:', err); }
     }
 
     var payload = {
       id: msgId, userId: this.userId, nick: this.nick, ts: ts,
-      iv: encrypted.iv, ct: encrypted.ct, sig: sig,
+      text: text, sig: sig,
       pubkey: Identity.pubkeyBase64 || null,
       fingerprint: Identity.fingerprint || null,
     };

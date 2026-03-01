@@ -1743,11 +1743,6 @@ const Chat = {
 
   /** Subscribe to a Supabase channel. isPrimary=true for the general channel (carries presence). */
   async _subscribeChannel(channelId, isPrimary) {
-    // Derive E2E key for this channel
-    await Crypto.deriveKey(channelId);
-    // Cache the key for background decryption
-    this._keyCache.set(channelId, Crypto._defaultKeyHandle);
-
     var channelConfig = {
       config: {
         broadcast: { self: false, ack: true },
@@ -1868,24 +1863,10 @@ const Chat = {
 
   /** Unified message handler for all channels. */
   async _onChannelMessage(channelId, payload) {
-    console.log('[chat-debug] _onChannelMessage called, channel:', channelId, 'has payload:', !!payload, 'has iv:', !!(payload && payload.iv), 'has ct:', !!(payload && payload.ct));
-    if (!payload || !payload.iv || !payload.ct) { console.warn('[chat-debug] DROP: missing payload/iv/ct'); return; }
+    if (!payload || !payload.text) { console.warn('[chat-debug] DROP: missing payload or text'); return; }
     if (payload.userId === this.userId) { console.log('[chat-debug] DROP: self-message'); return; }
 
-    // Decrypt with the correct key for this channel
-    var plaintext;
-    try {
-      if (channelId === this._activeChannelId && !this._dmMode) {
-        plaintext = await Crypto.decrypt(payload.iv, payload.ct);
-      } else {
-        var key = await this._deriveKeyForChannel(channelId);
-        plaintext = await Crypto.decrypt(payload.iv, payload.ct, key);
-      }
-      console.log('[chat-debug] decrypt OK, plaintext length:', plaintext.length);
-    } catch (err) {
-      console.error('[chat-debug] DROP: decrypt failed:', err.message || err);
-      return;
-    }
+    var plaintext = payload.text;
 
     // Detect image messages (skip text automod for images)
     var isImage = isImageDataUrl(plaintext);
@@ -1905,7 +1886,7 @@ const Chat = {
     // Verify signature
     var verifyStatus = 'unverified';
     if (payload.sig && payload.pubkey && payload.fingerprint) {
-      var canonical = [payload.id, payload.userId, payload.nick, payload.ts, payload.iv, payload.ct].join('|');
+      var canonical = [payload.id, payload.userId, payload.nick, payload.ts, payload.text].join('|');
       try {
         var valid = await Identity.verify(canonical, payload.sig, payload.pubkey);
         if (valid) {
@@ -1963,12 +1944,6 @@ const Chat = {
 
       // Switch active channel
       this._activeChannelId = channelId;
-
-      // Set the crypto default key from cache
-      var cachedKey = this._keyCache.get(channelId);
-      if (cachedKey != null) {
-        Crypto._defaultKeyHandle = cachedKey;
-      }
 
       // Clear unread
       this._unreadCounts.set(channelId, 0);
@@ -2085,15 +2060,6 @@ const Chat = {
       }
     }
 
-    // Encrypt the message
-    var encrypted;
-    try {
-      encrypted = await Crypto.encrypt(text);
-    } catch (err) {
-      UI.addSystemMessage('Encryption error. Message not sent.');
-      return;
-    }
-
     var ts = Date.now();
     var msgId = crypto.randomUUID();
 
@@ -2101,7 +2067,7 @@ const Chat = {
     var sig = null;
     if (!this._signingDisabled) {
       try {
-        var canonical = [msgId, this.userId, this.nick, ts, encrypted.iv, encrypted.ct].join('|');
+        var canonical = [msgId, this.userId, this.nick, ts, text].join('|');
         sig = await Identity.sign(canonical);
       } catch (err) {
         console.warn('Signing failed:', err);
@@ -2113,8 +2079,7 @@ const Chat = {
       userId: this.userId,
       nick: this.nick,
       ts: ts,
-      iv: encrypted.iv,
-      ct: encrypted.ct,
+      text: text,
       sig: sig,
       pubkey: Identity.pubkeyBase64 || null,
       fingerprint: Identity.fingerprint || null,
@@ -2122,7 +2087,7 @@ const Chat = {
 
     // Check broadcast payload size (Supabase Realtime limit ~250KB)
     var payloadSize = JSON.stringify(payload).length;
-    console.log('[chat-debug] broadcast payload size:', payloadSize, 'bytes, ct length:', encrypted.ct.length);
+    console.log('[chat-debug] broadcast payload size:', payloadSize, 'bytes, text length:', text.length);
     if (payloadSize > 240000) {
       UI.addSystemMessage('Message too large for broadcast (' + Math.round(payloadSize / 1024) + 'KB). Try a smaller image.', 'leave');
       return;
@@ -2793,68 +2758,26 @@ document.addEventListener('DOMContentLoaded', () => {
     UI.updateCharCount(UI.msgInput.value.length);
   });
 
-  // ── Clipboard paste via Rust IPC ──
-  // WKWebView doesn't fire DOM paste events for image clipboard data.
-  // Instead we intercept Cmd+V, ask Rust to read the system clipboard,
-  // and handle the response (image data URL or text).
+  // ── Clipboard paste (image handling) ──
+  // Text paste is handled generically by the IPC init script (ipc.rs).
+  // Image paste is dispatched as a 'jarvis:paste-image' custom event
+  // which we handle here to show the image preview UI.
   var _pendingImageDataUrl = null;
 
-  document.addEventListener('keydown', function(e) {
-    if (e.metaKey && e.key.toUpperCase() === 'V' && !e.repeat) {
-      if (!window.jarvis || !window.jarvis.ipc) return;
-      e.preventDefault();
-      e.stopPropagation();
-      window.jarvis.ipc.send('debug_event', { type: 'paste_cmd_v_intercepted' });
-      window.jarvis.ipc.request('clipboard_paste', {}).then(function(resp) {
-        window.jarvis.ipc.send('debug_event', {
-          type: 'clipboard_paste_response',
-          kind: resp.kind || 'error',
-          has_data_url: !!resp.data_url,
-          text_len: resp.text ? resp.text.length : 0,
-          error: resp.error || null
-        });
-        if (resp.error) return;
-        if (resp.kind === 'image' && resp.data_url) {
-          // Show image paste preview (same flow as the old DOM paste handler)
-          if (resp.data_url.length > CONFIG.MAX_IMAGE_LEN) {
-            UI.addSystemMessage('Image too large.', 'leave');
-            return;
-          }
-          _pendingImageDataUrl = resp.data_url;
-          $('#paste-thumb').src = resp.data_url;
-          var sizeKB = Math.round(resp.data_url.length * 3 / 4 / 1024);
-          $('#paste-info').textContent = 'Image ready (' + sizeKB + ' KB)';
-          $('#paste-preview').classList.add('show');
-          UI.msgInput.focus();
-        } else if (resp.kind === 'text' && resp.text) {
-          // If the text looks like an image file path, load it as an image
-          if (isImagePath(resp.text)) {
-            window.jarvis.ipc.request('read_file', { path: resp.text.trim() }).then(function(fileResp) {
-              if (fileResp && fileResp.data_url) {
-                _pendingImageDataUrl = fileResp.data_url;
-                $('#paste-thumb').src = fileResp.data_url;
-                var sizeKB = Math.round(fileResp.data_url.length * 3 / 4 / 1024);
-                $('#paste-info').textContent = 'Image ready (' + sizeKB + ' KB)';
-                $('#paste-preview').classList.add('show');
-                UI.msgInput.focus();
-              } else {
-                // Not a valid image file — just insert as text
-                UI.msgInput.focus();
-                document.execCommand('insertText', false, resp.text);
-              }
-            }).catch(function() {
-              UI.msgInput.focus();
-              document.execCommand('insertText', false, resp.text);
-            });
-          } else {
-            // Plain text paste
-            UI.msgInput.focus();
-            document.execCommand('insertText', false, resp.text);
-          }
-        }
-      });
+  document.addEventListener('jarvis:paste-image', function(e) {
+    var resp = e.detail;
+    if (!resp || !resp.data_url) return;
+    if (resp.data_url.length > CONFIG.MAX_IMAGE_LEN) {
+      UI.addSystemMessage('Image too large.', 'leave');
+      return;
     }
-  }, true);
+    _pendingImageDataUrl = resp.data_url;
+    $('#paste-thumb').src = resp.data_url;
+    var sizeKB = Math.round(resp.data_url.length * 3 / 4 / 1024);
+    $('#paste-info').textContent = 'Image ready (' + sizeKB + ' KB)';
+    $('#paste-preview').classList.add('show');
+    UI.msgInput.focus();
+  });
 
   // Paste preview: send
   $('#paste-send').addEventListener('click', function() {
