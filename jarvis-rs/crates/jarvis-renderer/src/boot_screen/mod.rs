@@ -367,8 +367,10 @@ mod tests {
 
     #[test]
     fn progress_clamps_at_1() {
-        let mut config = BootScreenConfig::default();
-        config.duration = 2.0;
+        let config = BootScreenConfig {
+            duration: 2.0,
+            ..Default::default()
+        };
         // Can't create BootScreen without GPU, test the math directly
         let elapsed = 5.0_f32;
         let progress = (elapsed / config.duration).clamp(0.0, 1.0);

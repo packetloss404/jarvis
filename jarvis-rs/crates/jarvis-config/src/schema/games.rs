@@ -60,20 +60,10 @@ pub struct CustomGameConfig {
 }
 
 /// Games configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GamesConfig {
     pub enabled: GamesEnabledConfig,
     pub fullscreen: FullscreenConfig,
     pub custom_paths: Vec<CustomGameConfig>,
-}
-
-impl Default for GamesConfig {
-    fn default() -> Self {
-        Self {
-            enabled: GamesEnabledConfig::default(),
-            fullscreen: FullscreenConfig::default(),
-            custom_paths: Vec::new(),
-        }
-    }
 }
