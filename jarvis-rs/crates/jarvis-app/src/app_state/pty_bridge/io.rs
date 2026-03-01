@@ -198,23 +198,29 @@ mod tests {
     fn pty_write_and_read_echo() {
         let mut handle = spawn_pty(80, 24, None).expect("spawn should succeed");
 
+        // Give the shell time to initialize before sending input.
+        // Windows cmd.exe can be slow to start on CI machines.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
         // Write a command that produces known output
         handle
             .write_input(b"echo PTY_TEST_MARKER_12345\n")
             .expect("write should succeed");
 
-        // Give the shell time to process
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        // Poll for output with retries — CI can be slow, especially on Windows
+        let mut all_output = Vec::new();
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            all_output.extend(handle.drain_output());
+            let output_str = String::from_utf8_lossy(&all_output);
+            if output_str.contains("PTY_TEST_MARKER_12345") {
+                handle.kill();
+                return;
+            }
+        }
 
-        let output = handle.drain_output();
-        let output_str = String::from_utf8_lossy(&output);
-
-        assert!(
-            output_str.contains("PTY_TEST_MARKER_12345"),
-            "output should contain echo marker, got: {output_str}"
-        );
-
-        handle.kill();
+        let output_str = String::from_utf8_lossy(&all_output);
+        panic!("output should contain echo marker, got: {output_str}");
     }
 
     #[test]
