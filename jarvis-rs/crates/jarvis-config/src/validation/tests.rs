@@ -42,6 +42,14 @@ fn catches_panel_gap_too_large() {
 }
 
 #[test]
+fn catches_panel_gap_zero() {
+    let mut config = JarvisConfig::default();
+    config.layout.panel_gap = 0;
+    let err = validate(&config).unwrap_err().to_string();
+    assert!(err.contains("layout.panel_gap"));
+}
+
+#[test]
 fn catches_max_panels_zero() {
     let mut config = JarvisConfig::default();
     config.layout.max_panels = 0;

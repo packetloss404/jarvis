@@ -42,7 +42,7 @@ name = "jarvis-dark"
 # ui_size = 13           # 10-24
 
 [layout]
-# panel_gap = 6          # 0-20
+# panel_gap = 6          # 1-20
 # border_radius = 8      # 0-20
 # padding = 10           # 0-40
 # max_panels = 5         # 1-10

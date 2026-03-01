@@ -6,7 +6,7 @@ use super::helpers::{validate_range, validate_range_f64};
 
 /// Validate all layout-related constraints.
 pub(crate) fn validate_layout(errors: &mut Vec<String>, config: &JarvisConfig) {
-    validate_range(errors, "layout.panel_gap", config.layout.panel_gap, 0, 20);
+    validate_range(errors, "layout.panel_gap", config.layout.panel_gap, 1, 20);
     validate_range(
         errors,
         "layout.border_radius",
