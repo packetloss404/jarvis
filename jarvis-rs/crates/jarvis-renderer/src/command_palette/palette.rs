@@ -19,9 +19,11 @@ impl CommandPalette {
             .into_iter()
             .map(|action| {
                 let keybind_display = registry.keybind_for_action(&action);
+                let category = action.category().to_string();
                 PaletteItem {
                     label: action.label().to_string(),
                     keybind_display,
+                    category,
                     action,
                 }
             })
@@ -113,6 +115,12 @@ impl CommandPalette {
         self.query.clear();
         self.filtered.clear();
         self.selected = 0;
+    }
+
+    /// Append dynamic items (e.g. plugins) and re-filter.
+    pub fn add_items(&mut self, items: Vec<PaletteItem>) {
+        self.items.extend(items);
+        self.filter();
     }
 
     /// The items currently visible after filtering.

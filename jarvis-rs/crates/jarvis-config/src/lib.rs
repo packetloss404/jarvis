@@ -50,6 +50,15 @@ pub fn load_config() -> Result<JarvisConfig, ConfigError> {
         }
     }
 
+    // Discover local plugins from the filesystem
+    if let Some(dir) = toml_loader::plugins::plugins_dir() {
+        let local = toml_loader::plugins::discover_local_plugins(&dir);
+        if !local.is_empty() {
+            tracing::info!(count = local.len(), "Discovered local plugins");
+        }
+        config.plugins.local = local;
+    }
+
     validation::validate(&config)?;
     Ok(config)
 }

@@ -1,7 +1,8 @@
 //! JarvisApp struct definition and constructor.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use winit::window::Window;
@@ -98,6 +99,9 @@ pub struct JarvisApp {
     // Active games/URLs: maps pane_id → original_url_before_navigation
     pub(super) game_active: HashMap<u32, String>,
 
+    // Shared plugin directories handle (for config reload)
+    pub(super) plugin_dirs: Option<Arc<RwLock<HashMap<String, PathBuf>>>>,
+
     // Native menu bar
     pub(super) _menu: Option<muda::Menu>,
     pub(super) menu_ids: Option<super::menu::MenuIds>,
@@ -152,6 +156,7 @@ impl JarvisApp {
             cursor_pos: (0.0, 0.0),
             drag_state: None,
             game_active: HashMap::new(),
+            plugin_dirs: None,
             _menu: None,
             menu_ids: None,
         }

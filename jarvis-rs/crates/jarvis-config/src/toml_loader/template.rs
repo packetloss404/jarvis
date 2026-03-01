@@ -195,6 +195,22 @@ name = "jarvis-dark"
 # kind = "terminal"
 # command = "claude"
 # title = "Claude Code"
+
+# -- Plugins --
+# Bookmark plugins appear in the command palette and open as webview panes.
+# [[plugins.bookmarks]]
+# name = "Spotify"
+# url = "https://open.spotify.com"
+# category = "Web"
+
+# [[plugins.bookmarks]]
+# name = "Hacker News"
+# url = "https://news.ycombinator.com"
+# category = "Web"
+
+# Local plugins are discovered automatically from:
+#   ~/.config/jarvis/plugins/<plugin-id>/plugin.toml
+# Each plugin folder should contain a plugin.toml manifest and an HTML entry point.
 "##
     .to_string()
 }

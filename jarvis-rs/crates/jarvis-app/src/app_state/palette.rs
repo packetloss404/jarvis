@@ -26,7 +26,9 @@ impl JarvisApp {
                 if mode == PaletteMode::UrlInput {
                     // Go back to action select mode
                     let registry = KeybindRegistry::from_config(&self.config.keybinds);
-                    self.command_palette = Some(jarvis_renderer::CommandPalette::new(&registry));
+                    let mut new_palette = jarvis_renderer::CommandPalette::new(&registry);
+                    self.inject_plugin_items(&mut new_palette);
+                    self.command_palette = Some(new_palette);
                     self.send_palette_update();
                 } else {
                     self.dispatch(Action::CloseOverlay);
@@ -101,7 +103,7 @@ impl JarvisApp {
                             serde_json::json!({
                                 "label": item.label,
                                 "keybind": item.keybind_display,
-                                "category": item.action.category()
+                                "category": item.category
                             })
                         })
                         .collect();
@@ -135,6 +137,40 @@ impl JarvisApp {
     /// Convenience: send palette_update with current state.
     fn send_palette_update(&self) {
         self.send_palette_to_webview("palette_update");
+    }
+
+    /// Inject plugin items (bookmarks + local plugins) into the command palette.
+    pub(super) fn inject_plugin_items(&self, palette: &mut jarvis_renderer::CommandPalette) {
+        let mut items = Vec::new();
+
+        for bm in &self.config.plugins.bookmarks {
+            if bm.name.is_empty() || bm.url.is_empty() {
+                continue;
+            }
+            items.push(jarvis_renderer::PaletteItem {
+                action: jarvis_common::actions::Action::OpenURL(bm.url.clone()),
+                label: bm.name.clone(),
+                keybind_display: None,
+                category: bm.category.clone(),
+            });
+        }
+
+        for lp in &self.config.plugins.local {
+            let url = format!(
+                "jarvis://localhost/plugins/{}/{}",
+                lp.id, lp.entry
+            );
+            items.push(jarvis_renderer::PaletteItem {
+                action: jarvis_common::actions::Action::OpenURL(url),
+                label: lp.name.clone(),
+                keybind_display: None,
+                category: lp.category.clone(),
+            });
+        }
+
+        if !items.is_empty() {
+            palette.add_items(items);
+        }
     }
 
     /// Notify all webviews whether an overlay (palette/assistant) is active.
