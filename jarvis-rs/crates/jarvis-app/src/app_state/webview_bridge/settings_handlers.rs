@@ -59,6 +59,19 @@ impl JarvisApp {
                 if let Err(e) = handle.send_ipc("settings_saved", &ack) {
                     tracing::warn!(pane_id, error = %e, "Failed to send settings_saved");
                 }
+
+                // Validate working directory and warn if it doesn't exist
+                if path == "shell.working_directory" {
+                    if let Some(warning) = validate_working_directory(&self.config) {
+                        let warn_payload = serde_json::json!({
+                            "path": path,
+                            "message": warning,
+                        });
+                        if let Err(e) = handle.send_ipc("settings_field_warning", &warn_payload) {
+                            tracing::warn!(pane_id, error = %e, "Failed to send field warning");
+                        }
+                    }
+                }
             }
         }
     }
@@ -232,6 +245,8 @@ const VALID_PATHS: &[&str] = &[
     "status_bar.show_panel_buttons",
     "status_bar.show_online_count",
     "status_bar.bg",
+    // Shell
+    "shell.working_directory",
     // Auto-open (special: value is an array)
     "auto_open.panels",
 ];
@@ -413,6 +428,8 @@ fn apply_setting(
             set_bool(&mut config.status_bar.show_online_count, value);
         }
         "status_bar.bg" => set_str(&mut config.status_bar.bg, value),
+        // -- Shell --
+        "shell.working_directory" => set_option_str(&mut config.shell.working_directory, value),
         // -- Auto-open panels (special: array value) --
         "auto_open.panels" => {
             if let Some(arr) = value.as_array() {
@@ -447,6 +464,7 @@ fn reset_section(config: &mut jarvis_config::schema::JarvisConfig, section: &str
         "games" => config.games = Default::default(),
         "performance" => config.performance = Default::default(),
         "advanced" => config.advanced = Default::default(),
+        "shell" => config.shell = Default::default(),
         "auto_open" => config.auto_open = Default::default(),
         "status_bar" => config.status_bar = Default::default(),
         "window" => config.window = Default::default(),
@@ -461,6 +479,14 @@ fn reset_section(config: &mut jarvis_config::schema::JarvisConfig, section: &str
 fn set_str(target: &mut String, value: &serde_json::Value) {
     if let Some(s) = value.as_str() {
         *target = s.to_string();
+    }
+}
+
+fn set_option_str(target: &mut Option<String>, value: &serde_json::Value) {
+    if value.is_null() {
+        *target = None;
+    } else if let Some(s) = value.as_str() {
+        *target = if s.is_empty() { None } else { Some(s.to_string()) };
     }
 }
 
@@ -546,6 +572,40 @@ fn extract_string_field(payload: &IpcPayload, field: &str) -> Option<String> {
     match payload {
         IpcPayload::Json(obj) => obj.get(field)?.as_str().map(String::from),
         _ => None,
+    }
+}
+
+// =============================================================================
+// VALIDATION
+// =============================================================================
+
+/// Validate the configured working directory. Returns a warning message if invalid.
+fn validate_working_directory(config: &jarvis_config::schema::JarvisConfig) -> Option<String> {
+    let dir = config.shell.working_directory.as_deref()?;
+    if dir.is_empty() {
+        return None;
+    }
+
+    // Expand ~ to home directory
+    let expanded = if dir.starts_with("~/") || dir == "~" {
+        if let Ok(home) = std::env::var("HOME") {
+            dir.replacen('~', &home, 1)
+        } else {
+            dir.to_string()
+        }
+    } else {
+        dir.to_string()
+    };
+
+    let path = std::path::Path::new(&expanded);
+    if !path.is_absolute() {
+        Some(format!("Path must be absolute (e.g. /Users/you/projects), got: {dir}"))
+    } else if !path.exists() {
+        Some(format!("Directory does not exist: {expanded}"))
+    } else if !path.is_dir() {
+        Some(format!("Path is not a directory: {expanded}"))
+    } else {
+        None
     }
 }
 

@@ -62,7 +62,7 @@ const ALLOWED_ENV_VARS: &[&str] = &[
 ];
 
 /// Build a sanitized `CommandBuilder` for the given shell.
-fn build_shell_command(shell: &str) -> CommandBuilder {
+fn build_shell_command(shell: &str, cwd: Option<&str>) -> CommandBuilder {
     let mut cmd = CommandBuilder::new(shell);
 
     // Clear inherited env, then selectively re-add safe vars
@@ -75,6 +75,28 @@ fn build_shell_command(shell: &str) -> CommandBuilder {
 
     // Always set TERM for proper terminal behavior
     cmd.env("TERM", "xterm-256color");
+
+    // Set working directory if provided and valid
+    if let Some(dir) = cwd {
+        if !dir.is_empty() {
+            // Expand ~ to home directory
+            let expanded = if dir.starts_with("~/") || dir == "~" {
+                if let Ok(home) = std::env::var("HOME") {
+                    dir.replacen('~', &home, 1)
+                } else {
+                    dir.to_string()
+                }
+            } else {
+                dir.to_string()
+            };
+            let path = std::path::Path::new(&expanded);
+            if path.is_dir() {
+                cmd.cwd(&expanded);
+            } else {
+                tracing::warn!(dir, expanded = %expanded, "Working directory does not exist, using default");
+            }
+        }
+    }
 
     // On Unix, pass -l for a login shell (loads .profile, .bash_profile, etc.)
     #[cfg(unix)]
@@ -94,7 +116,7 @@ fn build_shell_command(shell: &str) -> CommandBuilder {
 /// Returns a `PtyHandle` that owns the master side of the PTY pair.
 /// A background thread reads output from the PTY and sends chunks
 /// over the returned handle's `output_rx` channel.
-pub fn spawn_pty(cols: u16, rows: u16) -> Result<PtyHandle, String> {
+pub fn spawn_pty(cols: u16, rows: u16, cwd: Option<&str>) -> Result<PtyHandle, String> {
     let pty_system = native_pty_system();
 
     let size = PtySize {
@@ -109,7 +131,7 @@ pub fn spawn_pty(cols: u16, rows: u16) -> Result<PtyHandle, String> {
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
     let shell = default_shell();
-    let cmd = build_shell_command(&shell);
+    let cmd = build_shell_command(&shell, cwd);
 
     let child = pair
         .slave
@@ -165,7 +187,7 @@ pub fn spawn_pty(cols: u16, rows: u16) -> Result<PtyHandle, String> {
 /// Spawn a PTY with default terminal dimensions.
 #[allow(dead_code)] // Used in tests
 pub fn spawn_pty_default() -> Result<PtyHandle, String> {
-    spawn_pty(DEFAULT_COLS, DEFAULT_ROWS)
+    spawn_pty(DEFAULT_COLS, DEFAULT_ROWS, None)
 }
 
 // =============================================================================
@@ -231,7 +253,7 @@ mod tests {
 
     #[test]
     fn spawn_pty_creates_handle() {
-        let handle = spawn_pty(80, 24);
+        let handle = spawn_pty(80, 24, None);
         assert!(
             handle.is_ok(),
             "spawn_pty should succeed: {:?}",

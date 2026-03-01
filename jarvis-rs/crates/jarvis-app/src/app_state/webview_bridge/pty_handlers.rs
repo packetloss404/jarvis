@@ -59,7 +59,8 @@ impl JarvisApp {
         let (cols, rows) = extract_size_fields(payload)
             .unwrap_or((pty_bridge::DEFAULT_COLS, pty_bridge::DEFAULT_ROWS));
 
-        match pty_bridge::spawn_pty(cols, rows) {
+        let cwd = self.config.shell.working_directory.as_deref();
+        match pty_bridge::spawn_pty(cols, rows, cwd) {
             Ok(handle) => {
                 self.ptys.insert(pane_id, handle);
                 tracing::info!(pane_id, cols, rows, "PTY restarted");
@@ -87,7 +88,8 @@ impl JarvisApp {
         let (cols, rows) = extract_size_fields(payload)
             .unwrap_or((pty_bridge::DEFAULT_COLS, pty_bridge::DEFAULT_ROWS));
 
-        match pty_bridge::spawn_pty(cols, rows) {
+        let cwd = self.config.shell.working_directory.as_deref();
+        match pty_bridge::spawn_pty(cols, rows, cwd) {
             Ok(handle) => {
                 self.ptys.insert(pane_id, handle);
                 tracing::info!(pane_id, cols, rows, "PTY spawned for terminal");

@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn pty_write_and_read_echo() {
-        let mut handle = spawn_pty(80, 24).expect("spawn should succeed");
+        let mut handle = spawn_pty(80, 24, None).expect("spawn should succeed");
 
         // Write a command that produces known output
         handle
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn pty_resize_updates_size() {
-        let mut handle = spawn_pty(80, 24).expect("spawn should succeed");
+        let mut handle = spawn_pty(80, 24, None).expect("spawn should succeed");
         assert_eq!(handle.size.cols, 80);
         assert_eq!(handle.size.rows, 24);
 
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn pty_kill_terminates_process() {
-        let mut handle = spawn_pty(80, 24).expect("spawn should succeed");
+        let mut handle = spawn_pty(80, 24, None).expect("spawn should succeed");
         handle.kill();
 
         // After kill, drain should eventually return empty or disconnected
@@ -282,8 +282,8 @@ mod tests {
     #[test]
     fn pty_manager_kill_all_with_ptys() {
         let mut mgr = PtyManager::new();
-        let h1 = spawn_pty(80, 24).expect("spawn 1");
-        let h2 = spawn_pty(80, 24).expect("spawn 2");
+        let h1 = spawn_pty(80, 24, None).expect("spawn 1");
+        let h2 = spawn_pty(80, 24, None).expect("spawn 2");
         mgr.insert(1, h1);
         mgr.insert(2, h2);
         assert_eq!(mgr.len(), 2);
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn pty_manager_kill_all_is_idempotent() {
         let mut mgr = PtyManager::new();
-        let h1 = spawn_pty(80, 24).expect("spawn");
+        let h1 = spawn_pty(80, 24, None).expect("spawn");
         mgr.insert(1, h1);
 
         mgr.kill_all();
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn pty_manager_lifecycle() {
         let mut mgr = PtyManager::new();
-        let handle = spawn_pty(80, 24).expect("spawn should succeed");
+        let handle = spawn_pty(80, 24, None).expect("spawn should succeed");
 
         mgr.insert(42, handle);
         assert!(mgr.contains(42));

@@ -184,6 +184,7 @@ body.focused {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   padding: 5px 0;
   min-height: 34px;
 }
@@ -375,6 +376,23 @@ input[type="text"] {
 }
 input[type="text"]:focus {
   border-color: var(--color-border-focused);
+}
+input[type="text"].has-warning {
+  border-color: var(--color-warning);
+}
+
+/* Field warning */
+.field-warning {
+  display: none;
+  width: 100%;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--color-warning);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.field-warning.visible {
+  display: block;
 }
 
 /* ================================================================ */
@@ -842,6 +860,13 @@ input[type="text"]:focus {
         <span class="control-label">Scrollback Lines</span>
         <input type="number" data-path="terminal.scrollback_lines" min="100" max="100000" step="100" value="10000">
       </div>
+
+      <div class="section-subtitle">Shell</div>
+      <div class="control-row">
+        <span class="control-label">Working Directory</span>
+        <input type="text" data-path="shell.working_directory" placeholder="Leave empty for home directory" value="">
+        <div class="field-warning" id="warning-shell.working_directory"></div>
+      </div>
     </div>
 
     <!-- ============================================================ -->
@@ -1159,8 +1184,31 @@ onIpc('settings_data', function(payload) {
   }
 });
 
-onIpc('settings_saved', function() {
+onIpc('settings_saved', function(payload) {
   showToast('Saved');
+  // Clear any previous warning for this path
+  if (payload && payload.path) {
+    var warnEl = document.getElementById('warning-' + payload.path);
+    if (warnEl) {
+      warnEl.textContent = '';
+      warnEl.classList.remove('visible');
+    }
+    var input = document.querySelector('[data-path="' + payload.path + '"]');
+    if (input) { input.classList.remove('has-warning'); }
+  }
+});
+
+onIpc('settings_field_warning', function(payload) {
+  if (!payload || !payload.path) { return; }
+  var warnEl = document.getElementById('warning-' + payload.path);
+  if (warnEl) {
+    warnEl.textContent = payload.message || '';
+    warnEl.classList.toggle('visible', !!payload.message);
+  }
+  var input = document.querySelector('[data-path="' + payload.path + '"]');
+  if (input) {
+    input.classList.toggle('has-warning', !!payload.message);
+  }
 });
 
 onIpc('settings_theme_changed', function(payload) {
