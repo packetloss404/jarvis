@@ -66,6 +66,7 @@ export class RelayConnection implements IRelayConnection {
   private desktopDhPubkey: string | undefined;
   private cipher: RelayCipher | null = null;
   private pendingMessages: object[] = [];
+  private keyExchangeInProgress = false;
   private backoff = 1000;
   private activePaneId = 1;
   private static readonly MAX_BACKOFF = 30000;
@@ -78,6 +79,7 @@ export class RelayConnection implements IRelayConnection {
     this.callbacks = callbacks;
     this.cipher = null;
     this.pendingMessages = [];
+    this.keyExchangeInProgress = false;
     this.status = 'connecting';
     this.peerConnected = false;
     callbacks.onStatusChange('connecting', 'connecting to relay...');
@@ -118,6 +120,7 @@ export class RelayConnection implements IRelayConnection {
       this.stopPing();
       this.cipher = null;
       this.pendingMessages = [];
+      this.keyExchangeInProgress = false;
       if (this.status === 'disconnected') return;
 
       if (this.status === 'connected' || this.peerConnected) {
@@ -192,6 +195,8 @@ export class RelayConnection implements IRelayConnection {
   private async initiateKeyExchange(): Promise<void> {
     if (!this.desktopDhPubkey) return;
     if (this.cipher) return; // Already established
+    if (this.keyExchangeInProgress) return; // Prevent double invocation
+    this.keyExchangeInProgress = true;
 
     try {
       const cipher = await createRelayCipher(this.desktopDhPubkey);
@@ -214,6 +219,7 @@ export class RelayConnection implements IRelayConnection {
       }
       this.pendingMessages = [];
     } catch (e) {
+      this.keyExchangeInProgress = false;
       console.error('Key exchange failed:', e);
       this.handleError(`encryption setup failed: ${e}`);
     }
@@ -306,6 +312,7 @@ export class RelayConnection implements IRelayConnection {
     this.peerConnected = false;
     this.cipher = null;
     this.pendingMessages = [];
+    this.keyExchangeInProgress = false;
     this.stopPing();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

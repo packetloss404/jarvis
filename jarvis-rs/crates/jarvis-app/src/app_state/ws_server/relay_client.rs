@@ -209,7 +209,9 @@ async fn relay_session(
                                 }
                                 RelayResponse::PeerDisconnected => {
                                     tracing::info!("Mobile peer disconnected");
-                                    cipher = None; // Reset encryption on peer disconnect
+                                    // NOTE: Do NOT clear cipher here. A malicious relay could
+                                    // send fake PeerDisconnected to force a plaintext downgrade.
+                                    // Cipher is only cleared on full revoke/re-pair.
                                     let _ = event_tx.send(RelayEvent::PeerDisconnected);
                                 }
                                 RelayResponse::Error { message } => {
@@ -225,7 +227,11 @@ async fn relay_session(
                         if let Ok(envelope) = serde_json::from_str::<RelayEnvelope>(&text) {
                             match envelope {
                                 RelayEnvelope::Plaintext { payload } => {
-                                    handle_client_message(&payload, cmd_tx);
+                                    if cipher.is_none() {
+                                        handle_client_message(&payload, cmd_tx);
+                                    } else {
+                                        tracing::warn!("Rejecting plaintext after encryption established");
+                                    }
                                 }
                                 RelayEnvelope::KeyExchange { dh_pubkey } => {
                                     tracing::info!("Received mobile DH pubkey");
