@@ -120,6 +120,17 @@ impl JarvisApp {
         }
 
         let content_provider = ContentProvider::new(&panels_path);
+
+        // Register local plugin directories
+        if let Some(plugins_base) = jarvis_config::toml_loader::plugins::plugins_dir() {
+            for lp in &self.config.plugins.local {
+                content_provider.add_plugin_dir(&lp.id, plugins_base.join(&lp.id));
+            }
+        }
+
+        // Save the shared plugin dirs handle for config reload
+        self.plugin_dirs = Some(content_provider.plugin_dirs_handle());
+
         let mut manager = WebViewManager::new();
         manager.set_content_provider(content_provider);
 

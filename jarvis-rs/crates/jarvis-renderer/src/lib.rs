@@ -10,7 +10,7 @@ pub mod render_state;
 pub mod ui;
 
 pub use assistant_panel::{AssistantPanel, ChatMessage, ChatRole};
-pub use command_palette::{CommandPalette, PaletteMode};
+pub use command_palette::{CommandPalette, PaletteItem, PaletteMode};
 pub use gpu::GpuContext;
 pub use perf::FrameTimer;
 pub use quad::{QuadInstance, QuadRenderer};

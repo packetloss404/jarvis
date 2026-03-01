@@ -18,4 +18,6 @@ pub struct PaletteItem {
     pub label: String,
     /// The keybind display string (e.g. "⌘T"), if one is bound.
     pub keybind_display: Option<String>,
+    /// Category for grouping in the palette UI.
+    pub category: String,
 }

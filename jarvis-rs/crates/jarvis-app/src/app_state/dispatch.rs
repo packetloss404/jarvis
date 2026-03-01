@@ -108,7 +108,9 @@ impl JarvisApp {
             }
             Action::OpenCommandPalette => {
                 self.command_palette_open = true;
-                self.command_palette = Some(jarvis_renderer::CommandPalette::new(&self.registry));
+                let mut palette = jarvis_renderer::CommandPalette::new(&self.registry);
+                self.inject_plugin_items(&mut palette);
+                self.command_palette = Some(palette);
                 self.input.set_mode(InputMode::CommandPalette);
                 self.send_palette_to_webview("palette_show");
                 self.notify_overlay_state();
@@ -270,6 +272,21 @@ impl JarvisApp {
                     self.registry =
                         jarvis_platform::input::KeybindRegistry::from_config(&c.keybinds);
                     self.chrome = jarvis_renderer::UiChrome::from_config(&c.layout);
+
+                    // Re-register plugin directories
+                    if let Some(ref dirs_handle) = self.plugin_dirs {
+                        if let Ok(mut dirs) = dirs_handle.write() {
+                            dirs.clear();
+                            if let Some(plugins_base) =
+                                jarvis_config::toml_loader::plugins::plugins_dir()
+                            {
+                                for lp in &c.plugins.local {
+                                    dirs.insert(lp.id.clone(), plugins_base.join(&lp.id));
+                                }
+                            }
+                        }
+                    }
+
                     self.config = c;
                     self.inject_theme_into_all_webviews();
                     self.event_bus.publish(Event::ConfigReloaded);

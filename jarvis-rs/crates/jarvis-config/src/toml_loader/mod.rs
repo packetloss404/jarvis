@@ -2,6 +2,7 @@
 
 mod loader;
 mod paths;
+pub mod plugins;
 mod template;
 
 #[cfg(test)]

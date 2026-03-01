@@ -6,6 +6,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 /// Serves local files from a base directory via custom protocol.
 ///
@@ -17,6 +18,10 @@ pub struct ContentProvider {
     base_dir: PathBuf,
     /// In-memory overrides (for dynamically generated content).
     overrides: HashMap<String, (String, Vec<u8>)>, // path -> (mime, data)
+    /// Plugin directories: plugin_id -> absolute path to plugin folder.
+    /// Wrapped in `Arc<RwLock>` so the custom protocol closure and the app
+    /// can share the same mutable map (e.g. on config reload).
+    plugin_dirs: Arc<RwLock<HashMap<String, PathBuf>>>,
 }
 
 impl ContentProvider {
@@ -25,6 +30,7 @@ impl ContentProvider {
         Self {
             base_dir: base_dir.into(),
             overrides: HashMap::new(),
+            plugin_dirs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -39,6 +45,28 @@ impl ContentProvider {
             .insert(path.into(), (mime.into(), data.into()));
     }
 
+    /// Register a local plugin directory.
+    pub fn add_plugin_dir(&self, id: impl Into<String>, path: impl Into<PathBuf>) {
+        if let Ok(mut dirs) = self.plugin_dirs.write() {
+            dirs.insert(id.into(), path.into());
+        }
+    }
+
+    /// Remove all registered plugin directories.
+    pub fn clear_plugin_dirs(&self) {
+        if let Ok(mut dirs) = self.plugin_dirs.write() {
+            dirs.clear();
+        }
+    }
+
+    /// Get a shared handle to the plugin directories map.
+    ///
+    /// Used to share the map between the `ContentProvider` (inside the
+    /// custom protocol closure) and the app state (for reload).
+    pub fn plugin_dirs_handle(&self) -> Arc<RwLock<HashMap<String, PathBuf>>> {
+        Arc::clone(&self.plugin_dirs)
+    }
+
     /// Resolve a request path to content bytes and MIME type.
     pub fn resolve(&self, path: &str) -> Option<(Cow<'_, str>, Cow<'_, [u8]>)> {
         let clean = path.trim_start_matches('/');
@@ -48,12 +76,42 @@ impl ContentProvider {
             return Some((Cow::Borrowed(mime.as_str()), Cow::Borrowed(data.as_slice())));
         }
 
+        // Check plugin directories: paths like "plugins/{id}/..."
+        if let Some(rest) = clean.strip_prefix("plugins/") {
+            if let Some(slash_pos) = rest.find('/') {
+                let plugin_id = &rest[..slash_pos];
+                let asset_path = &rest[slash_pos + 1..];
+                return self.resolve_plugin_asset(plugin_id, asset_path);
+            }
+        }
+
         // Resolve from filesystem
         let file_path = self.base_dir.join(clean);
 
         // Prevent directory traversal (including symlink bypass).
         // Canonicalize both paths to resolve symlinks, `..`, etc.
         let canonical_base = std::fs::canonicalize(&self.base_dir).ok()?;
+        let canonical_file = std::fs::canonicalize(&file_path).ok()?;
+        if !canonical_file.starts_with(&canonical_base) {
+            return None;
+        }
+
+        let data = std::fs::read(&canonical_file).ok()?;
+        let mime = mime_from_extension(&file_path);
+        Some((Cow::Owned(mime.to_string()), Cow::Owned(data)))
+    }
+
+    /// Resolve an asset from a plugin directory with containment check.
+    fn resolve_plugin_asset(&self, plugin_id: &str, asset_path: &str) -> Option<(Cow<'_, str>, Cow<'_, [u8]>)> {
+        let plugin_base = {
+            let dirs = self.plugin_dirs.read().ok()?;
+            dirs.get(plugin_id)?.clone()
+        };
+
+        let file_path = plugin_base.join(asset_path);
+
+        // Containment check: canonicalize both to prevent traversal
+        let canonical_base = std::fs::canonicalize(&plugin_base).ok()?;
         let canonical_file = std::fs::canonicalize(&file_path).ok()?;
         if !canonical_file.starts_with(&canonical_base) {
             return None;
@@ -411,6 +469,64 @@ mod tests {
                 "{panel} must not use innerHTML (XSS risk)"
             );
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Plugin directory resolution
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn resolve_plugin_asset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join("my-plugin");
+        std::fs::create_dir(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("index.html"), "<html>plugin</html>").unwrap();
+
+        let cp = ContentProvider::new(assets_dir());
+        cp.add_plugin_dir("my-plugin", &plugin_dir);
+
+        let result = cp.resolve("plugins/my-plugin/index.html");
+        assert!(result.is_some(), "plugin asset should resolve");
+        let (mime, data) = result.unwrap();
+        assert_eq!(mime.as_ref(), "text/html");
+        assert_eq!(data.as_ref(), b"<html>plugin</html>");
+    }
+
+    #[test]
+    fn plugin_traversal_is_blocked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join("evil-plugin");
+        std::fs::create_dir(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("index.html"), "ok").unwrap();
+
+        let cp = ContentProvider::new(assets_dir());
+        cp.add_plugin_dir("evil-plugin", &plugin_dir);
+
+        assert!(
+            cp.resolve("plugins/evil-plugin/../../etc/passwd").is_none(),
+            "directory traversal from plugin dir must be blocked"
+        );
+    }
+
+    #[test]
+    fn unknown_plugin_returns_none() {
+        let cp = ContentProvider::new(assets_dir());
+        assert!(cp.resolve("plugins/nonexistent/index.html").is_none());
+    }
+
+    #[test]
+    fn clear_plugin_dirs_works() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join("test-plugin");
+        std::fs::create_dir(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("index.html"), "ok").unwrap();
+
+        let cp = ContentProvider::new(assets_dir());
+        cp.add_plugin_dir("test-plugin", &plugin_dir);
+        assert!(cp.resolve("plugins/test-plugin/index.html").is_some());
+
+        cp.clear_plugin_dirs();
+        assert!(cp.resolve("plugins/test-plugin/index.html").is_none());
     }
 
     // -----------------------------------------------------------------
