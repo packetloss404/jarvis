@@ -108,7 +108,8 @@ This activates the virtualenv and runs `main.py`, which launches the Metal front
 
 | Guide | Description |
 |-------|-------------|
-| **[Plugin System](docs/plugins.md)** | Build custom panels, tools, and web apps that run inside Jarvis — bookmark plugins, local HTML/JS/CSS plugins with full IPC bridge access |
+| **[Plugin System](docs/plugins/plugins.md)** | Build custom panels, tools, and web apps that run inside Jarvis — bookmark plugins, local HTML/JS/CSS plugins with full IPC bridge access |
+| **[Manual](docs/manual/README.md)** | Complete technical reference — architecture, config, terminal, tiling, webview/IPC, input, plugins, networking, renderer |
 
 ## Skills
 
