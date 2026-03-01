@@ -154,8 +154,6 @@ impl Action {
             Action::ClosePane,
             Action::SplitHorizontal,
             Action::SplitVertical,
-            Action::FocusNextPane,
-            Action::FocusPrevPane,
             Action::ToggleFullscreen,
             Action::OpenSettings,
             Action::OpenChat,

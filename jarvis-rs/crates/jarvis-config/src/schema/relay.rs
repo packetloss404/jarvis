@@ -13,7 +13,7 @@ pub struct RelayConfig {
 impl Default for RelayConfig {
     fn default() -> Self {
         Self {
-            url: "wss://relay.jarvis.dev/ws".into(),
+            url: "wss://jarvis-relay-363598788638.us-central1.run.app/ws".into(),
             auto_connect: false,
         }
     }
