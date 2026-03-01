@@ -121,9 +121,6 @@ impl JarvisApp {
         let content_provider = ContentProvider::new(&panels_path);
         let mut manager = WebViewManager::new();
         manager.set_content_provider(content_provider);
-        manager
-            .allow_open_url
-            .store(self.config.games.allow_open_url, std::sync::atomic::Ordering::Relaxed);
 
         self.webviews = Some(WebViewRegistry::new(manager));
         tracing::info!(

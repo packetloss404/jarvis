@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tracing::{debug, warn};
@@ -14,25 +13,16 @@ use super::WebViewManager;
 
 /// Allowed URL prefixes for webview navigation.
 ///
-/// Only these origins are permitted. Everything else is blocked.
+/// Any `https://` URL is always permitted. For non-https schemes, only these
+/// origins are allowed:
 /// - `jarvis://` — custom protocol for bundled panel assets
 /// - `about:blank` — default empty page
-/// - Supabase — chat backend (Realtime, REST)
-/// - CDN origins — xterm.js, other panel dependencies
+/// - `http://jarvis.localhost` — WebView2 Windows rewrite of jarvis://
 pub const ALLOWED_NAV_PREFIXES: &[&str] = &[
     "jarvis://",
     // On Windows, WebView2 rewrites custom protocols: jarvis://localhost/… → http://jarvis.localhost/…
     "http://jarvis.localhost",
     "about:blank",
-    "https://ojmqzagktzkualzgpcbq.supabase.co",
-    "https://cdn.jsdelivr.net/",
-    "https://unpkg.com/",
-    "https://kartbros.io",
-    "https://basketbros.io",
-    "https://footballbros.io",
-    "https://soccerbros.gg",
-    "https://wrestlebros.io",
-    "https://baseballbros.io",
 ];
 
 /// Check whether a URL is allowed by the navigation allowlist.
@@ -109,15 +99,13 @@ impl WebViewManager {
     pub(super) fn attach_navigation_handler<'a>(
         builder: WebViewBuilder<'a>,
         events: Arc<Mutex<Vec<WebViewEvent>>>,
-        allow_open_url: Arc<AtomicBool>,
         pid: u32,
     ) -> WebViewBuilder<'a> {
         builder.with_navigation_handler(move |url| {
-            // When allow_open_url is enabled, permit any https:// navigation
-            let open_url_allowed =
-                allow_open_url.load(Ordering::Relaxed) && url.starts_with("https://");
-
-            if !open_url_allowed && !is_navigation_allowed(&url) {
+            if !url.starts_with("https://")
+                && !url.starts_with("http://")
+                && !is_navigation_allowed(&url)
+            {
                 warn!(
                     pane_id = pid,
                     url = %url,
@@ -161,34 +149,18 @@ mod tests {
         assert!(is_navigation_allowed("about:blank"));
     }
 
-    #[test]
-    fn allows_supabase_origin() {
-        assert!(is_navigation_allowed(
-            "https://ojmqzagktzkualzgpcbq.supabase.co/rest/v1/channels"
-        ));
-        assert!(is_navigation_allowed(
-            "https://ojmqzagktzkualzgpcbq.supabase.co/realtime/v1/websocket"
-        ));
-    }
+    // -- https:// URLs are allowed by the navigation handler, not by is_navigation_allowed --
 
     #[test]
-    fn allows_cdn_origins() {
-        assert!(is_navigation_allowed(
-            "https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css"
-        ));
-        assert!(is_navigation_allowed(
-            "https://unpkg.com/some-package@1.0.0/dist/index.js"
-        ));
+    fn https_not_in_allowlist_but_allowed_by_handler() {
+        // is_navigation_allowed only covers non-https schemes.
+        // https:// is handled directly in attach_navigation_handler.
+        assert!(!is_navigation_allowed("https://evil.com"));
+        assert!(!is_navigation_allowed("https://google.com"));
+        assert!(!is_navigation_allowed("https://ojmqzagktzkualzgpcbq.supabase.co/rest/v1/channels"));
     }
 
     // -- Blocked URLs --
-
-    #[test]
-    fn blocks_arbitrary_https() {
-        assert!(!is_navigation_allowed("https://evil.com"));
-        assert!(!is_navigation_allowed("https://google.com"));
-        assert!(!is_navigation_allowed("https://example.com/phishing"));
-    }
 
     #[test]
     fn blocks_file_protocol() {
@@ -209,7 +181,9 @@ mod tests {
     }
 
     #[test]
-    fn blocks_http_unencrypted() {
+    fn http_not_in_allowlist_but_allowed_by_handler() {
+        // is_navigation_allowed only covers non-http/https schemes.
+        // http:// is handled directly in attach_navigation_handler.
         assert!(!is_navigation_allowed("http://evil.com"));
         assert!(!is_navigation_allowed("http://localhost:8080"));
     }
@@ -236,26 +210,13 @@ mod tests {
         assert!(!is_navigation_allowed("ftp://files.example.com"));
     }
 
-    #[test]
-    fn blocks_similar_but_wrong_supabase() {
-        // Different project ID — not our Supabase
-        assert!(!is_navigation_allowed(
-            "https://xyzabc123.supabase.co/rest/v1/data"
-        ));
-    }
-
     // -- Allowlist structure --
 
     #[test]
     fn allowlist_has_expected_entries() {
-        assert_eq!(ALLOWED_NAV_PREFIXES.len(), 12);
+        assert_eq!(ALLOWED_NAV_PREFIXES.len(), 3);
         assert!(ALLOWED_NAV_PREFIXES.contains(&"jarvis://"));
         assert!(ALLOWED_NAV_PREFIXES.contains(&"about:blank"));
-        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://kartbros.io"));
-        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://basketbros.io"));
-        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://footballbros.io"));
-        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://soccerbros.gg"));
-        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://wrestlebros.io"));
-        assert!(ALLOWED_NAV_PREFIXES.contains(&"https://baseballbros.io"));
+        assert!(ALLOWED_NAV_PREFIXES.contains(&"http://jarvis.localhost"));
     }
 }

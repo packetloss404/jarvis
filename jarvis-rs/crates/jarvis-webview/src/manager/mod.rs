@@ -3,7 +3,6 @@
 //! `WebViewManager` creates, tracks, and destroys `wry::WebView` instances,
 //! one per pane that needs embedded web content (games, chat, docs, etc.).
 
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::content::ContentProvider;
@@ -25,8 +24,6 @@ pub struct WebViewManager {
     pub(crate) events: Arc<Mutex<Vec<WebViewEvent>>>,
     /// Optional content provider for the `jarvis://` custom protocol.
     content_provider: Option<Arc<ContentProvider>>,
-    /// Runtime-toggleable flag: when true, allow navigation to any `https://` URL.
-    pub allow_open_url: Arc<AtomicBool>,
 }
 
 impl WebViewManager {
@@ -35,7 +32,6 @@ impl WebViewManager {
         Self {
             events: Arc::new(Mutex::new(Vec::new())),
             content_provider: None,
-            allow_open_url: Arc::new(AtomicBool::new(false)),
         }
     }
 

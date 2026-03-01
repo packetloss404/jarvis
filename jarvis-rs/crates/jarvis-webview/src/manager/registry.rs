@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use tracing::debug;
 use wry::raw_window_handle;
@@ -86,13 +84,4 @@ impl WebViewRegistry {
         self.handles.len()
     }
 
-    /// Get a shared reference to the `allow_open_url` flag.
-    pub fn allow_open_url(&self) -> &Arc<AtomicBool> {
-        &self.manager.allow_open_url
-    }
-
-    /// Update the `allow_open_url` flag at runtime (e.g. on config reload).
-    pub fn set_allow_open_url(&self, value: bool) {
-        self.manager.allow_open_url.store(value, Ordering::Relaxed);
-    }
 }
