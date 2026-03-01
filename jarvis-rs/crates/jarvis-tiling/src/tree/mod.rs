@@ -154,6 +154,48 @@ mod tests {
     }
 
     #[test]
+    fn adjust_ratio_between_nested() {
+        // [1 | (2 / 3)] — H split with nested V split on right
+        let mut tree = SplitNode::split_h(
+            SplitNode::leaf(1),
+            SplitNode::split_v(SplitNode::leaf(2), SplitNode::leaf(3)),
+        );
+        // Adjust the outer H split using panes from each side
+        assert!(tree.adjust_ratio_between(1, 2, 0.1));
+        if let SplitNode::Split { ratio, .. } = &tree {
+            assert!((*ratio - 0.6).abs() < 0.001, "outer H ratio should be 0.6");
+        } else {
+            panic!("expected split");
+        }
+    }
+
+    #[test]
+    fn adjust_ratio_between_inner() {
+        // [1 | (2 / 3)] — adjust the inner V split
+        let mut tree = SplitNode::split_h(
+            SplitNode::leaf(1),
+            SplitNode::split_v(SplitNode::leaf(2), SplitNode::leaf(3)),
+        );
+        assert!(tree.adjust_ratio_between(2, 3, 0.1));
+        // Outer ratio should be unchanged
+        if let SplitNode::Split {
+            ratio: outer_ratio,
+            second,
+            ..
+        } = &tree
+        {
+            assert!((*outer_ratio - 0.5).abs() < 0.001, "outer ratio unchanged");
+            if let SplitNode::Split { ratio, .. } = second.as_ref() {
+                assert!((*ratio - 0.6).abs() < 0.001, "inner V ratio should be 0.6");
+            } else {
+                panic!("expected inner split");
+            }
+        } else {
+            panic!("expected split");
+        }
+    }
+
+    #[test]
     fn next_pane_wraps() {
         let tree = SplitNode::split_h(
             SplitNode::leaf(1),

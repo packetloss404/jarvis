@@ -108,4 +108,29 @@ impl SplitNode {
             }
         }
     }
+
+    /// Adjust the split ratio of the node where `first_id` is in the first
+    /// subtree and `second_id` is in the second subtree. This uniquely
+    /// identifies a split even when pane IDs appear at multiple nesting levels.
+    /// Positive `delta` grows the first subtree.
+    pub fn adjust_ratio_between(&mut self, first_id: u32, second_id: u32, delta: f64) -> bool {
+        match self {
+            SplitNode::Leaf { .. } => false,
+            SplitNode::Split {
+                ratio,
+                first,
+                second,
+                ..
+            } => {
+                if first.contains_pane(first_id) && second.contains_pane(second_id) {
+                    // This is the target split — adjust its ratio
+                    *ratio = (*ratio + delta).clamp(0.1, 0.9);
+                    return true;
+                }
+                // Recurse into whichever child contains both
+                first.adjust_ratio_between(first_id, second_id, delta)
+                    || second.adjust_ratio_between(first_id, second_id, delta)
+            }
+        }
+    }
 }

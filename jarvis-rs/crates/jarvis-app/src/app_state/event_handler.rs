@@ -282,8 +282,18 @@ impl JarvisApp {
                 Direction::Vertical => y,
             };
             let ratio_delta = drag_ratio_delta(drag, current_pos);
-            let pane_id = drag.border.first_pane;
-            self.tiling.tree_mut().adjust_ratio(pane_id, ratio_delta);
+            // On macOS, cursor Y increases upward (AppKit coordinates) while
+            // the layout has Y increasing downward.  Negate the vertical
+            // delta so dragging up shrinks the top pane as expected.
+            let ratio_delta = match drag.border.direction {
+                Direction::Horizontal => ratio_delta,
+                Direction::Vertical => -ratio_delta,
+            };
+            let first_pane = drag.border.first_pane;
+            let second_pane = drag.border.second_pane;
+            self.tiling
+                .tree_mut()
+                .adjust_ratio_between(first_pane, second_pane, ratio_delta);
 
             // Update start position for incremental dragging
             if let Some(ref mut drag) = self.drag_state {

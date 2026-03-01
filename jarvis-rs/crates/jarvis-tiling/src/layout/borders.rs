@@ -24,8 +24,10 @@ pub struct SplitBorder {
     pub start: f64,
     /// End of the divider line.
     pub end: f64,
-    /// The first pane ID in the first subtree (used to adjust ratio).
+    /// A pane ID from the first subtree (used with `second_pane` to identify the split).
     pub first_pane: u32,
+    /// A pane ID from the second subtree (used with `first_pane` to identify the split).
+    pub second_pane: u32,
     /// The bounding rect of the entire split region.
     pub bounds: Rect,
 }
@@ -86,6 +88,7 @@ fn walk_borders(node: &SplitNode, bounds: Rect, gap: f64, out: &mut Vec<SplitBor
             second,
         } => {
             let first_pane = first.collect_pane_ids().into_iter().next().unwrap_or(0);
+            let second_pane = second.collect_pane_ids().into_iter().next().unwrap_or(0);
 
             match direction {
                 Direction::Horizontal => {
@@ -99,6 +102,7 @@ fn walk_borders(node: &SplitNode, bounds: Rect, gap: f64, out: &mut Vec<SplitBor
                         start: bounds.y,
                         end: bounds.y + bounds.height,
                         first_pane,
+                        second_pane,
                         bounds,
                     });
 
@@ -128,6 +132,7 @@ fn walk_borders(node: &SplitNode, bounds: Rect, gap: f64, out: &mut Vec<SplitBor
                         start: bounds.x,
                         end: bounds.x + bounds.width,
                         first_pane,
+                        second_pane,
                         bounds,
                     });
 
@@ -184,6 +189,7 @@ mod tests {
         // At 50% of (800 - 2) = 399, border at 399 + 1 = 400
         assert!((borders[0].position - 400.0).abs() < 1.0);
         assert_eq!(borders[0].first_pane, 1);
+        assert_eq!(borders[0].second_pane, 2);
     }
 
     #[test]
@@ -192,6 +198,8 @@ mod tests {
         let borders = compute_borders(&tree, viewport(), 2.0);
         assert_eq!(borders.len(), 1);
         assert_eq!(borders[0].direction, Direction::Vertical);
+        assert_eq!(borders[0].first_pane, 1);
+        assert_eq!(borders[0].second_pane, 2);
         // At 50% of (600 - 2) = 299, border at 299 + 1 = 300
         assert!((borders[0].position - 300.0).abs() < 1.0);
     }
@@ -219,6 +227,7 @@ mod tests {
             start: 0.0,
             end: 600.0,
             first_pane: 1,
+            second_pane: 2,
             bounds: viewport(),
         };
         // On the border
@@ -241,6 +250,7 @@ mod tests {
             start: 0.0,
             end: 800.0,
             first_pane: 1,
+            second_pane: 2,
             bounds: viewport(),
         };
         assert!(border.hit_test(400.0, 300.0));
@@ -256,6 +266,7 @@ mod tests {
             start: 0.0,
             end: 600.0,
             first_pane: 1,
+            second_pane: 2,
             bounds: viewport(), // width=800
         };
         // 80px = 10% of 800
@@ -270,6 +281,7 @@ mod tests {
             start: 0.0,
             end: 800.0,
             first_pane: 1,
+            second_pane: 2,
             bounds: viewport(), // height=600
         };
         // 60px = 10% of 600
@@ -284,6 +296,7 @@ mod tests {
             start: 0.0,
             end: 0.0,
             first_pane: 1,
+            second_pane: 2,
             bounds: Rect {
                 x: 0.0,
                 y: 0.0,

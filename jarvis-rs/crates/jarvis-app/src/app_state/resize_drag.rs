@@ -77,6 +77,7 @@ mod tests {
             start: 0.0,
             end: 600.0,
             first_pane: 1,
+            second_pane: 2,
             bounds: Rect {
                 x: 0.0,
                 y: 0.0,
