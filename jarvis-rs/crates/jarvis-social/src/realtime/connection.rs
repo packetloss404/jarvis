@@ -11,9 +11,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{error, info, warn};
 
 use super::handler::handle_phoenix_message;
-use super::types::{
-    ChannelConfig, PhoenixMessage, RealtimeCommand, RealtimeConfig, RealtimeEvent,
-};
+use super::types::{ChannelConfig, PhoenixMessage, RealtimeCommand, RealtimeConfig, RealtimeEvent};
 
 // ---------------------------------------------------------------------------
 // Ref Counter
@@ -89,10 +87,8 @@ pub(crate) async fn connection_loop(
                 // Spawn heartbeat task.
                 let heartbeat_write = Arc::clone(&ws_write);
                 let heartbeat_interval = config.heartbeat_interval_secs;
-                let heartbeat_handle = tokio::spawn(heartbeat_task(
-                    heartbeat_write,
-                    heartbeat_interval,
-                ));
+                let heartbeat_handle =
+                    tokio::spawn(heartbeat_task(heartbeat_write, heartbeat_interval));
 
                 // Spawn command forwarder.
                 let cmd_write = Arc::clone(&ws_write);

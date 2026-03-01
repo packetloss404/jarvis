@@ -35,7 +35,10 @@ impl JarvisApp {
             }
         };
 
-        let params = obj.get("params").cloned().unwrap_or(serde_json::Value::Null);
+        let params = obj
+            .get("params")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
 
         match op {
             "init" => self.crypto_op_init(pane_id, req_id),
@@ -74,12 +77,7 @@ impl JarvisApp {
         }
     }
 
-    fn crypto_op_derive_room_key(
-        &mut self,
-        pane_id: u32,
-        req_id: u64,
-        params: &serde_json::Value,
-    ) {
+    fn crypto_op_derive_room_key(&mut self, pane_id: u32, req_id: u64, params: &serde_json::Value) {
         let room = match params.get("room").and_then(|v| v.as_str()) {
             Some(r) => r.to_string(),
             None => {
@@ -257,11 +255,7 @@ impl JarvisApp {
         match &self.crypto {
             Some(svc) => match svc.verify(&data, &signature, &pubkey) {
                 Ok(valid) => {
-                    self.crypto_respond_ok(
-                        pane_id,
-                        req_id,
-                        serde_json::json!({ "valid": valid }),
-                    );
+                    self.crypto_respond_ok(pane_id, req_id, serde_json::json!({ "valid": valid }));
                 }
                 Err(e) => {
                     self.crypto_respond_error(pane_id, req_id, &e.to_string());

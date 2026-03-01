@@ -229,7 +229,10 @@ impl JarvisApp {
         let logical_height = size.height as f64 / scale_factor;
         let bounds = wry::Rect {
             position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(0.0, 0.0)),
-            size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(logical_width, logical_height)),
+            size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(
+                logical_width,
+                logical_height,
+            )),
         };
 
         // Use pane_id 0 — reserved for the boot webview (no tiling pane owns it)
@@ -284,12 +287,7 @@ impl JarvisApp {
         let physical_size = window.inner_size();
         let logical_width = physical_size.width as f64 / scale_factor;
         let logical_height = physical_size.height as f64 / scale_factor;
-        let viewport = tiling_viewport(
-            &self.config,
-            &self.chrome,
-            logical_width,
-            logical_height,
-        );
+        let viewport = tiling_viewport(&self.config, &self.chrome, logical_width, logical_height);
         let layout = self.tiling.compute_layout(viewport);
 
         for (pane_id, rect) in &layout {
@@ -342,12 +340,17 @@ impl JarvisApp {
                         }
                     }
                     // Bros games: inject ad-blocker once the page has loaded.
-                    let is_bros_game = ["kartbros", "basketbros", "footballbros", "soccerbros", "wrestlebros", "baseballbros"]
-                        .iter()
-                        .any(|domain| url.contains(domain));
-                    if state == jarvis_webview::PageLoadState::Finished
-                        && is_bros_game
-                    {
+                    let is_bros_game = [
+                        "kartbros",
+                        "basketbros",
+                        "footballbros",
+                        "soccerbros",
+                        "wrestlebros",
+                        "baseballbros",
+                    ]
+                    .iter()
+                    .any(|domain| url.contains(domain));
+                    if state == jarvis_webview::PageLoadState::Finished && is_bros_game {
                         if let Some(ref mut registry) = self.webviews {
                             if let Some(handle) = registry.get_mut(pane_id) {
                                 let _ = handle.evaluate_script(concat!(

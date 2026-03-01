@@ -33,10 +33,7 @@ impl JarvisApp {
                 }
             })
             .collect();
-        let active_idx = ordered
-            .iter()
-            .position(|&id| id == focused_id)
-            .unwrap_or(0);
+        let active_idx = ordered.iter().position(|&id| id == focused_id).unwrap_or(0);
         self.chrome.set_tabs(tabs, active_idx);
     }
 

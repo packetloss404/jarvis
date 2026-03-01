@@ -10,6 +10,4 @@ mod manager;
 mod types;
 
 pub use manager::PairManager;
-pub use types::{
-    PairConfig, PairEvent, PairParticipant, PairRole, PairSession, PairState,
-};
+pub use types::{PairConfig, PairEvent, PairParticipant, PairRole, PairSession, PairState};

@@ -51,12 +51,11 @@ impl JarvisApp {
                     }
                     PresenceEvent::Poked { display_name, .. } => {
                         tracing::info!("poke received");
-                        self.notifications.push(
-                            jarvis_common::notifications::Notification::info(
+                        self.notifications
+                            .push(jarvis_common::notifications::Notification::info(
                                 "Poke!",
                                 format!("{display_name} poked you"),
-                            ),
-                        );
+                            ));
                         self.send_presence_notification_to_webviews(&format!(
                             "{display_name} poked you!"
                         ));
@@ -116,8 +115,7 @@ impl JarvisApp {
         match rt {
             Ok(rt) => {
                 rt.spawn(async move {
-                    let mut client =
-                        jarvis_social::PresenceClient::new(identity, presence_config);
+                    let mut client = jarvis_social::PresenceClient::new(identity, presence_config);
                     let mut event_rx = client.start();
 
                     loop {
@@ -154,11 +152,7 @@ impl JarvisApp {
     }
 
     /// Send an activity update to the presence server (non-blocking).
-    pub(super) fn send_presence_activity(
-        &self,
-        status: UserStatus,
-        activity: Option<String>,
-    ) {
+    pub(super) fn send_presence_activity(&self, status: UserStatus, activity: Option<String>) {
         if let Some(ref tx) = self.presence_cmd_tx {
             let cmd = PresenceCommand::UpdateActivity { status, activity };
             if let Err(e) = tx.try_send(cmd) {

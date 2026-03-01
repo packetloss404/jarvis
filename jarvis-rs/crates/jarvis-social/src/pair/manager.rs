@@ -6,9 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::info;
 
-use super::types::{
-    PairConfig, PairEvent, PairParticipant, PairRole, PairSession, PairState,
-};
+use super::types::{PairConfig, PairEvent, PairParticipant, PairRole, PairSession, PairState};
 
 // ---------------------------------------------------------------------------
 // Pair Manager

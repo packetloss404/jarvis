@@ -157,7 +157,9 @@ mod tests {
         // https:// is handled directly in attach_navigation_handler.
         assert!(!is_navigation_allowed("https://evil.com"));
         assert!(!is_navigation_allowed("https://google.com"));
-        assert!(!is_navigation_allowed("https://ojmqzagktzkualzgpcbq.supabase.co/rest/v1/channels"));
+        assert!(!is_navigation_allowed(
+            "https://ojmqzagktzkualzgpcbq.supabase.co/rest/v1/channels"
+        ));
     }
 
     // -- Blocked URLs --

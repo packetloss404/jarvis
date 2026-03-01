@@ -294,8 +294,16 @@ fn dispatch_client_message(msg: ClientMessage, cmd_tx: &std::sync::mpsc::Sender<
         ClientMessage::PtyInput { pane_id, data } => {
             let _ = cmd_tx.send(ClientCommand::PtyInput { pane_id, data });
         }
-        ClientMessage::PtyResize { pane_id, cols, rows } => {
-            let _ = cmd_tx.send(ClientCommand::PtyResize { pane_id, cols, rows });
+        ClientMessage::PtyResize {
+            pane_id,
+            cols,
+            rows,
+        } => {
+            let _ = cmd_tx.send(ClientCommand::PtyResize {
+                pane_id,
+                cols,
+                rows,
+            });
         }
         ClientMessage::Ping => {}
     }

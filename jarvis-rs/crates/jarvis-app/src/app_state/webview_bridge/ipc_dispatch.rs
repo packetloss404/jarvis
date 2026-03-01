@@ -185,7 +185,11 @@ impl JarvisApp {
                                 if let Err(e) = cb.set_text(text) {
                                     tracing::warn!(pane_id, error = %e, "clipboard_copy: failed to write");
                                 } else {
-                                    tracing::info!(pane_id, len = text.len(), "clipboard_copy: text copied");
+                                    tracing::info!(
+                                        pane_id,
+                                        len = text.len(),
+                                        "clipboard_copy: text copied"
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -220,7 +224,9 @@ impl JarvisApp {
                                     self.send_palette_hide();
                                     self.command_palette_open = false;
                                     self.command_palette = None;
-                                    self.input.set_mode(jarvis_platform::input_processor::InputMode::Terminal);
+                                    self.input.set_mode(
+                                        jarvis_platform::input_processor::InputMode::Terminal,
+                                    );
                                     self.notify_overlay_state();
                                     self.needs_redraw = true;
                                     self.dispatch(action);
@@ -289,8 +295,7 @@ impl JarvisApp {
                 if let Ok(mut cb) = jarvis_platform::Clipboard::new() {
                     if let Ok(text) = cb.get_text() {
                         if let Some(ref mut palette) = self.command_palette {
-                            let url_mode = palette.mode()
-                                == jarvis_renderer::PaletteMode::UrlInput;
+                            let url_mode = palette.mode() == jarvis_renderer::PaletteMode::UrlInput;
                             for ch in text.chars() {
                                 if ch.is_ascii_graphic() || ch == ' ' {
                                     let ch = if url_mode {
@@ -316,11 +321,9 @@ impl JarvisApp {
         }
 
         // When assistant overlay is open, route keys there
-        if self.assistant_open {
-            if self.handle_assistant_key(&key, true) {
-                self.needs_redraw = true;
-                return;
-            }
+        if self.assistant_open && self.handle_assistant_key(&key, true) {
+            self.needs_redraw = true;
+            return;
         }
 
         // When a game/URL is active, Escape navigates back to the original page

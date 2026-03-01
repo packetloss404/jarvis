@@ -97,8 +97,10 @@ impl ApplicationHandler for JarvisApp {
 
             WindowEvent::MouseInput { state, button, .. } => {
                 tracing::info!(
-                    ?state, ?button,
-                    x = self.cursor_pos.0, y = self.cursor_pos.1,
+                    ?state,
+                    ?button,
+                    x = self.cursor_pos.0,
+                    y = self.cursor_pos.1,
                     "[winit] MouseInput"
                 );
                 self.handle_mouse_input(state, button);
@@ -238,11 +240,7 @@ impl JarvisApp {
     fn render_frame(&mut self) {
         let vp = self.viewport();
         if let Some(ref mut rs) = self.render_state {
-            rs.prepare_chrome_quads(
-                &self.chrome,
-                vp.width as f32,
-                vp.height as f32,
-            );
+            rs.prepare_chrome_quads(&self.chrome, vp.width as f32, vp.height as f32);
             if let Err(e) = rs.render_background() {
                 tracing::error!("Render error: {e}");
             }

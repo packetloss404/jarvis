@@ -486,7 +486,11 @@ fn set_option_str(target: &mut Option<String>, value: &serde_json::Value) {
     if value.is_null() {
         *target = None;
     } else if let Some(s) = value.as_str() {
-        *target = if s.is_empty() { None } else { Some(s.to_string()) };
+        *target = if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        };
     }
 }
 
@@ -599,7 +603,9 @@ fn validate_working_directory(config: &jarvis_config::schema::JarvisConfig) -> O
 
     let path = std::path::Path::new(&expanded);
     if !path.is_absolute() {
-        Some(format!("Path must be absolute (e.g. /Users/you/projects), got: {dir}"))
+        Some(format!(
+            "Path must be absolute (e.g. /Users/you/projects), got: {dir}"
+        ))
     } else if !path.exists() {
         Some(format!("Directory does not exist: {expanded}"))
     } else if !path.is_dir() {

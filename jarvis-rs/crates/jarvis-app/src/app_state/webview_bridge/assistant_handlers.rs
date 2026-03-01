@@ -88,11 +88,7 @@ impl JarvisApp {
     /// Handle `launch_game` — launch a fullscreen game in the requesting panel.
     ///
     /// The payload must contain `{ "game": "tetris" | "asteroids" | ... }`.
-    pub(in crate::app_state) fn handle_launch_game(
-        &mut self,
-        pane_id: u32,
-        payload: &IpcPayload,
-    ) {
+    pub(in crate::app_state) fn handle_launch_game(&mut self, pane_id: u32, payload: &IpcPayload) {
         let game_name = match payload {
             IpcPayload::Json(obj) => obj.get("game").and_then(|v| v.as_str()),
             _ => None,

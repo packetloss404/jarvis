@@ -24,7 +24,10 @@ pub enum ServerMessage {
     PtyExit { pane_id: u32, code: u32 },
 
     #[serde(rename = "pane_list")]
-    PaneList { panes: Vec<PaneInfo>, focused_id: u32 },
+    PaneList {
+        panes: Vec<PaneInfo>,
+        focused_id: u32,
+    },
 }
 
 /// Messages received from mobile.

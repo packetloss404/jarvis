@@ -195,22 +195,14 @@ impl CryptoService {
         }
         let ecdsa_pkcs8 = B64.decode(&id.ecdsa_pkcs8_b64).map_err(|e| pe(&e))?;
         let ecdh_pkcs8 = B64.decode(&id.ecdh_pkcs8_b64).map_err(|e| pe(&e))?;
-        let ecdsa_signing_key =
-            SigningKey::from_pkcs8_der(&ecdsa_pkcs8).map_err(|e| pe(&e))?;
-        let ecdh_secret_key =
-            SecretKey::from_pkcs8_der(&ecdh_pkcs8).map_err(|e| pe(&e))?;
+        let ecdsa_signing_key = SigningKey::from_pkcs8_der(&ecdsa_pkcs8).map_err(|e| pe(&e))?;
+        let ecdh_secret_key = SecretKey::from_pkcs8_der(&ecdh_pkcs8).map_err(|e| pe(&e))?;
         Self::from_keys(ecdsa_signing_key, ecdh_secret_key)
     }
 
     fn save(&self, path: &Path) -> Result<(), PlatformError> {
-        let ecdsa_pkcs8 = self
-            .ecdsa_signing_key
-            .to_pkcs8_der()
-            .map_err(|e| pe(&e))?;
-        let ecdh_pkcs8 = self
-            .ecdh_secret_key
-            .to_pkcs8_der()
-            .map_err(|e| pe(&e))?;
+        let ecdsa_pkcs8 = self.ecdsa_signing_key.to_pkcs8_der().map_err(|e| pe(&e))?;
+        let ecdh_pkcs8 = self.ecdh_secret_key.to_pkcs8_der().map_err(|e| pe(&e))?;
         let id = IdentityFile {
             version: 1,
             ecdsa_pkcs8_b64: B64.encode(ecdsa_pkcs8.as_bytes()),
@@ -268,9 +260,7 @@ impl CryptoService {
 fn export_ecdsa_pubkey_spki_b64(key: &SigningKey) -> Result<String, PlatformError> {
     use p256::pkcs8::EncodePublicKey;
     let verifying_key = key.verifying_key();
-    let spki_der = verifying_key
-        .to_public_key_der()
-        .map_err(|e| pe(&e))?;
+    let spki_der = verifying_key.to_public_key_der().map_err(|e| pe(&e))?;
     Ok(B64.encode(spki_der.as_bytes()))
 }
 
@@ -335,7 +325,10 @@ mod tests {
         let handle_b = svc_b.derive_shared_key(&svc_a.dh_pubkey_base64).unwrap();
 
         // Both sides should derive the same key
-        assert_eq!(svc_a.get_key(handle_a).unwrap(), svc_b.get_key(handle_b).unwrap());
+        assert_eq!(
+            svc_a.get_key(handle_a).unwrap(),
+            svc_b.get_key(handle_b).unwrap()
+        );
 
         // Encrypt on A, decrypt on B
         let (iv, ct) = svc_a.encrypt("secret dm", handle_a).unwrap();
@@ -356,7 +349,9 @@ mod tests {
 
         // Sign with original, verify with reloaded
         let sig = svc1.sign("persist test").unwrap();
-        let valid = svc2.verify("persist test", &sig, &svc2.pubkey_base64).unwrap();
+        let valid = svc2
+            .verify("persist test", &sig, &svc2.pubkey_base64)
+            .unwrap();
         assert!(valid);
 
         let _ = std::fs::remove_file(&tmp);

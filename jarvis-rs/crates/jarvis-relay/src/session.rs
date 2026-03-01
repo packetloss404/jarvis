@@ -81,11 +81,7 @@ impl SessionStore {
     }
 
     /// Get the peer's sender for forwarding.
-    pub async fn get_peer_tx(
-        &self,
-        session_id: &str,
-        role: Role,
-    ) -> Option<mpsc::Sender<String>> {
+    pub async fn get_peer_tx(&self, session_id: &str, role: Role) -> Option<mpsc::Sender<String>> {
         let map = self.sessions.read().await;
         let session = map.get(session_id)?;
         match role {
@@ -116,7 +112,8 @@ impl SessionStore {
         let mut map = self.sessions.write().await;
         let now = Instant::now();
         map.retain(|id, session| {
-            let stale = session.mobile_tx.is_none() && now.duration_since(session.created_at) > max_age;
+            let stale =
+                session.mobile_tx.is_none() && now.duration_since(session.created_at) > max_age;
             if stale {
                 tracing::info!(session_id = %id, "Reaping stale session");
             }

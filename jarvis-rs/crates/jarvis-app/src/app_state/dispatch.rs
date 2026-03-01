@@ -21,10 +21,9 @@ impl JarvisApp {
                     return;
                 }
                 let viewport = self.viewport();
-                let content = self.chrome.content_rect(
-                    viewport.width as f32,
-                    viewport.height as f32,
-                );
+                let content = self
+                    .chrome
+                    .content_rect(viewport.width as f32, viewport.height as f32);
                 let dir = self.tiling.auto_split_direction(content);
                 self.tiling.split(dir);
                 let new_id = self.tiling.focused_id();
@@ -160,11 +159,10 @@ impl JarvisApp {
             }
             Action::OpenChat => {
                 let kind = jarvis_common::types::PaneKind::Chat;
-                if let Some(new_id) = self.tiling.split_with(
-                    jarvis_tiling::tree::Direction::Horizontal,
-                    kind,
-                    "Chat",
-                ) {
+                if let Some(new_id) =
+                    self.tiling
+                        .split_with(jarvis_tiling::tree::Direction::Horizontal, kind, "Chat")
+                {
                     self.create_webview_for_pane_with_url(
                         new_id,
                         "jarvis://localhost/chat/index.html",
@@ -202,20 +200,23 @@ impl JarvisApp {
                                     .replace('\'', "\\'")
                                     .replace('\n', "\\n")
                                     .replace('\r', "\\r");
-                                let js = format!(concat!(
-                                    "(function(){{",
-                                      "var t='{}';",
-                                      "var a=document.activeElement;",
-                                      "if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')){{",
+                                let js = format!(
+                                    concat!(
+                                        "(function(){{",
+                                        "var t='{}';",
+                                        "var a=document.activeElement;",
+                                        "if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')){{",
                                         "var s=a.selectionStart||0,e=a.selectionEnd||0;",
                                         "a.value=a.value.slice(0,s)+t+a.value.slice(e);",
                                         "a.selectionStart=a.selectionEnd=s+t.length;",
                                         "a.dispatchEvent(new Event('input',{{bubbles:true}}));",
-                                      "}}else if(window.jarvis&&window.jarvis.ipc){{",
+                                        "}}else if(window.jarvis&&window.jarvis.ipc){{",
                                         "window.jarvis.ipc.send('pty_input',{{data:t}});",
-                                      "}}",
-                                    "}})()"
-                                ), escaped);
+                                        "}}",
+                                        "}})()"
+                                    ),
+                                    escaped
+                                );
                                 let _ = handle.evaluate_script(&js);
                             }
                         }

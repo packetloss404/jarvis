@@ -20,7 +20,10 @@ use crate::rate_limit::{RateLimitConfig, RateLimiter};
 use crate::session::SessionStore;
 
 #[derive(Parser)]
-#[command(name = "jarvis-relay", about = "WebSocket relay for jarvis mobile bridge")]
+#[command(
+    name = "jarvis-relay",
+    about = "WebSocket relay for jarvis mobile bridge"
+)]
 struct Args {
     /// Port to listen on.
     #[arg(short, long, default_value_t = 8080)]

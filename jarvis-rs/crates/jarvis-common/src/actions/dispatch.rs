@@ -141,9 +141,7 @@ impl Action {
                 }
             }
 
-            Action::PairMobile
-            | Action::RevokeMobilePairing
-            | Action::ReloadConfig => "System",
+            Action::PairMobile | Action::RevokeMobilePairing | Action::ReloadConfig => "System",
 
             Action::PushToTalk | Action::ReleasePushToTalk | Action::None => "System",
         }

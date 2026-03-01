@@ -43,7 +43,11 @@ impl RelayCipher {
     }
 
     /// Decrypt a RelayEnvelope::Encrypted into a ClientMessage.
-    pub fn decrypt_client_message(&self, iv_b64: &str, ct_b64: &str) -> Result<ClientMessage, String> {
+    pub fn decrypt_client_message(
+        &self,
+        iv_b64: &str,
+        ct_b64: &str,
+    ) -> Result<ClientMessage, String> {
         let iv = B64.decode(iv_b64).map_err(|e| e.to_string())?;
         let ct = B64.decode(ct_b64).map_err(|e| e.to_string())?;
         if iv.len() != 12 {

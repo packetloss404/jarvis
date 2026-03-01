@@ -17,7 +17,11 @@ impl JarvisApp {
                             tracing::warn!(pane_id, error = %e, "Mobile input write failed");
                         }
                     }
-                    ClientCommand::PtyResize { pane_id, cols, rows } => {
+                    ClientCommand::PtyResize {
+                        pane_id,
+                        cols,
+                        rows,
+                    } => {
                         if let Err(e) = self.ptys.resize(pane_id, cols, rows) {
                             tracing::warn!(pane_id, error = %e, "Mobile resize failed");
                         }

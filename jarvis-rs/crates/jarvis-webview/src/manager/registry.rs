@@ -83,5 +83,4 @@ impl WebViewRegistry {
     pub fn count(&self) -> usize {
         self.handles.len()
     }
-
 }

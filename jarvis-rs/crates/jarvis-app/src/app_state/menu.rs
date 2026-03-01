@@ -2,7 +2,7 @@
 
 use jarvis_common::actions::Action;
 use muda::accelerator::{Accelerator, Code, Modifiers, CMD_OR_CTRL};
-use muda::{Menu, MenuEvent, MenuItem, MenuId, PredefinedMenuItem, Submenu};
+use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 
 use super::core::JarvisApp;
 

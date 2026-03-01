@@ -39,11 +39,7 @@ const MAX_FILE_SIZE: u64 = 5 * 1024 * 1024;
 impl JarvisApp {
     /// Handle a `read_file` IPC message — read a local image file and
     /// return its contents as a base64 data URL.
-    pub(in crate::app_state) fn handle_read_file(
-        &mut self,
-        pane_id: u32,
-        payload: &IpcPayload,
-    ) {
+    pub(in crate::app_state) fn handle_read_file(&mut self, pane_id: u32, payload: &IpcPayload) {
         let obj = match payload {
             IpcPayload::Json(v) => v,
             _ => {
@@ -63,9 +59,9 @@ impl JarvisApp {
         };
 
         // Expand ~ to home directory
-        let expanded = if path_str.starts_with("~/") {
+        let expanded = if let Some(stripped) = path_str.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
-                home.join(&path_str[2..])
+                home.join(stripped)
             } else {
                 std::path::PathBuf::from(path_str)
             }
@@ -77,7 +73,12 @@ impl JarvisApp {
         let metadata = match std::fs::metadata(&expanded) {
             Ok(m) => m,
             Err(e) => {
-                self.read_file_respond(pane_id, req_id, None, Some(&format!("file not found: {e}")));
+                self.read_file_respond(
+                    pane_id,
+                    req_id,
+                    None,
+                    Some(&format!("file not found: {e}")),
+                );
                 return;
             }
         };
@@ -105,7 +106,12 @@ impl JarvisApp {
         let mime = match detect_mime(&bytes) {
             Some(m) => m,
             None => {
-                self.read_file_respond(pane_id, req_id, None, Some("not a recognized image format"));
+                self.read_file_respond(
+                    pane_id,
+                    req_id,
+                    None,
+                    Some("not a recognized image format"),
+                );
                 return;
             }
         };
@@ -171,14 +177,26 @@ impl JarvisApp {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(pane_id, error = %e, "clipboard_paste: failed to open clipboard");
-                self.clipboard_paste_respond(pane_id, req_id, None, None, Some("clipboard unavailable"));
+                self.clipboard_paste_respond(
+                    pane_id,
+                    req_id,
+                    None,
+                    None,
+                    Some("clipboard unavailable"),
+                );
                 return;
             }
         };
 
         // Try image first
         if let Ok((width, height, rgba)) = cb.get_image() {
-            tracing::info!(pane_id, width, height, rgba_len = rgba.len(), "clipboard_paste: image found");
+            tracing::info!(
+                pane_id,
+                width,
+                height,
+                rgba_len = rgba.len(),
+                "clipboard_paste: image found"
+            );
             // Encode RGBA pixels as PNG
             match encode_rgba_as_png(width as u32, height as u32, &rgba) {
                 Ok(png_bytes) => {
@@ -189,7 +207,13 @@ impl JarvisApp {
                 }
                 Err(e) => {
                     tracing::warn!(pane_id, error = %e, "clipboard_paste: PNG encode failed");
-                    self.clipboard_paste_respond(pane_id, req_id, None, None, Some("failed to encode image"));
+                    self.clipboard_paste_respond(
+                        pane_id,
+                        req_id,
+                        None,
+                        None,
+                        Some("failed to encode image"),
+                    );
                 }
             }
             return;

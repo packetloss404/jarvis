@@ -29,10 +29,7 @@ pub struct RenderState {
 
 impl RenderState {
     /// Create a fully initialized render state from a window and config.
-    pub async fn new(
-        window: Arc<Window>,
-        config: &JarvisConfig,
-    ) -> Result<Self, RendererError> {
+    pub async fn new(window: Arc<Window>, config: &JarvisConfig) -> Result<Self, RendererError> {
         let gpu = GpuContext::new(window).await?;
         let quad = QuadRenderer::new(&gpu.device, gpu.format());
         let bg_pipeline = BackgroundPipeline::new(&gpu.device, gpu.format());
@@ -153,11 +150,12 @@ impl RenderState {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self.gpu.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor {
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("jarvis frame encoder"),
-            },
-        );
+            });
 
         // Pass 1: Clear + hex grid background
         self.bg_pipeline
@@ -165,24 +163,20 @@ impl RenderState {
 
         // Pass 2: UI chrome quads (loads existing content)
         {
-            let mut pass = encoder.begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: Some("jarvis quad pass"),
-                    color_attachments: &[Some(
-                        wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        },
-                    )],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                },
-            );
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("jarvis quad pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
             self.quad.render(&mut pass);
         }
 
