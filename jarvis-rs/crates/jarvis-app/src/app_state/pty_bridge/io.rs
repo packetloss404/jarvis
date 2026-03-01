@@ -202,9 +202,10 @@ mod tests {
         // Windows cmd.exe can be slow to start on CI machines.
         std::thread::sleep(std::time::Duration::from_millis(500));
 
-        // Write a command that produces known output
+        // Write a command that produces known output.
+        // Use \r\n — Windows cmd.exe requires carriage return to execute.
         handle
-            .write_input(b"echo PTY_TEST_MARKER_12345\n")
+            .write_input(b"echo PTY_TEST_MARKER_12345\r\n")
             .expect("write should succeed");
 
         // Poll for output with retries — CI can be slow, especially on Windows
