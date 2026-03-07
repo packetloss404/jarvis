@@ -58,8 +58,13 @@ function Normalize-Id([string]$value) {
     return $normalized
 }
 
+function Normalize-PathKey([string]$value) {
+    return $value.Replace('/', '\').TrimEnd('\')
+}
+
 function Ensure-Directory([string]$dirPath) {
-    if ($dirPath -eq $installRoot) {
+    $dirPath = Normalize-PathKey $dirPath
+    if ($dirPath -eq (Normalize-PathKey $installRoot)) {
         return 'INSTALLFOLDER'
     }
     if ($dirIds.ContainsKey($dirPath)) {
@@ -103,7 +108,7 @@ foreach ($relativeDir in $relativeDirs) {
 
     for ($i = $common; $i -lt $parts.Length; $i++) {
         $currentRelative = ($parts[0..$i] -join '\\')
-        $currentPath = Join-Path $installRoot $currentRelative
+        $currentPath = Normalize-PathKey (Join-Path $installRoot $currentRelative)
         $dirId = $dirIds[$currentPath]
         $indent = '      ' + ('  ' * $i)
         $directoryLines.Add(($indent + '<Directory Id="' + $dirId + '" Name="' + $parts[$i] + '">')) | Out-Null
