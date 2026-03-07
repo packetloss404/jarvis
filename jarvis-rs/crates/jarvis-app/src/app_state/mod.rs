@@ -21,6 +21,7 @@ mod title;
 mod types;
 mod ui_state;
 mod webview_bridge;
+mod workspace_capture;
 mod ws_server;
 
 pub use core::JarvisApp;
