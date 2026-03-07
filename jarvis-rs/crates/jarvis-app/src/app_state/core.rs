@@ -27,8 +27,6 @@ use super::types::{AssistantEvent, PresenceCommand};
 #[derive(Debug, Clone)]
 pub(super) struct ChatStreamHostState {
     pub controller_pane_id: u32,
-    pub source_pane_id: u32,
-    pub source_title: String,
 }
 
 /// Top-level application state.
@@ -85,6 +83,7 @@ pub struct JarvisApp {
     pub(super) relay_key_tx: Option<tokio::sync::watch::Sender<Option<[u8; 32]>>>,
     pub(super) pairing_pane_id: Option<u32>,
     pub(super) chat_stream_host: Option<ChatStreamHostState>,
+    pub(super) last_chat_stream_frame_at: Instant,
     pub(super) last_terminal_focus: Option<u32>,
 
     // Crypto service (identity + encryption)
@@ -160,6 +159,7 @@ impl JarvisApp {
             relay_key_tx: None,
             pairing_pane_id: None,
             chat_stream_host: None,
+            last_chat_stream_frame_at: Instant::now(),
             last_terminal_focus: Some(1),
             crypto: None,
             boot: None,

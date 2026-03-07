@@ -39,6 +39,10 @@ qrcode = { workspace = true }
 urlencoding = "2"
 png = "0.17"
 muda = "0.15"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
 
 [build-dependencies]
 winres = "0.1"

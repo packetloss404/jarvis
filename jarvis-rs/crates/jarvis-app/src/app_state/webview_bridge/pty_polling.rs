@@ -23,28 +23,6 @@ impl JarvisApp {
         for (pane_id, data) in &outputs {
             let text = String::from_utf8_lossy(data);
 
-            if let Some(stream) = self.chat_stream_host.as_ref() {
-                if stream.source_pane_id == *pane_id {
-                    if let Some(ref registry) = self.webviews {
-                        if let Some(handle) = registry.get(stream.controller_pane_id) {
-                            let payload = serde_json::json!({
-                                "paneId": pane_id,
-                                "title": stream.source_title,
-                                "data": text,
-                            });
-                            if let Err(e) = handle.send_ipc("chat_stream_host_output", &payload) {
-                                tracing::warn!(
-                                    pane_id,
-                                    controller_pane_id = stream.controller_pane_id,
-                                    error = %e,
-                                    "Failed to send chat stream output to webview"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-
             // Send to local WebView
             if let Some(ref registry) = self.webviews {
                 if let Some(handle) = registry.get(*pane_id) {
@@ -72,8 +50,6 @@ impl JarvisApp {
         let finished = self.ptys.check_finished();
         for pane_id in finished {
             tracing::info!(pane_id, "PTY process exited");
-
-            self.stop_chat_stream_for_pane(pane_id, "terminal exited");
 
             let exit_code = self.ptys.kill_and_remove(pane_id);
             let code = exit_code.unwrap_or(0);
