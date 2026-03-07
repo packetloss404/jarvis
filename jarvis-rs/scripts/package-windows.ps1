@@ -121,30 +121,30 @@ Get-ChildItem $installRoot -Recurse -File | ForEach-Object {
     $fileId = "File$componentIndex"
     $sourcePath = $_.FullName.Replace('&', '&amp;')
     $componentNodes.Add(@"
-    <DirectoryRef Id=\"$dirId\">
-      <Component Id=\"$componentId\" Guid=\"*\">
-        <File Id=\"$fileId\" Source=\"$sourcePath\" KeyPath=\"yes\" />
+    <DirectoryRef Id="$dirId">
+      <Component Id="$componentId" Guid="*">
+        <File Id="$fileId" Source="$sourcePath" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 "@) | Out-Null
-    $componentRefs.Add("      <ComponentRef Id=\"$componentId\" />") | Out-Null
+    $componentRefs.Add(('      <ComponentRef Id="' + $componentId + '" />')) | Out-Null
 }
 
 $menuComponent = @"
-    <DirectoryRef Id=\"ProgramMenuDir\">
-      <Component Id=\"ApplicationShortcut\" Guid=\"*\">
-        <Shortcut Id=\"JarvisStartMenuShortcut\"
-                  Name=\"Jarvis\"
-                  Description=\"Launch Jarvis\"
-                  Target=\"[INSTALLFOLDER]Jarvis.exe\"
-                  WorkingDirectory=\"INSTALLFOLDER\" />
-        <RemoveFolder Id=\"ProgramMenuDirRemove\" On=\"uninstall\" />
-        <RegistryValue Root=\"HKCU\"
-                       Key=\"Software\\Jarvis\"
-                       Name=\"StartMenuShortcut\"
-                       Type=\"integer\"
-                       Value=\"1\"
-                       KeyPath=\"yes\" />
+    <DirectoryRef Id="ProgramMenuDir">
+      <Component Id="ApplicationShortcut" Guid="*">
+        <Shortcut Id="JarvisStartMenuShortcut"
+                  Name="Jarvis"
+                  Description="Launch Jarvis"
+                  Target="[INSTALLFOLDER]Jarvis.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="ProgramMenuDirRemove" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Jarvis"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
       </Component>
     </DirectoryRef>
 "@
@@ -152,37 +152,37 @@ $menuComponent = @"
 $componentRefs.Add('      <ComponentRef Id="ApplicationShortcut" />') | Out-Null
 
 $directoriesXml = @"
-      <Directory Id=\"INSTALLFOLDER\" Name=\"Jarvis\">
+      <Directory Id="INSTALLFOLDER" Name="Jarvis">
 $(($directoryLines -join "`n"))
       </Directory>
 "@
 
 $wxs = @"
-<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<Wix xmlns=\"http://wixtoolset.org/schemas/v4/wxs\">
-  <Package Name=\"Jarvis\"
-           Manufacturer=\"Dylan Burton\"
-           Version=\"$Version\"
-           UpgradeCode=\"$upgradeCode\"
-           Language=\"1033\"
-           Scope=\"perMachine\">
-    <SummaryInformation Description=\"Jarvis desktop app\" Manufacturer=\"Dylan Burton\" />
-    <MediaTemplate EmbedCab=\"yes\" />
-    <MajorUpgrade DowngradeErrorMessage=\"A newer version of Jarvis is already installed.\" />
-    <Icon Id=\"JarvisIcon\" SourceFile=\"$($sourceIcon.Replace('&', '&amp;'))\" />
-    <Property Id=\"ARPPRODUCTICON\" Value=\"JarvisIcon\" />
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Jarvis"
+           Manufacturer="Dylan Burton"
+           Version="$Version"
+           UpgradeCode="$upgradeCode"
+           Language="1033"
+           Scope="perMachine">
+    <SummaryInformation Description="Jarvis desktop app" Manufacturer="Dylan Burton" />
+    <MediaTemplate EmbedCab="yes" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Jarvis is already installed." />
+    <Icon Id="JarvisIcon" SourceFile="$($sourceIcon.Replace('&', '&amp;'))" />
+    <Property Id="ARPPRODUCTICON" Value="JarvisIcon" />
 
-    <StandardDirectory Id=\"ProgramFiles64Folder\">
+    <StandardDirectory Id="ProgramFiles64Folder">
 $directoriesXml
     </StandardDirectory>
 
-    <StandardDirectory Id=\"ProgramMenuFolder\">
-      <Directory Id=\"ProgramMenuDir\" Name=\"Jarvis\" />
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="Jarvis" />
     </StandardDirectory>
 
 $(($componentNodes -join "`n"))
 $menuComponent
-    <Feature Id=\"MainFeature\" Title=\"Jarvis\" Level=\"1\">
+    <Feature Id="MainFeature" Title="Jarvis" Level="1">
 $(($componentRefs -join "`n"))
     </Feature>
   </Package>
