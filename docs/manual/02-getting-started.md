@@ -137,22 +137,18 @@ After a successful build:
 
 ### Running
 
-The binary must be run from a directory where it can locate `assets/panels/`. By default, it looks for `assets/panels/` relative to the current working directory:
+Panel assets (HTML/JS/CSS for terminal, chat, games, etc.) are embedded in the binary at compile time via `include_dir`, so the executable is fully self-contained and can be run from any directory:
 
 ```bash
-# From the jarvis-rs directory (where assets/ lives)
+# From anywhere
+./jarvis-rs/target/release/jarvis
+
+# Or via cargo
 cd jarvis/jarvis-rs
-cargo run
-
-# Or run the release binary directly
-./target/release/jarvis
+cargo run --release
 ```
 
-If you run the binary from a different directory, the webview panels (terminal, assistant, chat, games, etc.) will not load. You will see a warning in the log:
-
-```
-WARN: Panels directory not found -- webviews will have no bundled content
-```
+If an `assets/panels/` directory exists on disk (relative to the working directory or next to the binary), those files take priority over the embedded assets. This is useful during development to iterate on panel HTML without rebuilding.
 
 ### Building the Relay Server
 

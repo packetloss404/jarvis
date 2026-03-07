@@ -342,7 +342,7 @@ Entry point (`main.rs`):
 - `shutdown.rs` -- Ordered shutdown: PTYs -> WebViews -> presence -> relay -> tokio runtime -> GPU
 - `polling.rs` -- Adaptive polling at ~120Hz for presence, assistant, webview events, PTY output, mobile commands, relay events, menu events
 - `pty_bridge/` -- PTY process management via `portable-pty`. Spawns shell processes, manages reader threads, bridges I/O between xterm.js and PTY
-- `webview_bridge/` -- 13 sub-modules handling all WebView-related operations:
+- `webview_bridge/` -- 15 sub-modules handling all WebView-related operations:
   - `ipc_dispatch.rs` -- IPC message validation (allowlist of 29 permitted kinds) and routing
   - `lifecycle.rs` -- WebView creation/destruction per pane
   - `bounds.rs` -- Coordinate conversion and bounds synchronization
@@ -355,9 +355,13 @@ Entry point (`main.rs`):
   - `file_handlers.rs` -- File read operations for WebView
   - `theme_handlers.rs` -- Theme CSS injection into all WebViews
   - `status_bar_handlers.rs` -- Status bar initialization
+  - `chat_stream_handlers.rs` -- Workspace streaming to mobile chat (start/stop/status, 350ms frame interval capture)
+  - `emulator_handlers.rs` -- ROM file listing and loading for the retro game emulator panel (scans ~/ROMs, supports NES/SNES/GB/GBA/N64/Genesis/etc.)
 - `assistant.rs` / `assistant_task.rs` -- AI assistant panel state and background task
 - `social.rs` -- Presence client lifecycle and event polling
 - `palette.rs` -- Command palette keyboard handler
+- `blanking.rs` -- Pane blanking: covers individual panes with a black overlay and blocks input. Used for privacy/focus management. State tracked in `blanked_panes: HashSet<u32>`
+- `workspace_capture/` -- Cross-platform workspace frame capture for live streaming to mobile chat. Native implementations on macOS and Linux; stub on Windows. Returns JPEG data URLs at 350ms intervals
 - `resize_drag.rs` -- Mouse drag-to-resize pane borders
 - `title.rs` -- Dynamic window title updates
 - `ui_state.rs` -- UI chrome state updates (tab bar, status bar)
@@ -424,7 +428,7 @@ main()
         +-- ApplicationHandler::resumed()
               |
               +-- initialize_window()
-              |     +-- Create winit window (1280x800, transparent)
+              |     +-- Create winit window (1280x800, transparent on macOS only)
               |     +-- Load window icon from embedded PNG
               |     +-- RenderState::new() (async GPU init via pollster)
               |     +-- BootSequence::new()
@@ -527,7 +531,7 @@ PTY processes are spawned with the configured shell program (or platform default
 
 The `ContentProvider` registers a `jarvis://` custom protocol with `wry`. When a WebView requests `jarvis://localhost/terminal/index.html`, the content provider resolves it to `{assets_dir}/panels/terminal/index.html` and returns the file with the correct MIME type.
 
-This avoids the need for a local HTTP server and enables bundled assets, in-memory overrides, and plugin directory resolution with security containment (canonicalization-based traversal prevention).
+Panel assets are embedded in the binary at compile time via `include_dir`, so the binary is fully self-contained. The content provider checks the filesystem first (for development and plugin overrides), then falls back to embedded assets. This avoids the need for a local HTTP server and enables in-memory overrides, plugin directory resolution, and embedded fallback, all with security containment (canonicalization-based traversal prevention).
 
 ### 6.8 Sync/Async Bridge
 

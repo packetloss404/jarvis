@@ -130,7 +130,7 @@ A warning is logged via `tracing::warn!` with the requested path.
 
 **Source:** `jarvis-rs/crates/jarvis-webview/src/content.rs`
 
-The `ContentProvider` resolves `jarvis://` URL paths to file contents and MIME types. It supports three resolution strategies, checked in order:
+The `ContentProvider` resolves `jarvis://` URL paths to file contents and MIME types. It supports four resolution strategies, checked in order:
 
 ### 1. In-Memory Overrides
 
@@ -162,7 +162,17 @@ Methods:
 
 ### 3. Base Directory (Filesystem)
 
-Falls back to reading from `{base_dir}/{clean_path}` on disk. The base directory is typically the `assets/` folder at the workspace root.
+Falls back to reading from `{base_dir}/{clean_path}` on disk. The base directory is typically the `assets/` folder at the workspace root. This is useful during development to iterate on panel HTML without rebuilding.
+
+### 4. Embedded Assets (Compile-Time)
+
+If the file is not found on disk (or the base directory does not exist), the content provider falls back to assets embedded in the binary at compile time via `include_dir`. The `assets/panels/` directory is statically included in the `jarvis-webview` crate, making the binary fully self-contained. The embedded path strips the `panels/` prefix since the embedded directory is rooted at `assets/panels/`.
+
+```rust
+static EMBEDDED_PANELS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../assets/panels");
+```
+
+This means the binary works correctly regardless of working directory -- no need to ship the `assets/` folder alongside the executable.
 
 ### Security: Directory Traversal Prevention
 
@@ -228,7 +238,7 @@ Every WebView is created from a `WebViewConfig`:
 pub struct WebViewConfig {
     pub url: Option<String>,         // Initial URL (mutually exclusive with html)
     pub html: Option<String>,        // Initial HTML (mutually exclusive with url)
-    pub transparent: bool,           // Default: true
+    pub transparent: bool,           // Default: true on macOS, false on Windows/Linux
     pub devtools: bool,              // Default: true in debug, false in release
     pub user_agent: Option<String>,  // Default: "Jarvis/0.1"
     pub clipboard: bool,             // Default: true
@@ -405,7 +415,7 @@ Every message must have a `kind` field that appears in the `ALLOWED_IPC_KINDS` a
 | `panel_close` | (none) | Close this panel (refused if it's the last pane) |
 | `panel_toggle` | `{ panel: string }` | Toggle a panel from the status bar |
 | `open_settings` | (none) | Open or focus the settings panel |
-| `launch_game` | `{ game: "tetris"\|"asteroids"\|"minesweeper"\|"pinball"\|"doodlejump"\|"draw"\|"subway"\|"videoplayer" }` | Navigate the current pane to a game; stores original URL for Escape-back |
+| `launch_game` | `{ game: "tetris"\|"asteroids"\|"minesweeper"\|"pinball"\|"doodlejump"\|"draw"\|"subway"\|"videoplayer"\|"emulator" }` | Navigate the current pane to a game; stores original URL for Escape-back |
 
 #### Settings
 
@@ -572,7 +582,7 @@ If parsing fails, the message is rejected.
 
 Individual handlers perform their own validation:
 - **Panel names** are checked against `ALLOWED_PANELS`: `["terminal", "assistant", "chat", "settings", "presence"]`
-- **Game names** are checked against `ALLOWED_GAMES`: `["tetris", "asteroids", "minesweeper", "pinball", "doodlejump", "draw", "subway", "videoplayer"]`
+- **Game names** are checked against `ALLOWED_GAMES`: `["tetris", "asteroids", "minesweeper", "pinball", "doodlejump", "draw", "subway", "videoplayer", "emulator"]`
 - **Settings paths** are checked against `VALID_PATHS` (100+ whitelisted dotted paths like `"colors.primary"`, `"font.size"`)
 - **PTY resize** values are sanity-checked: cols/rows must be 1-500
 - **Assistant input** is capped at 4096 characters

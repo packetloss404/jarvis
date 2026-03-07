@@ -17,8 +17,10 @@ navigate the codebase confidently.
 5. [Crypto Service and Identity](#crypto-service-and-identity)
 6. [AI Assistant Panel](#ai-assistant-panel)
 7. [Chat Panel Features](#chat-panel-features)
-8. [Network Configuration Reference](#network-configuration-reference)
-9. [Security Model](#security-model)
+8. [Workspace Streaming](#workspace-streaming)
+9. [Retro Game Emulator](#retro-game-emulator)
+10. [Network Configuration Reference](#network-configuration-reference)
+11. [Security Model](#security-model)
 
 ---
 
@@ -839,6 +841,61 @@ messages:
 All user-generated content (nicknames, message text, system messages) is
 rendered using `element.textContent = value` rather than `innerHTML`,
 preventing XSS injection.
+
+---
+
+## Workspace Streaming
+
+**Source:** `jarvis-rs/crates/jarvis-app/src/app_state/webview_bridge/chat_stream_handlers.rs`, `jarvis-rs/crates/jarvis-app/src/app_state/workspace_capture/`
+
+Jarvis supports live workspace streaming to the chat panel, allowing mobile-connected users to see your desktop workspace in real time.
+
+### Architecture
+
+The chat panel sends a `chat_stream_control` IPC message with an action field:
+
+| Action     | Effect |
+|------------|--------|
+| `"start"`  | Begins capturing workspace frames on a background thread |
+| `"stop"`   | Stops the capture thread |
+| `"status"` | Returns whether streaming is currently active |
+
+When streaming is active, a background thread captures workspace frames at a fixed interval (`CHAT_STREAM_FRAME_INTERVAL = 350ms`) and sends them back to the chat WebView as `chat_stream_host_frame` IPC messages containing a JPEG data URL.
+
+### Platform Support
+
+The workspace capture module (`app_state/workspace_capture/`) has per-platform implementations:
+
+| Platform | Status |
+|----------|--------|
+| macOS    | Native implementation (CoreGraphics) |
+| Linux    | Native implementation |
+| Windows  | Stub (returns error -- implementation pending) |
+
+---
+
+## Retro Game Emulator
+
+**Source:** `jarvis-rs/crates/jarvis-app/src/app_state/webview_bridge/emulator_handlers.rs`, `jarvis-rs/assets/panels/games/emulator.html`
+
+Jarvis includes a retro game emulator panel that can load ROM files from the user's system.
+
+### IPC Messages
+
+| Kind                 | Direction | Description |
+|----------------------|-----------|-------------|
+| `emulator_list_roms` | JS -> Rust | Scans `~/ROMs` directory for ROM files and returns a list |
+| `emulator_load_rom`  | JS -> Rust | Reads a ROM file and returns its contents as base64-encoded data |
+
+### Supported ROM Formats
+
+The emulator scans for files with these extensions: `.nes`, `.smc`, `.sfc`, `.gb`, `.gbc`, `.gba`, `.nds`, `.n64`, `.z64`, `.v64`, `.bin`, `.cue`, `.iso`, `.md`, `.smd`, `.sms`, `.gg`, `.a26`, `.zip`, `.7z`.
+
+Maximum ROM size: **64 MB**.
+
+### WebView Transparency
+
+The emulator panel uses WebGL for rendering, which requires an opaque (non-transparent) WebView. When navigating to the emulator, the existing transparent WebView is destroyed and recreated with `transparent: false`. When exiting the emulator, the WebView is recreated with the default transparency setting.
 
 ---
 

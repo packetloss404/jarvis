@@ -113,6 +113,12 @@ pub enum RendererError {
 }
 ```
 
+### Window Transparency (Platform-Conditional)
+
+The application window is created with `with_transparent(true)` **only on macOS**, where it is needed for titlebar blending (content extending behind traffic light buttons). On **Windows and Linux**, the window is opaque (`with_transparent(false)`) because transparent windows cause rendering artifacts -- WebView2 on Windows composites poorly with transparent backgrounds, leading to see-through panels and ghosting when panes are moved.
+
+Similarly, the default `WebViewConfig::transparent` is `true` on macOS and `false` on Windows/Linux. The emulator panel always uses `transparent: false` regardless of platform because WebGL canvases are invisible in transparent WebViews.
+
 ### Key Source File
 
 - `jarvis-rs/crates/jarvis-renderer/src/gpu/context.rs`
