@@ -83,22 +83,14 @@ impl JarvisApp {
     ///
     /// Used by the emulator panel — WebGL canvases are invisible in
     /// transparent WebViews because the alpha channel makes them see-through.
-    pub(in crate::app_state) fn create_webview_for_pane_opaque(
-        &mut self,
-        pane_id: u32,
-        url: &str,
-    ) {
+    pub(in crate::app_state) fn create_webview_for_pane_opaque(&mut self, pane_id: u32, url: &str) {
         let mut config = WebViewConfig::with_url(url);
         config.transparent = false;
         self.create_webview_for_pane_with_config(pane_id, config);
     }
 
     /// Create a webview for a pane with a full config.
-    fn create_webview_for_pane_with_config(
-        &mut self,
-        pane_id: u32,
-        config: WebViewConfig,
-    ) {
+    fn create_webview_for_pane_with_config(&mut self, pane_id: u32, config: WebViewConfig) {
         let window = match &self.window {
             Some(w) => w,
             None => {
@@ -137,6 +129,7 @@ impl JarvisApp {
         } else {
             tracing::info!(pane_id, url = %url_str, "WebView created for pane");
             self.inject_theme_into_all_webviews();
+            self.apply_blank_state_to_pane(pane_id);
         }
     }
 
@@ -187,6 +180,7 @@ impl JarvisApp {
         } else {
             tracing::info!(pane_id, ?kind, "WebView created for pane");
             self.inject_theme_into_all_webviews();
+            self.apply_blank_state_to_pane(pane_id);
         }
     }
 
@@ -211,6 +205,9 @@ impl JarvisApp {
 
     /// Destroy the webview and PTY for a pane.
     pub(in crate::app_state) fn destroy_webview_for_pane(&mut self, pane_id: u32) {
+        self.stop_chat_stream_for_pane(pane_id, "pane closed");
+        self.blanked_panes.remove(&pane_id);
+
         // Kill PTY first (if any)
         if self.ptys.contains(pane_id) {
             let exit_code = self.ptys.kill_and_remove(pane_id);
@@ -361,6 +358,9 @@ impl JarvisApp {
                                 let _ = handle.focus();
                             }
                         }
+                    }
+                    if state == jarvis_webview::PageLoadState::Finished {
+                        self.apply_blank_state_to_pane(pane_id);
                     }
                     // Bros games: inject ad-blocker once the page has loaded.
                     let is_bros_game = [

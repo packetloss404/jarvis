@@ -12,8 +12,8 @@ const MAX_ROM_SIZE: u64 = 64 * 1024 * 1024;
 
 /// Allowed ROM file extensions.
 const ROM_EXTENSIONS: &[&str] = &[
-    "nes", "smc", "sfc", "gb", "gbc", "gba", "nds", "n64", "z64", "v64", "bin", "cue", "iso",
-    "md", "smd", "sms", "gg", "a26", "zip", "7z",
+    "nes", "smc", "sfc", "gb", "gbc", "gba", "nds", "n64", "z64", "v64", "bin", "cue", "iso", "md",
+    "smd", "sms", "gg", "a26", "zip", "7z",
 ];
 
 /// Return the ROMs directory path (~/ ROMs).
@@ -36,13 +36,25 @@ impl JarvisApp {
         let dir = match roms_dir() {
             Some(d) => d,
             None => {
-                self.emulator_respond(pane_id, req_id, "emulator_list_roms_response", None, Some("cannot determine home directory"));
+                self.emulator_respond(
+                    pane_id,
+                    req_id,
+                    "emulator_list_roms_response",
+                    None,
+                    Some("cannot determine home directory"),
+                );
                 return;
             }
         };
 
         if !dir.is_dir() {
-            self.emulator_respond(pane_id, req_id, "emulator_list_roms_response", None, Some("~/ROMs directory not found"));
+            self.emulator_respond(
+                pane_id,
+                req_id,
+                "emulator_list_roms_response",
+                None,
+                Some("~/ROMs directory not found"),
+            );
             return;
         }
 
@@ -103,21 +115,39 @@ impl JarvisApp {
         let filename = match obj.get("filename").and_then(|v| v.as_str()) {
             Some(f) => f,
             None => {
-                self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some("missing filename"));
+                self.emulator_respond(
+                    pane_id,
+                    req_id,
+                    "emulator_load_rom_response",
+                    None,
+                    Some("missing filename"),
+                );
                 return;
             }
         };
 
         // Prevent directory traversal
         if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
-            self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some("invalid filename"));
+            self.emulator_respond(
+                pane_id,
+                req_id,
+                "emulator_load_rom_response",
+                None,
+                Some("invalid filename"),
+            );
             return;
         }
 
         let dir = match roms_dir() {
             Some(d) => d,
             None => {
-                self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some("cannot determine home directory"));
+                self.emulator_respond(
+                    pane_id,
+                    req_id,
+                    "emulator_load_rom_response",
+                    None,
+                    Some("cannot determine home directory"),
+                );
                 return;
             }
         };
@@ -128,39 +158,75 @@ impl JarvisApp {
         let canonical_dir = match std::fs::canonicalize(&dir) {
             Ok(c) => c,
             Err(_) => {
-                self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some("ROMs directory not found"));
+                self.emulator_respond(
+                    pane_id,
+                    req_id,
+                    "emulator_load_rom_response",
+                    None,
+                    Some("ROMs directory not found"),
+                );
                 return;
             }
         };
         let canonical_path = match std::fs::canonicalize(&path) {
             Ok(c) => c,
             Err(_) => {
-                self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some("ROM file not found"));
+                self.emulator_respond(
+                    pane_id,
+                    req_id,
+                    "emulator_load_rom_response",
+                    None,
+                    Some("ROM file not found"),
+                );
                 return;
             }
         };
         if !canonical_path.starts_with(&canonical_dir) {
-            self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some("invalid path"));
+            self.emulator_respond(
+                pane_id,
+                req_id,
+                "emulator_load_rom_response",
+                None,
+                Some("invalid path"),
+            );
             return;
         }
 
         let metadata = match std::fs::metadata(&canonical_path) {
             Ok(m) => m,
             Err(e) => {
-                self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some(&format!("file error: {e}")));
+                self.emulator_respond(
+                    pane_id,
+                    req_id,
+                    "emulator_load_rom_response",
+                    None,
+                    Some(&format!("file error: {e}")),
+                );
                 return;
             }
         };
 
         if metadata.len() > MAX_ROM_SIZE {
-            self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some("ROM too large (max 64MB)"));
+            self.emulator_respond(
+                pane_id,
+                req_id,
+                "emulator_load_rom_response",
+                None,
+                Some("ROM too large (max 64MB)"),
+            );
             return;
         }
 
         let bytes = match std::fs::read(&canonical_path) {
             Ok(b) => b,
             Err(e) => {
-                self.emulator_respond(pane_id, req_id, "emulator_load_rom_response", None, Some(&format!("read error: {e}")));
+                self.emulator_respond(
+                    pane_id,
+                    req_id,
+                    "emulator_load_rom_response",
+                    None,
+                    Some(&format!("read error: {e}")),
+                );
                 return;
             }
         };

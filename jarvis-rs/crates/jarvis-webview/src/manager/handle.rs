@@ -74,7 +74,15 @@ impl WebViewHandle {
 
     /// Open devtools (if enabled).
     pub fn open_devtools(&self) {
-        self.webview.open_devtools();
+        #[cfg(debug_assertions)]
+        {
+            self.webview.open_devtools();
+        }
+
+        #[cfg(not(debug_assertions))]
+        {
+            let _ = self;
+        }
     }
 
     /// Set zoom level.

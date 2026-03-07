@@ -156,10 +156,7 @@ impl JarvisApp {
         }
 
         for lp in &self.config.plugins.local {
-            let url = format!(
-                "jarvis://localhost/plugins/{}/{}",
-                lp.id, lp.entry
-            );
+            let url = format!("jarvis://localhost/plugins/{}/{}", lp.id, lp.entry);
             items.push(jarvis_renderer::PaletteItem {
                 action: jarvis_common::actions::Action::OpenURL(url),
                 label: lp.name.clone(),

@@ -75,8 +75,16 @@ impl JarvisApp {
     ///
     /// Sends `focus_changed` with `{ "focused": true/false }` to each panel,
     /// and `status_update` with the active panel name to the status bar.
-    pub(in crate::app_state) fn notify_focus_changed(&self) {
+    pub(in crate::app_state) fn notify_focus_changed(&mut self) {
         let focused_id = self.tiling.focused_id();
+        if self
+            .tiling
+            .pane(focused_id)
+            .map(|pane| pane.kind == jarvis_common::types::PaneKind::Terminal)
+            .unwrap_or(false)
+        {
+            self.last_terminal_focus = Some(focused_id);
+        }
         tracing::info!(focused_id, "notify_focus_changed: will focus pane");
 
         if let Some(ref registry) = self.webviews {

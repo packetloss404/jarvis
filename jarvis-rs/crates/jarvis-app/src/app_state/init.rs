@@ -110,7 +110,7 @@ impl JarvisApp {
 
     /// Set up the WebView registry with the content provider for `jarvis://`.
     fn initialize_webviews(&mut self) {
-        let panels_path = std::env::current_dir().unwrap_or_default().join(PANELS_DIR);
+        let panels_path = resolve_panels_path();
 
         if !panels_path.is_dir() {
             tracing::warn!(
@@ -140,6 +140,27 @@ impl JarvisApp {
             "WebView registry initialized"
         );
     }
+}
+
+fn resolve_panels_path() -> std::path::PathBuf {
+    let mut candidates = Vec::new();
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(current_dir.join(PANELS_DIR));
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join(PANELS_DIR));
+            candidates.push(exe_dir.join("resources").join(PANELS_DIR));
+            candidates.push(exe_dir.join("..").join("Resources").join(PANELS_DIR));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_dir())
+        .unwrap_or_else(|| std::path::PathBuf::from(PANELS_DIR))
 }
 
 /// Load the application icon from the bundled PNG asset.

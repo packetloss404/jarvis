@@ -106,6 +106,9 @@ impl JarvisApp {
                     }
                 }
             }
+            Action::ToggleBlankPane => {
+                self.toggle_blank_for_focused_pane();
+            }
             Action::OpenCommandPalette => {
                 self.command_palette_open = true;
                 let mut palette = jarvis_renderer::CommandPalette::new(&self.registry);

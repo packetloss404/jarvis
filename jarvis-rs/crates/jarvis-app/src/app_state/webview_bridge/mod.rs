@@ -5,6 +5,7 @@
 
 mod assistant_handlers;
 mod bounds;
+mod chat_stream_handlers;
 mod crypto_handlers;
 mod emulator_handlers;
 mod file_handlers;

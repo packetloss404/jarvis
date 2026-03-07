@@ -35,6 +35,7 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "launch_game",
     "ping",
     "boot_complete",
+    "chat_stream_control",
     "crypto",
     "window_drag",
     "keybind",
@@ -88,6 +89,9 @@ impl JarvisApp {
         match msg.kind.as_str() {
             "boot_complete" => {
                 self.handle_boot_complete();
+            }
+            "chat_stream_control" => {
+                self.handle_chat_stream_control(pane_id, &msg.payload);
             }
             "ping" => {
                 // Respond with pong — used for IPC round-trip testing
@@ -399,6 +403,7 @@ mod tests {
         assert!(is_ipc_kind_allowed("open_settings"));
         assert!(is_ipc_kind_allowed("status_bar_init"));
         assert!(is_ipc_kind_allowed("boot_complete"));
+        assert!(is_ipc_kind_allowed("chat_stream_control"));
         assert!(is_ipc_kind_allowed("crypto"));
         assert!(is_ipc_kind_allowed("window_drag"));
         assert!(is_ipc_kind_allowed("read_file"));

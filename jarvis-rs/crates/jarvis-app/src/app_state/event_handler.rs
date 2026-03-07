@@ -111,7 +111,7 @@ impl ApplicationHandler for JarvisApp {
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
-                tracing::info!(
+                tracing::trace!(
                     key = ?event.logical_key,
                     state = ?event.state,
                     "[winit] KeyboardInput"

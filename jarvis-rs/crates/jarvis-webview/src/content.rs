@@ -102,7 +102,11 @@ impl ContentProvider {
     }
 
     /// Resolve an asset from a plugin directory with containment check.
-    fn resolve_plugin_asset(&self, plugin_id: &str, asset_path: &str) -> Option<(Cow<'_, str>, Cow<'_, [u8]>)> {
+    fn resolve_plugin_asset(
+        &self,
+        plugin_id: &str,
+        asset_path: &str,
+    ) -> Option<(Cow<'_, str>, Cow<'_, [u8]>)> {
         let plugin_base = {
             let dirs = self.plugin_dirs.read().ok()?;
             dirs.get(plugin_id)?.clone()

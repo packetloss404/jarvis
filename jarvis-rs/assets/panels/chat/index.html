@@ -282,6 +282,116 @@ body {
   font-size: var(--font-ui-size);
 }
 
+#live-stream {
+  display: none;
+  flex-shrink: 0;
+  border-top: var(--border-width) solid var(--color-border);
+  background: linear-gradient(180deg, rgba(0, 229, 255, 0.03), rgba(255, 255, 255, 0.01));
+}
+
+#live-stream.visible {
+  display: block;
+}
+
+#live-stream-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px 6px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+#live-stream-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text);
+}
+
+#live-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.45);
+}
+
+#live-stream.active #live-pill-dot {
+  background: var(--color-error);
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.45);
+}
+
+#live-stream-title {
+  color: var(--color-text);
+  text-transform: none;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#live-stream-viewers {
+  color: var(--color-text-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
+#live-stream-body {
+  padding: 0 12px 10px;
+}
+
+#live-stream-output {
+  margin: 0;
+  min-height: 76px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--color-text);
+  font-family: "SFMono-Regular", "JetBrains Mono", "Menlo", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#live-btn {
+  background: transparent;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+}
+
+#live-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-focused);
+}
+
+#live-btn.active {
+  color: var(--color-error);
+  border-color: rgba(255, 68, 68, 0.35);
+}
+
 #messages::-webkit-scrollbar { width: var(--scrollbar-width); }
 #messages::-webkit-scrollbar-track { background: transparent; }
 #messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
@@ -791,6 +901,7 @@ body {
     <span class="channel-chevron">&#9662;</span>
   </h1>
   <div id="header-meta">
+    <button id="live-btn" title="Stream a terminal into chat">Go Live</button>
     <span id="my-nick" title="Click to change nickname"></span>
     <span><span id="status-dot"></span><span id="status-text">offline</span></span>
     <span id="user-count">0 online</span>
@@ -836,6 +947,19 @@ body {
     <div class="icon">&#9881;</div>
     <div>No messages yet.</div>
     <div>Say something to get started.</div>
+  </div>
+</div>
+
+<div id="live-stream">
+  <div id="live-stream-header">
+    <div id="live-stream-meta">
+      <span id="live-pill"><span id="live-pill-dot"></span><span id="live-stream-status">Offline</span></span>
+      <span id="live-stream-title"></span>
+    </div>
+    <span id="live-stream-viewers"></span>
+  </div>
+  <div id="live-stream-body">
+    <pre id="live-stream-output">No live terminal yet.</pre>
   </div>
 </div>
 
@@ -1264,6 +1388,12 @@ const UI = {
   nickInput: null,
   myNick: null,
   retryBtn: null,
+  liveStreamEl: null,
+  liveStatusEl: null,
+  liveTitleEl: null,
+  liveViewersEl: null,
+  liveOutputEl: null,
+  liveBtn: null,
   _rateFeedbackTimeout: null,
   _retryCallback: null,
 
@@ -1281,6 +1411,12 @@ const UI = {
     this.nickInput = $('#nick-input');
     this.myNick = $('#my-nick');
     this.retryBtn = $('#retry-btn');
+    this.liveStreamEl = $('#live-stream');
+    this.liveStatusEl = $('#live-stream-status');
+    this.liveTitleEl = $('#live-stream-title');
+    this.liveViewersEl = $('#live-stream-viewers');
+    this.liveOutputEl = $('#live-stream-output');
+    this.liveBtn = $('#live-btn');
 
     this.retryBtn.addEventListener('click', () => {
       if (this._retryCallback) this._retryCallback();
@@ -1512,6 +1648,29 @@ const UI = {
     if (len >= CONFIG.MAX_MSG_LEN) this.charCount.className = 'over';
   },
 
+  setLiveButton(active) {
+    this.liveBtn.classList.toggle('active', !!active);
+    this.liveBtn.textContent = active ? 'End Live' : 'Go Live';
+  },
+
+  renderLiveStream(state) {
+    if (!state || !state.visible) {
+      this.liveStreamEl.classList.remove('visible', 'active');
+      this.liveStatusEl.textContent = 'Offline';
+      this.liveTitleEl.textContent = '';
+      this.liveViewersEl.textContent = '';
+      this.liveOutputEl.textContent = 'No live terminal yet.';
+      return;
+    }
+
+    this.liveStreamEl.classList.add('visible');
+    this.liveStreamEl.classList.toggle('active', !!state.active);
+    this.liveStatusEl.textContent = state.status || 'Live';
+    this.liveTitleEl.textContent = state.title || '';
+    this.liveViewersEl.textContent = state.viewersText || '';
+    this.liveOutputEl.textContent = state.text || 'Waiting for terminal output...';
+  },
+
   _hideEmpty() {
     if (this.emptyState) {
       this.emptyState.remove();
@@ -1634,6 +1793,280 @@ function isImagePath(text) {
   return /\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?)$/i.test(trimmed);
 }
 
+function stripAnsi(text) {
+  return text.replace(/\x1B\[[0-9;?]*[ -\/]*[@-~]/g, '');
+}
+
+function normalizeTerminalText(text) {
+  return stripAnsi(String(text || ''))
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\u0000/g, '');
+}
+
+function trimTerminalTail(text, maxChars) {
+  if (text.length <= maxChars) return text;
+  return text.slice(text.length - maxChars);
+}
+
+const LiveStream = {
+  relayUrl: '',
+  ws: null,
+  role: 'spectator',
+  sessionId: null,
+  sourcePaneId: null,
+  sourceTitle: '',
+  hostNick: '',
+  viewerCount: 0,
+  tailText: '',
+  localActive: false,
+  remoteActive: false,
+  _flushTimer: null,
+  _dirty: false,
+
+  init() {
+    if (window.jarvis && window.jarvis.ipc) {
+      window.jarvis.ipc.on('chat_stream_host_output', (payload) => {
+        this.onHostOutput(payload);
+      });
+      window.jarvis.ipc.on('chat_stream_host_stopped', (payload) => {
+        this.onLocalStop(payload && payload.reason ? payload.reason : 'stream stopped');
+      });
+    }
+    this.refreshConfig();
+  },
+
+  async refreshConfig() {
+    if (!(window.jarvis && window.jarvis.ipc && window.jarvis.ipc.request)) return;
+    try {
+      var status = await window.jarvis.ipc.request('chat_stream_control', { action: 'status' });
+      if (status && status.relayUrl) this.relayUrl = status.relayUrl;
+    } catch (_) {}
+  },
+
+  async syncToActiveChannel() {
+    await this.refreshConfig();
+    if (this.localActive) return;
+    this.disconnect();
+    this.remoteActive = false;
+    this.tailText = '';
+    this.hostNick = '';
+    this.sourceTitle = '';
+    this.viewerCount = 0;
+    this.render();
+    this.connect('spectator');
+  },
+
+  async toggle() {
+    if (this.localActive) {
+      await this.stop('stream stopped');
+    } else {
+      await this.start();
+    }
+  },
+
+  async start() {
+    if (!(window.jarvis && window.jarvis.ipc && window.jarvis.ipc.request)) return;
+    await this.refreshConfig();
+    if (!this.relayUrl) {
+      UI.addSystemMessage('Relay URL is not configured.', 'leave');
+      return;
+    }
+
+    try {
+      var status = await window.jarvis.ipc.request('chat_stream_control', { action: 'start' });
+      if (status && status.error) {
+        UI.addSystemMessage(status.error, 'leave');
+        return;
+      }
+
+      this.localActive = true;
+      this.remoteActive = true;
+      this.role = 'host';
+      this.sourcePaneId = status.sourcePaneId || null;
+      this.sourceTitle = status.sourceTitle || 'Terminal';
+      this.hostNick = Chat.nick || 'Host';
+      this.viewerCount = 0;
+      this.tailText = '';
+      this._dirty = false;
+      UI.setLiveButton(true);
+      this.render();
+      this.connect('host');
+    } catch (err) {
+      UI.addSystemMessage('Failed to start live stream.', 'leave');
+    }
+  },
+
+  async stop(reason) {
+    if (window.jarvis && window.jarvis.ipc && window.jarvis.ipc.request) {
+      try {
+        await window.jarvis.ipc.request('chat_stream_control', { action: 'stop' });
+      } catch (_) {}
+    }
+    this.onLocalStop(reason || 'stream stopped');
+  },
+
+  onLocalStop(reason) {
+    this.localActive = false;
+    this.remoteActive = false;
+    this.role = 'spectator';
+    this.disconnect();
+    UI.setLiveButton(false);
+    if (this.tailText) {
+      this.render(reason || 'Ended');
+    } else {
+      UI.renderLiveStream({ visible: false });
+    }
+    this.connect('spectator');
+  },
+
+  connect(role) {
+    if (!this.relayUrl || !Chat._activeChannelId) return;
+    this.disconnect();
+    this.role = role;
+    this.sessionId = this._sessionIdForChannel(Chat._activeChannelId);
+
+    try {
+      var ws = new WebSocket(this.relayUrl);
+      this.ws = ws;
+    } catch (_) {
+      return;
+    }
+
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
+      var helloType = role === 'host' ? 'host_hello' : 'spectator_hello';
+      ws.send(JSON.stringify({ type: helloType, session_id: this.sessionId }));
+    };
+
+    ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
+      this.onRelayMessage(event.data);
+    };
+
+    ws.onclose = () => {
+      if (this.ws === ws) {
+        this.ws = null;
+      }
+    };
+  },
+
+  disconnect() {
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+    if (this.ws) {
+      var ws = this.ws;
+      this.ws = null;
+      try { ws.close(); } catch (_) {}
+    }
+  },
+
+  onRelayMessage(data) {
+    var msg = null;
+    try {
+      msg = JSON.parse(data);
+    } catch (_) {
+      return;
+    }
+    if (!msg || !msg.type) return;
+
+    if (msg.type === 'session_ready') return;
+    if (msg.type === 'host_connected') {
+      if (!this.localActive) {
+        this.remoteActive = true;
+        this.render('Live');
+      }
+      return;
+    }
+    if (msg.type === 'host_disconnected') {
+      if (!this.localActive) {
+        this.remoteActive = false;
+        this.render('Ended');
+      }
+      return;
+    }
+    if (msg.type === 'viewer_count') {
+      this.viewerCount = msg.count || 0;
+      this.render();
+      return;
+    }
+    if (msg.type === 'error') {
+      UI.addSystemMessage(msg.message || 'Relay error', 'leave');
+      return;
+    }
+    if (msg.type === 'stream_snapshot') {
+      if (this.localActive) return;
+      this.remoteActive = true;
+      this.hostNick = msg.hostNick || 'Host';
+      this.sourceTitle = msg.paneTitle || 'Terminal';
+      this.tailText = msg.text || '';
+      this.render('Live');
+    }
+  },
+
+  onHostOutput(payload) {
+    if (!this.localActive) return;
+    this.sourcePaneId = payload && payload.paneId ? payload.paneId : this.sourcePaneId;
+    this.sourceTitle = payload && payload.title ? payload.title : this.sourceTitle;
+    var clean = normalizeTerminalText(payload && payload.data ? payload.data : '');
+    if (!clean) return;
+    this.tailText = trimTerminalTail(this.tailText + clean, 8000);
+    this._dirty = true;
+    this.render('Live');
+    this.scheduleFlush();
+  },
+
+  scheduleFlush() {
+    if (this._flushTimer) return;
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null;
+      this.flushSnapshot();
+    }, 250);
+  },
+
+  flushSnapshot() {
+    if (!this.localActive || !this._dirty || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    this._dirty = false;
+    this.ws.send(JSON.stringify({
+      type: 'stream_snapshot',
+      paneId: this.sourcePaneId,
+      paneTitle: this.sourceTitle,
+      hostNick: Chat.nick || this.hostNick || 'Host',
+      text: this.tailText,
+      ts: Date.now(),
+    }));
+  },
+
+  render(forcedStatus) {
+    var visible = this.localActive || this.remoteActive || !!this.tailText;
+    var title = '';
+    if (this.sourceTitle) title = this.sourceTitle;
+    if (this.hostNick && !this.localActive) {
+      title = this.hostNick + ' - ' + (title || 'Terminal');
+    }
+    UI.renderLiveStream({
+      visible: visible,
+      active: this.localActive || this.remoteActive,
+      status: forcedStatus || (this.localActive || this.remoteActive ? 'Live' : 'Ended'),
+      title: title,
+      viewersText: this.viewerCount ? (this.viewerCount + ' watching') : '',
+      text: this.tailText,
+    });
+  },
+
+  _sessionIdForChannel(channelId) {
+    return 'chat-live:' + channelId;
+  },
+
+  destroy() {
+    this.disconnect();
+  },
+};
+
 // =================================================================
 // CHAT APP
 // =================================================================
@@ -1739,6 +2172,7 @@ const Chat = {
     }
 
     UI.updateChannelName(this._getChannelDisplayName(this._activeChannelId));
+    LiveStream.syncToActiveChannel();
   },
 
   /** Subscribe to a Supabase channel. isPrimary=true for the general channel (carries presence). */
@@ -1942,6 +2376,10 @@ const Chat = {
         this._closeDMChannel();
       }
 
+      if (LiveStream.localActive) {
+        LiveStream.stop('channel switched');
+      }
+
       // Switch active channel
       this._activeChannelId = channelId;
 
@@ -1975,6 +2413,7 @@ const Chat = {
       var chName = this._getChannelDisplayName(channelId);
       UI.msgInput.placeholder = 'Message ' + chName + '...';
       UI.msgInput.focus();
+      LiveStream.syncToActiveChannel();
     } finally {
       this._switching = false;
     }
@@ -2647,6 +3086,7 @@ const Chat = {
         }
       }
     }
+    LiveStream.destroy();
   },
 };
 
@@ -2674,6 +3114,8 @@ window.addEventListener('unhandledrejection', function(event) {
 
 document.addEventListener('DOMContentLoaded', () => {
   UI.init();
+  UI.setLiveButton(false);
+  LiveStream.init();
 
   // Load saved nickname or generate random default
   let savedNick = null;
@@ -2746,6 +3188,9 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   $('#send-btn').addEventListener('click', sendMessage);
+  $('#live-btn').addEventListener('click', function() {
+    LiveStream.toggle();
+  });
   UI.msgInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();

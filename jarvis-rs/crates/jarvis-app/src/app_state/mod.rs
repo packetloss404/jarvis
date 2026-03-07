@@ -5,6 +5,7 @@
 
 mod assistant;
 mod assistant_task;
+mod blanking;
 mod core;
 mod dispatch;
 mod event_handler;

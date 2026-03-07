@@ -12,6 +12,12 @@ pub enum RelayHello {
 
     #[serde(rename = "mobile_hello")]
     MobileHello { session_id: String },
+
+    #[serde(rename = "host_hello")]
+    HostHello { session_id: String },
+
+    #[serde(rename = "spectator_hello")]
+    SpectatorHello { session_id: String },
 }
 
 /// Messages the relay sends back to clients.
@@ -26,6 +32,15 @@ pub enum RelayResponse {
 
     #[serde(rename = "peer_disconnected")]
     PeerDisconnected,
+
+    #[serde(rename = "host_connected")]
+    HostConnected,
+
+    #[serde(rename = "host_disconnected")]
+    HostDisconnected,
+
+    #[serde(rename = "viewer_count")]
+    ViewerCount { count: usize },
 
     #[serde(rename = "error")]
     Error { message: String },

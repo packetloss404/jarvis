@@ -1,0 +1,13 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --platform
+      - linux/amd64
+      - -t
+      - gcr.io/prismdatafeed/jarvis-relay
+      - -f
+      - relay/Dockerfile
+      - .
+images:
+  - gcr.io/prismdatafeed/jarvis-relay

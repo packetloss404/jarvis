@@ -25,6 +25,7 @@ pub enum Action {
 
     // -- Window --
     ToggleFullscreen,
+    ToggleBlankPane,
     Quit,
 
     // -- UI --

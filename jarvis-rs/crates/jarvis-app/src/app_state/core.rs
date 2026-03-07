@@ -1,6 +1,6 @@
 //! JarvisApp struct definition and constructor.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -23,6 +23,13 @@ use jarvis_webview::WebViewRegistry;
 
 use super::pty_bridge::PtyManager;
 use super::types::{AssistantEvent, PresenceCommand};
+
+#[derive(Debug, Clone)]
+pub(super) struct ChatStreamHostState {
+    pub controller_pane_id: u32,
+    pub source_pane_id: u32,
+    pub source_title: String,
+}
 
 /// Top-level application state.
 pub struct JarvisApp {
@@ -77,6 +84,8 @@ pub struct JarvisApp {
     pub(super) relay_shutdown_tx: Option<tokio::sync::mpsc::Sender<()>>,
     pub(super) relay_key_tx: Option<tokio::sync::watch::Sender<Option<[u8; 32]>>>,
     pub(super) pairing_pane_id: Option<u32>,
+    pub(super) chat_stream_host: Option<ChatStreamHostState>,
+    pub(super) last_terminal_focus: Option<u32>,
 
     // Crypto service (identity + encryption)
     pub(super) crypto: Option<jarvis_platform::CryptoService>,
@@ -98,6 +107,9 @@ pub struct JarvisApp {
 
     // Active games/URLs: maps pane_id → original_url_before_navigation
     pub(super) game_active: HashMap<u32, String>,
+
+    // Panes currently covered by a black blanking overlay.
+    pub(super) blanked_panes: HashSet<u32>,
 
     // Shared plugin directories handle (for config reload)
     pub(super) plugin_dirs: Option<Arc<RwLock<HashMap<String, PathBuf>>>>,
@@ -147,6 +159,8 @@ impl JarvisApp {
             relay_shutdown_tx: None,
             relay_key_tx: None,
             pairing_pane_id: None,
+            chat_stream_host: None,
+            last_terminal_focus: Some(1),
             crypto: None,
             boot: None,
             boot_webview_active: false,
@@ -156,6 +170,7 @@ impl JarvisApp {
             cursor_pos: (0.0, 0.0),
             drag_state: None,
             game_active: HashMap::new(),
+            blanked_panes: HashSet::new(),
             plugin_dirs: None,
             _menu: None,
             menu_ids: None,

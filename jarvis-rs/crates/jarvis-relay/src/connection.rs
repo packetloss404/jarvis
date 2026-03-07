@@ -8,7 +8,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::protocol::{RelayHello, RelayResponse};
 use crate::rate_limit::RateLimiter;
-use crate::session::{Role, SessionStore};
+use crate::session::{Role, SessionKind, SessionStore};
 
 /// Handle a single WebSocket connection.
 pub async fn handle_connection(
@@ -37,59 +37,109 @@ pub async fn handle_connection(
         return;
     }
 
-    // For desktop_hello, create the session. For mobile_hello, it must already exist.
-    match role {
-        Role::Desktop => {
-            // Enforce global session cap.
-            if store.count().await >= limiter.max_total_sessions() {
-                // Check if this is a reconnect (session already exists).
+    // Bridge sessions follow the existing desktop/mobile flow.
+    match role.session_kind() {
+        SessionKind::Bridge => match role {
+            Role::Desktop => {
+                // Enforce global session cap.
+                if store.count().await >= limiter.max_total_sessions() {
+                    // Check if this is a reconnect (session already exists).
+                    if !store.exists(&session_id).await {
+                        let _ = send_response(
+                            &mut sink,
+                            &RelayResponse::Error {
+                                message: "server at capacity".into(),
+                            },
+                        )
+                        .await;
+                        return;
+                    }
+                }
+
+                match store.ensure_session(&session_id, SessionKind::Bridge).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        // Session already exists -- desktop is reconnecting. Allow it by
+                        // unregistering the old desktop first.
+                        store.unregister(&session_id, Role::Desktop).await;
+                        let _ = store.ensure_session(&session_id, SessionKind::Bridge).await;
+                    }
+                    Err(_) => {
+                        let _ = send_response(
+                            &mut sink,
+                            &RelayResponse::Error {
+                                message: "session kind mismatch".into(),
+                            },
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+            Role::Mobile => {
+                // Verify session exists (created by desktop)
                 if !store.exists(&session_id).await {
                     let _ = send_response(
                         &mut sink,
                         &RelayResponse::Error {
-                            message: "server at capacity".into(),
+                            message: "session not found".into(),
                         },
                     )
                     .await;
                     return;
                 }
             }
-
-            if !store.create_session(&session_id).await {
-                // Session already exists -- desktop is reconnecting. Allow it by
-                // unregistering the old desktop first.
-                store.unregister(&session_id, Role::Desktop).await;
-                store.create_session(&session_id).await;
-            }
-        }
-        Role::Mobile => {
-            // Verify session exists (created by desktop)
-            if !store.exists(&session_id).await {
-                let _ = send_response(
-                    &mut sink,
-                    &RelayResponse::Error {
-                        message: "session not found".into(),
-                    },
-                )
-                .await;
+            _ => {}
+        },
+        SessionKind::Broadcast => {
+            if let Err(e) = store
+                .ensure_session(&session_id, SessionKind::Broadcast)
+                .await
+            {
+                let _ = send_response(&mut sink, &RelayResponse::Error { message: e.into() }).await;
                 return;
+            }
+
+            if matches!(role, Role::Host) {
+                store.unregister(&session_id, Role::Host).await;
             }
         }
     }
 
     // 2. Create our receive channel and register.
     let (tx, mut rx) = mpsc::channel::<String>(256);
-    let peer_tx = match store.register(&session_id, role, tx).await {
-        Ok(peer) => peer,
-        Err(e) => {
-            let _ = send_response(
-                &mut sink,
-                &RelayResponse::Error {
-                    message: e.to_string(),
-                },
-            )
-            .await;
-            return;
+    let peer_tx = if role.session_kind() == SessionKind::Bridge {
+        match store.register_bridge(&session_id, role, tx).await {
+            Ok(peer) => peer,
+            Err(e) => {
+                let _ = send_response(
+                    &mut sink,
+                    &RelayResponse::Error {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+                return;
+            }
+        }
+    } else {
+        match store.register_broadcast(&session_id, role, tx).await {
+            Ok(registration) => {
+                if matches!(role, Role::Spectator) && registration.host_connected {
+                    let _ = send_response(&mut sink, &RelayResponse::HostConnected).await;
+                }
+                None
+            }
+            Err(e) => {
+                let _ = send_response(
+                    &mut sink,
+                    &RelayResponse::Error {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+                return;
+            }
         }
     };
 
@@ -114,11 +164,22 @@ pub async fn handle_connection(
         return;
     }
 
-    // 4. If peer is already connected, notify both sides.
-    if let Some(ref peer) = peer_tx {
-        let _ = send_response(&mut sink, &RelayResponse::PeerConnected).await;
-        let json = serde_json::to_string(&RelayResponse::PeerConnected).unwrap();
-        let _ = peer.send(json).await;
+    // 4. Notify peers.
+    if role.session_kind() == SessionKind::Bridge {
+        if let Some(ref peer) = peer_tx {
+            let _ = send_response(&mut sink, &RelayResponse::PeerConnected).await;
+            let json = serde_json::to_string(&RelayResponse::PeerConnected).unwrap();
+            let _ = peer.send(json).await;
+        }
+    } else {
+        if matches!(role, Role::Host) {
+            let json = serde_json::to_string(&RelayResponse::HostConnected).unwrap();
+            for peer in store.spectator_targets(&session_id).await {
+                let _ = peer.send(json.clone()).await;
+            }
+        }
+
+        notify_viewer_count(&store, &session_id).await;
     }
 
     // 5. Forwarding loop.
@@ -135,11 +196,17 @@ pub async fn handle_connection(
             frame = stream.next() => {
                 match frame {
                     Some(Ok(Message::Text(text))) => {
-                        // Forward to peer if connected
-                        if let Some(peer) = store.get_peer_tx(&session_id, role).await {
-                            if peer.send(text.to_string()).await.is_err() {
-                                // Peer's channel closed -- they disconnected
-                                tracing::debug!(session = %session_id, "Peer channel closed");
+                        if role.session_kind() == SessionKind::Bridge {
+                            if let Some(peer) = store.get_peer_tx(&session_id, role).await {
+                                if peer.send(text.to_string()).await.is_err() {
+                                    tracing::debug!(session = %session_id, "Peer channel closed");
+                                }
+                            }
+                        } else if matches!(role, Role::Host) {
+                            for peer in store.spectator_targets(&session_id).await {
+                                if peer.send(text.to_string()).await.is_err() {
+                                    tracing::debug!(session = %session_id, "Spectator channel closed");
+                                }
                             }
                         }
                     }
@@ -165,13 +232,23 @@ pub async fn handle_connection(
         "Client disconnected"
     );
 
-    // Notify peer of disconnection.
-    if let Some(peer) = store.get_peer_tx(&session_id, role).await {
-        let json = serde_json::to_string(&RelayResponse::PeerDisconnected).unwrap();
-        let _ = peer.send(json).await;
-    }
-
+    drop(rx);
     store.unregister(&session_id, role).await;
+
+    if role.session_kind() == SessionKind::Bridge {
+        if let Some(peer) = store.get_peer_tx(&session_id, role).await {
+            let json = serde_json::to_string(&RelayResponse::PeerDisconnected).unwrap();
+            let _ = peer.send(json).await;
+        }
+    } else {
+        if matches!(role, Role::Host) {
+            let json = serde_json::to_string(&RelayResponse::HostDisconnected).unwrap();
+            for peer in store.spectator_targets(&session_id).await {
+                let _ = peer.send(json.clone()).await;
+            }
+        }
+        notify_viewer_count(&store, &session_id).await;
+    }
 }
 
 /// Read and parse the first message as a RelayHello.
@@ -188,6 +265,8 @@ async fn read_hello(
         Ok(Some(Ok(Message::Text(text)))) => match serde_json::from_str::<RelayHello>(&text) {
             Ok(RelayHello::DesktopHello { session_id }) => Some((session_id, Role::Desktop)),
             Ok(RelayHello::MobileHello { session_id }) => Some((session_id, Role::Mobile)),
+            Ok(RelayHello::HostHello { session_id }) => Some((session_id, Role::Host)),
+            Ok(RelayHello::SpectatorHello { session_id }) => Some((session_id, Role::Spectator)),
             Err(e) => {
                 tracing::warn!(peer = %addr, error = %e, "Invalid hello message");
                 None
@@ -222,4 +301,15 @@ async fn send_response(
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     let json = serde_json::to_string(response).unwrap();
     sink.send(Message::Text(json.into())).await
+}
+
+async fn notify_viewer_count(store: &SessionStore, session_id: &str) {
+    let json = serde_json::to_string(&RelayResponse::ViewerCount {
+        count: store.viewer_count(session_id).await,
+    })
+    .unwrap();
+
+    for peer in store.broadcast_targets(session_id).await {
+        let _ = peer.send(json.clone()).await;
+    }
 }

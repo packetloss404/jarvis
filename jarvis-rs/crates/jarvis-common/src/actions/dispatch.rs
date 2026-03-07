@@ -20,6 +20,7 @@ impl Action {
             Action::ResizePane { .. } => "Resize Pane",
             Action::SwapPane(_) => "Swap Pane",
             Action::ToggleFullscreen => "Toggle Fullscreen",
+            Action::ToggleBlankPane => "Toggle Blank Window",
             Action::Quit => "Quit",
             Action::OpenCommandPalette => "Command Palette",
             Action::OpenSettings => "Open Settings",
@@ -103,7 +104,7 @@ impl Action {
             | Action::SwapPane(_)
             | Action::ResizePane { .. } => "Panes",
 
-            Action::ToggleFullscreen | Action::Quit => "Window",
+            Action::ToggleFullscreen | Action::ToggleBlankPane | Action::Quit => "Window",
 
             Action::OpenSettings
             | Action::OpenAssistant
@@ -156,6 +157,7 @@ impl Action {
             Action::SplitHorizontal,
             Action::SplitVertical,
             Action::ToggleFullscreen,
+            Action::ToggleBlankPane,
             Action::OpenSettings,
             Action::OpenChat,
             Action::OpenURLPrompt,
