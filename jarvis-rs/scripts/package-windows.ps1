@@ -62,22 +62,30 @@ function Normalize-PathKey([string]$value) {
     return $value.Replace('/', '\').TrimEnd('\')
 }
 
-function Ensure-Directory([string]$dirPath) {
+function Get-DirectoryId([string]$dirPath) {
     $dirPath = Normalize-PathKey $dirPath
-    if ($dirPath -eq (Normalize-PathKey $installRoot)) {
+    $rootPath = Normalize-PathKey $installRoot
+    if ($dirPath -eq $rootPath) {
         return 'INSTALLFOLDER'
     }
+
+    $relativePath = $dirPath.Substring($rootPath.Length).TrimStart('\\')
+    if (-not $relativePath) {
+        return 'INSTALLFOLDER'
+    }
+
+    return Normalize-Id $relativePath
+}
+
+function Ensure-Directory([string]$dirPath) {
+    $dirPath = Normalize-PathKey $dirPath
     if ($dirIds.ContainsKey($dirPath)) {
         return $dirIds[$dirPath]
     }
 
     $parent = Split-Path -Parent $dirPath
     Ensure-Directory $parent | Out-Null
-    $relativePath = $dirPath.Substring($installRoot.Length).TrimStart('\\')
-    if (-not $relativePath) {
-        return 'INSTALLFOLDER'
-    }
-    $id = Normalize-Id $relativePath
+    $id = Get-DirectoryId $dirPath
     $dirIds[$dirPath] = $id
     return $id
 }
@@ -108,8 +116,7 @@ foreach ($relativeDir in $relativeDirs) {
 
     for ($i = $common; $i -lt $parts.Length; $i++) {
         $currentRelative = ($parts[0..$i] -join '\\')
-        $currentPath = Normalize-PathKey (Join-Path $installRoot $currentRelative)
-        $dirId = $dirIds[$currentPath]
+        $dirId = Normalize-Id $currentRelative
         $indent = '      ' + ('  ' * $i)
         $directoryLines.Add(($indent + '<Directory Id="' + $dirId + '" Name="' + $parts[$i] + '">')) | Out-Null
     }
