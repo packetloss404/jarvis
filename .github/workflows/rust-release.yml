@@ -197,4 +197,4 @@ jobs:
             artifacts/linux-binaries/jarvis_*.deb
             artifacts/windows-binaries/Jarvis.msi
             artifacts/windows-binaries/jarvis-windows-x64.zip
-            artifacts/windows-binaries/*.yaml
+            artifacts/windows-binaries/**/*.yaml
