@@ -8,6 +8,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use include_dir::{include_dir, Dir};
+
+/// Panels directory embedded at compile time so the binary is self-contained.
+static EMBEDDED_PANELS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../assets/panels");
+
 /// Serves local files from a base directory via custom protocol.
 ///
 /// When a WebView requests `jarvis://app/index.html`, the content
@@ -90,15 +95,27 @@ impl ContentProvider {
 
         // Prevent directory traversal (including symlink bypass).
         // Canonicalize both paths to resolve symlinks, `..`, etc.
-        let canonical_base = std::fs::canonicalize(&self.base_dir).ok()?;
-        let canonical_file = std::fs::canonicalize(&file_path).ok()?;
-        if !canonical_file.starts_with(&canonical_base) {
-            return None;
+        let canonical_base = std::fs::canonicalize(&self.base_dir).ok();
+        let canonical_file = std::fs::canonicalize(&file_path).ok();
+
+        if let (Some(base), Some(file)) = (&canonical_base, &canonical_file) {
+            if file.starts_with(base) {
+                if let Ok(data) = std::fs::read(file) {
+                    let mime = mime_from_extension(&file_path);
+                    return Some((Cow::Owned(mime.to_string()), Cow::Owned(data)));
+                }
+            }
         }
 
-        let data = std::fs::read(&canonical_file).ok()?;
-        let mime = mime_from_extension(&file_path);
-        Some((Cow::Owned(mime.to_string()), Cow::Owned(data)))
+        // Fall back to embedded assets.
+        // The embedded dir is rooted at assets/panels, so strip the "panels/" prefix.
+        let embedded_path = clean.strip_prefix("panels/").unwrap_or(clean);
+        if embedded_path.contains("..") {
+            return None;
+        }
+        let entry = EMBEDDED_PANELS.get_file(embedded_path)?;
+        let mime = mime_from_extension(Path::new(embedded_path));
+        Some((Cow::Borrowed(mime), Cow::Borrowed(entry.contents())))
     }
 
     /// Resolve an asset from a plugin directory with containment check.

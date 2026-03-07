@@ -29,7 +29,7 @@ impl JarvisApp {
     pub(super) fn initialize_window(&mut self, event_loop: &ActiveEventLoop) -> bool {
         let mut attrs = WindowAttributes::default()
             .with_title("Jarvis")
-            .with_transparent(true)
+            .with_transparent(cfg!(target_os = "macos"))
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0));
 
         // Load window icon from embedded PNG

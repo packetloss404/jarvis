@@ -22,7 +22,9 @@ impl Default for WebViewConfig {
         Self {
             url: None,
             html: None,
-            transparent: true,
+            // macOS needs transparency for titlebar blending;
+            // Windows WebView2 ghosts/bleeds with transparent backgrounds.
+            transparent: cfg!(target_os = "macos"),
             devtools: cfg!(debug_assertions),
             user_agent: Some("Jarvis/0.1".to_string()),
             clipboard: true,
