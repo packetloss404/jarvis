@@ -155,7 +155,20 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             });
             return;
         }
-        if (e.metaKey && !e.repeat) {
+        // Forward function keys (F1-F12) to Rust for app keybinds
+        if (/^F\d{1,2}$/.test(e.key) && !e.repeat) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.jarvis.ipc.send('keybind', {
+                key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey
+            });
+            return;
+        }
+        // On macOS, Cmd+key is the primary modifier; on Windows/Linux, Ctrl+key.
+        // Forward both so app keybinds work on all platforms.
+        var _isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+        var _isAppShortcut = _isMac ? e.metaKey : e.ctrlKey;
+        if (_isAppShortcut && !e.repeat) {
             var key = e.key.toUpperCase();
             // Copy: grab selection from xterm or DOM and send to Rust
             if (key === 'C') {
@@ -192,14 +205,17 @@ pub const IPC_INIT_SCRIPT: &str = r#"
             }
             // Skip shortcuts that should be handled natively by the webview
             if (key === 'R' || key === 'L' || key === 'Q' || key === 'A' || key === 'X' || key === 'Z') return;
+            // On Windows/Linux, let Ctrl+single-char through to the terminal
+            // (e.g. Ctrl+C for SIGINT) unless Shift is also held (app shortcut)
+            if (!_isMac && !e.shiftKey && !e.altKey && key.length === 1 && key !== ' ') return;
             e.preventDefault();
             e.stopPropagation();
             window.jarvis.ipc.send('keybind', {
-                key: key,
+                key: key === ' ' ? 'Space' : key,
                 ctrl: e.ctrlKey,
                 alt: e.altKey,
                 shift: e.shiftKey,
-                meta: true
+                meta: e.metaKey
             });
         }
     }, true);

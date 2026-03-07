@@ -54,7 +54,11 @@ impl Default for KeybindConfig {
             split_vertical: "Cmd+D".into(),
             split_horizontal: "Cmd+Shift+D".into(),
             close_pane: "Cmd+W".into(),
-            command_palette: "Cmd+Shift+P".into(),
+            command_palette: if cfg!(target_os = "macos") {
+                "Cmd+Shift+P".into()
+            } else {
+                "F1".into()
+            },
             copy: "Cmd+C".into(),
             paste: "Cmd+V".into(),
         }
