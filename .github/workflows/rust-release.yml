@@ -46,6 +46,7 @@ jobs:
           fi
 
       - name: Install Apple certificate
+        if: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.MACOS_CERTIFICATE_PWD != '' }}
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
@@ -61,11 +62,16 @@ jobs:
       - name: Build macOS package
         env:
           JARVIS_VERSION: ${{ steps.version.outputs.version }}
-          CODE_SIGN_IDENTITY: "Developer ID Application: Dylan Burton (BM79XU2ZAL)"
+          CODE_SIGN_IDENTITY: ${{ secrets.MACOS_CODE_SIGN_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: ./scripts/package-macos.sh --release --notarize
+        run: |
+          if [[ -n "$APPLE_ID" && -n "$APPLE_ID_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            ./scripts/package-macos.sh --release --notarize
+          else
+            ./scripts/package-macos.sh --release
+          fi
         working-directory: jarvis-rs
 
       - name: Upload macOS artifact

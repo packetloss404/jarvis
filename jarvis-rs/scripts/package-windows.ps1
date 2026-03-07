@@ -103,7 +103,7 @@ foreach ($relativeDir in $relativeDirs) {
         $currentPath = Join-Path $installRoot $currentRelative
         $dirId = $dirIds[$currentPath]
         $indent = '      ' + ('  ' * $i)
-        $directoryLines.Add("$indent<Directory Id=\"$dirId\" Name=\"$($parts[$i])\">") | Out-Null
+        $directoryLines.Add(($indent + '<Directory Id="' + $dirId + '" Name="' + $parts[$i] + '">')) | Out-Null
     }
 
     $previousParts = $parts
