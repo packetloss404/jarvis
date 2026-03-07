@@ -68,8 +68,11 @@ function Ensure-Directory([string]$dirPath) {
 
     $parent = Split-Path -Parent $dirPath
     Ensure-Directory $parent | Out-Null
-    $name = Split-Path -Leaf $dirPath
-    $id = Normalize-Id ((Resolve-Path -Relative $dirPath) -replace '^[.\\/]+', '')
+    $relativePath = $dirPath.Substring($installRoot.Length).TrimStart('\\')
+    if (-not $relativePath) {
+        return 'INSTALLFOLDER'
+    }
+    $id = Normalize-Id $relativePath
     $dirIds[$dirPath] = $id
     return $id
 }
