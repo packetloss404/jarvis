@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -27,6 +28,21 @@ use super::types::{AssistantEvent, PresenceCommand};
 #[derive(Debug, Clone)]
 pub(super) struct ChatStreamHostState {
     pub controller_pane_id: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ChatStreamCaptureRequest {
+    pub controller_pane_id: u32,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ChatStreamCaptureResult {
+    pub controller_pane_id: u32,
+    pub frame: Result<String, String>,
 }
 
 /// Top-level application state.
@@ -84,6 +100,9 @@ pub struct JarvisApp {
     pub(super) pairing_pane_id: Option<u32>,
     pub(super) chat_stream_host: Option<ChatStreamHostState>,
     pub(super) last_chat_stream_frame_at: Instant,
+    pub(super) chat_stream_capture_tx: Option<SyncSender<ChatStreamCaptureRequest>>,
+    pub(super) chat_stream_capture_rx: Option<Receiver<ChatStreamCaptureResult>>,
+    pub(super) chat_stream_capture_in_flight: bool,
     pub(super) last_terminal_focus: Option<u32>,
 
     // Crypto service (identity + encryption)
@@ -160,6 +179,9 @@ impl JarvisApp {
             pairing_pane_id: None,
             chat_stream_host: None,
             last_chat_stream_frame_at: Instant::now(),
+            chat_stream_capture_tx: None,
+            chat_stream_capture_rx: None,
+            chat_stream_capture_in_flight: false,
             last_terminal_focus: Some(1),
             crypto: None,
             boot: None,

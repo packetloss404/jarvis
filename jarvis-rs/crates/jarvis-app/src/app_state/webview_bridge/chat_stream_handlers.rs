@@ -1,10 +1,14 @@
 //! IPC handlers for chat relay streaming.
 
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use jarvis_webview::IpcPayload;
 
-use crate::app_state::core::{ChatStreamHostState, JarvisApp};
+use crate::app_state::core::{
+    ChatStreamCaptureRequest, ChatStreamCaptureResult, ChatStreamHostState, JarvisApp,
+};
 
 const CHAT_STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(350);
 
@@ -42,35 +46,72 @@ impl JarvisApp {
             return;
         };
 
+        while let Some(result) = self.try_recv_chat_stream_frame() {
+            self.chat_stream_capture_in_flight = false;
+
+            if result.controller_pane_id != state.controller_pane_id {
+                continue;
+            }
+
+            let payload = match result.frame {
+                Ok(frame) => serde_json::json!({
+                    "mime": "image/jpeg",
+                    "dataUrl": frame,
+                    "title": "Workspace",
+                }),
+                Err(error) => serde_json::json!({
+                    "error": error,
+                }),
+            };
+
+            if let Some(ref registry) = self.webviews {
+                if let Some(handle) = registry.get(state.controller_pane_id) {
+                    if let Err(e) = handle.send_ipc("chat_stream_host_frame", &payload) {
+                        tracing::warn!(
+                            pane_id = state.controller_pane_id,
+                            error = %e,
+                            "Failed to send chat stream frame"
+                        );
+                    }
+                }
+            }
+        }
+
         if Instant::now().duration_since(self.last_chat_stream_frame_at)
             < CHAT_STREAM_FRAME_INTERVAL
         {
             return;
         }
 
+        if self.chat_stream_capture_in_flight {
+            return;
+        }
+
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let Ok(pos) = window.outer_position() else {
+            return;
+        };
+        let size = window.outer_size();
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+
         self.last_chat_stream_frame_at = Instant::now();
 
-        let payload = match capture_workspace_frame(self) {
-            Ok(frame) => serde_json::json!({
-                "mime": "image/jpeg",
-                "dataUrl": frame,
-                "title": "Workspace",
-            }),
-            Err(error) => serde_json::json!({
-                "error": error,
-            }),
+        let Some(tx) = self.chat_stream_capture_tx.as_ref() else {
+            return;
         };
-
-        if let Some(ref registry) = self.webviews {
-            if let Some(handle) = registry.get(state.controller_pane_id) {
-                if let Err(e) = handle.send_ipc("chat_stream_host_frame", &payload) {
-                    tracing::warn!(
-                        pane_id = state.controller_pane_id,
-                        error = %e,
-                        "Failed to send chat stream frame"
-                    );
-                }
-            }
+        let request = ChatStreamCaptureRequest {
+            controller_pane_id: state.controller_pane_id,
+            x: pos.x,
+            y: pos.y,
+            width: size.width,
+            height: size.height,
+        };
+        if tx.try_send(request).is_ok() {
+            self.chat_stream_capture_in_flight = true;
         }
     }
 
@@ -111,6 +152,8 @@ impl JarvisApp {
         self.chat_stream_host = Some(ChatStreamHostState {
             controller_pane_id: pane_id,
         });
+        self.ensure_chat_stream_worker();
+        self.chat_stream_capture_in_flight = false;
         self.last_chat_stream_frame_at = Instant::now() - CHAT_STREAM_FRAME_INTERVAL;
 
         self.chat_stream_respond_status(pane_id, req_id, None);
@@ -172,6 +215,44 @@ impl JarvisApp {
     }
 }
 
+impl JarvisApp {
+    fn try_recv_chat_stream_frame(&mut self) -> Option<ChatStreamCaptureResult> {
+        let rx = self.chat_stream_capture_rx.as_ref()?;
+        match rx.try_recv() {
+            Ok(frame) => Some(frame),
+            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => None,
+        }
+    }
+
+    fn ensure_chat_stream_worker(&mut self) {
+        if self.chat_stream_capture_tx.is_some() && self.chat_stream_capture_rx.is_some() {
+            return;
+        }
+
+        let (request_tx, request_rx): (
+            SyncSender<ChatStreamCaptureRequest>,
+            Receiver<ChatStreamCaptureRequest>,
+        ) = sync_channel(1);
+        let (result_tx, result_rx): (
+            SyncSender<ChatStreamCaptureResult>,
+            Receiver<ChatStreamCaptureResult>,
+        ) = sync_channel(1);
+
+        thread::spawn(move || {
+            while let Ok(request) = request_rx.recv() {
+                let frame = capture_workspace_frame_from_request(request);
+                let _ = result_tx.send(ChatStreamCaptureResult {
+                    controller_pane_id: request.controller_pane_id,
+                    frame,
+                });
+            }
+        });
+
+        self.chat_stream_capture_tx = Some(request_tx);
+        self.chat_stream_capture_rx = Some(result_rx);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn ensure_workspace_capture_available() -> Result<(), &'static str> {
     Ok(())
@@ -183,7 +264,9 @@ fn ensure_workspace_capture_available() -> Result<(), &'static str> {
 }
 
 #[cfg(target_os = "macos")]
-fn capture_workspace_frame(app: &JarvisApp) -> Result<String, String> {
+fn capture_workspace_frame_from_request(
+    request: ChatStreamCaptureRequest,
+) -> Result<String, String> {
     use core_graphics::display::{
         kCGNullWindowID, kCGWindowImageDefault, kCGWindowListOptionOnScreenOnly, CGDisplay,
     };
@@ -192,22 +275,9 @@ fn capture_workspace_frame(app: &JarvisApp) -> Result<String, String> {
     use image::imageops::FilterType;
     use image::{DynamicImage, ImageBuffer, Rgba};
 
-    let window = app
-        .window
-        .as_ref()
-        .ok_or_else(|| "window unavailable".to_string())?;
-    let pos = window
-        .outer_position()
-        .map_err(|e| format!("window position unavailable: {e}"))?;
-    let size = window.outer_size();
-
-    if size.width == 0 || size.height == 0 {
-        return Err("window is not visible yet".into());
-    }
-
     let bounds = CGRect::new(
-        &CGPoint::new(pos.x as f64, pos.y as f64),
-        &CGSize::new(size.width as f64, size.height as f64),
+        &CGPoint::new(request.x as f64, request.y as f64),
+        &CGSize::new(request.width as f64, request.height as f64),
     );
     let image = CGDisplay::screenshot(
         bounds,
@@ -250,6 +320,8 @@ fn capture_workspace_frame(app: &JarvisApp) -> Result<String, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn capture_workspace_frame(_app: &JarvisApp) -> Result<String, String> {
+fn capture_workspace_frame_from_request(
+    _request: ChatStreamCaptureRequest,
+) -> Result<String, String> {
     Err("workspace streaming currently supports macOS only".into())
 }
