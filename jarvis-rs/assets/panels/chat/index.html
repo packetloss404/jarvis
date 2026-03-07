@@ -1868,7 +1868,7 @@ const LiveStream = {
     this.hostNick = '';
     this.sourceTitle = '';
     this.viewerCount = 0;
-    this.render();
+    UI.renderLiveStream({ visible: false });
     this.connect('spectator');
   },
 
@@ -1924,12 +1924,10 @@ const LiveStream = {
     this.remoteActive = false;
     this.role = 'spectator';
     this.disconnect();
+    this.imageUrl = '';
+    this.viewerCount = 0;
     UI.setLiveButton(false);
-    if (this.imageUrl) {
-      this.render(reason || 'Ended');
-    } else {
-      UI.renderLiveStream({ visible: false });
-    }
+    UI.renderLiveStream({ visible: false });
     this.connect('spectator');
   },
 
@@ -1992,7 +1990,9 @@ const LiveStream = {
     if (msg.type === 'host_disconnected') {
       if (!this.localActive) {
         this.remoteActive = false;
-        this.render('Ended');
+        this.imageUrl = '';
+        this.viewerCount = 0;
+        UI.renderLiveStream({ visible: false });
       }
       return;
     }
@@ -2007,6 +2007,8 @@ const LiveStream = {
     }
     if (msg.type === 'workspace_frame') {
       if (this.localActive) return;
+      // Ignore stale frames older than 10 seconds (relay may cache last frame)
+      if (msg.ts && (Date.now() - msg.ts) > 10000) return;
       this.remoteActive = true;
       this.hostNick = msg.hostNick || 'Host';
       this.sourceTitle = msg.title || 'Workspace';
