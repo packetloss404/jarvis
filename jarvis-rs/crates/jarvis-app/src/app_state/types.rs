@@ -27,5 +27,5 @@ pub(super) enum PresenceCommand {
     },
 }
 
-/// How often to poll for events (approx 120 Hz).
-pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(8);
+/// How often to poll for events (approx 60 Hz).
+pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(16);

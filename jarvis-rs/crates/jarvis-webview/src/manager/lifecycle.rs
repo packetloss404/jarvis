@@ -106,6 +106,7 @@ impl WebViewManager {
                         .status(200)
                         .header("Content-Type", mime.as_ref())
                         .header("Access-Control-Allow-Origin", "jarvis://localhost")
+                        .header("Cache-Control", "no-store")
                         .body(std::borrow::Cow::from(data.into_owned()))
                         .unwrap(),
                     None => {

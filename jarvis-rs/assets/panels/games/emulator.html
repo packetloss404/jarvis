@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>JARVIS Emulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+body {
+  background: #0a0a0a;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+  user-select: none;
+  color: #ccc;
+}
+
+#launcher {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 40px;
+  border: 1px solid #1a3a4a;
+  border-radius: 8px;
+  background: #0d1117;
+  box-shadow: 0 0 40px rgba(0, 229, 255, 0.08);
+  max-width: 420px;
+  width: 90%;
+}
+
+#launcher h1 {
+  color: #00e5ff;
+  font-size: 18px;
+  letter-spacing: 4px;
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
+}
+
+.field { width: 100%; }
+
+label {
+  display: block;
+  color: #6a7a8a;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+select {
+  width: 100%;
+  padding: 10px 12px;
+  background: #161b22;
+  color: #ccc;
+  border: 1px solid #1a3a4a;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+}
+
+select:focus {
+  border-color: #00e5ff;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.2);
+}
+
+#rom-select option:disabled {
+  color: #3a4a5a;
+}
+
+.or-divider {
+  color: #3a4a5a;
+  font-size: 11px;
+  text-align: center;
+  margin: -8px 0;
+}
+
+#drop-zone {
+  width: 100%;
+  padding: 24px 16px;
+  border: 2px dashed #1a3a4a;
+  border-radius: 4px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  position: relative;
+}
+
+#drop-zone:hover,
+#drop-zone.drag-over {
+  border-color: #00e5ff;
+  background: rgba(0, 229, 255, 0.04);
+}
+
+#drop-zone p {
+  color: #6a7a8a;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+#rom-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.status-msg {
+  color: #ff6b00;
+  font-size: 12px;
+  text-align: center;
+  min-height: 16px;
+  word-break: break-all;
+}
+
+#boot-btn {
+  width: 100%;
+  padding: 12px;
+  background: transparent;
+  color: #2a3a4a;
+  border: 2px solid #1a3a4a;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  cursor: not-allowed;
+  transition: all 0.2s;
+}
+
+#boot-btn.ready {
+  color: #00e5ff;
+  border-color: #00e5ff;
+  cursor: pointer;
+  text-shadow: 0 0 8px rgba(0, 229, 255, 0.5);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
+}
+
+#boot-btn.ready:hover {
+  background: rgba(0, 229, 255, 0.08);
+}
+
+#boot-btn.loading {
+  color: #ff6b00;
+  border-color: #ff6b00;
+  cursor: wait;
+}
+
+.hint {
+  color: #3a4a5a;
+  font-size: 11px;
+}
+
+#ejs-player {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  background: #000;
+  z-index: 1;
+}
+
+/* Force opaque background on the whole page once emulator runs */
+body.emulator-active {
+  background: #000 !important;
+  display: block;
+}
+body.emulator-active #ejs-player {
+  background: #000 !important;
+}
+body.emulator-active #ejs-player,
+body.emulator-active #ejs-player *,
+body.emulator-active canvas,
+body.emulator-active video,
+body.emulator-active iframe {
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+body.emulator-active #ejs-player canvas,
+body.emulator-active #ejs-player video,
+body.emulator-active #ejs-player iframe {
+  display: block !important;
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  background: #000 !important;
+  z-index: 2 !important;
+}
+</style>
+</head>
+<body>
+
+<div id="launcher">
+  <h1>EMULATOR</h1>
+
+  <div class="field">
+    <label for="core-select">System</label>
+    <select id="core-select">
+      <option value="nes">NES</option>
+      <option value="snes">SNES</option>
+      <option value="gb">Game Boy</option>
+      <option value="gba" selected>Game Boy Advance</option>
+      <option value="nds">Nintendo DS</option>
+      <option value="n64">Nintendo 64</option>
+      <option value="psx">PlayStation</option>
+      <option value="segaMD">Sega Genesis</option>
+      <option value="segaMS">Sega Master System</option>
+      <option value="atari2600">Atari 2600</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="rom-select">ROM &mdash; ~/ROMs</label>
+    <select id="rom-select">
+      <option value="" disabled selected>Scanning...</option>
+    </select>
+  </div>
+
+  <p class="or-divider">or</p>
+
+  <div id="drop-zone">
+    <input type="file" id="rom-input"
+      accept=".nes,.smc,.sfc,.gb,.gbc,.gba,.nds,.n64,.z64,.v64,.bin,.cue,.iso,.md,.smd,.sms,.gg,.a26,.zip,.7z">
+    <p>Drop ROM or click to browse</p>
+  </div>
+
+  <p class="status-msg" id="status-msg"></p>
+
+  <button id="boot-btn" disabled>BOOT</button>
+  <p class="hint">Press Escape to exit</p>
+</div>
+
+<div id="ejs-player"></div>
+
+<script>
+'use strict';
+var romSelect = document.getElementById('rom-select');
+var romInput = document.getElementById('rom-input');
+var bootBtn = document.getElementById('boot-btn');
+var dropZone = document.getElementById('drop-zone');
+var statusMsg = document.getElementById('status-msg');
+
+/* State: either a File from picker or a filename from ~/ROMs */
+var selectedFile = null;
+var selectedRomName = null;
+
+function setReady(name) {
+  statusMsg.textContent = name;
+  bootBtn.disabled = false;
+  bootBtn.className = 'ready';
+}
+
+/* ---- ROM dropdown via IPC ---- */
+function loadRomList() {
+  if (!window.jarvis || !window.jarvis.ipc) {
+    romSelect.innerHTML = '<option value="" disabled selected>IPC not available</option>';
+    return;
+  }
+  window.jarvis.ipc.request('emulator_list_roms', {}).then(function(resp) {
+    if (resp.error) {
+      romSelect.innerHTML = '<option value="" disabled selected>' + resp.error + '</option>';
+      return;
+    }
+    var roms = resp.roms || [];
+    if (roms.length === 0) {
+      romSelect.innerHTML = '<option value="" disabled selected>No ROMs in ~/ROMs</option>';
+      return;
+    }
+    romSelect.innerHTML = '<option value="" disabled selected>Select a ROM...</option>';
+    for (var i = 0; i < roms.length; i++) {
+      var opt = document.createElement('option');
+      opt.value = roms[i];
+      opt.textContent = roms[i];
+      romSelect.appendChild(opt);
+    }
+  });
+}
+
+romSelect.addEventListener('change', function() {
+  selectedFile = null;
+  selectedRomName = romSelect.value;
+  romInput.value = '';
+  setReady(selectedRomName);
+});
+
+/* ---- File picker / drag-drop fallback ---- */
+function setFileFromPicker(file) {
+  if (!file) return;
+  selectedFile = file;
+  selectedRomName = null;
+  romSelect.value = '';
+  setReady(file.name);
+}
+
+romInput.addEventListener('change', function(e) {
+  setFileFromPicker(e.target.files[0]);
+});
+
+dropZone.addEventListener('dragover', function(e) {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', function() {
+  dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', function(e) {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  setFileFromPicker(e.dataTransfer.files[0]);
+});
+
+/* ---- Debug log: overlay + persist to Rust logs via IPC ---- */
+var _logLines = [];
+var debugEl = document.createElement('div');
+debugEl.id = 'debug-log';
+debugEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;max-height:30vh;overflow:auto;background:rgba(0,0,0,0.8);color:#0f0;font-family:Courier New,monospace;font-size:11px;padding:8px;z-index:99999;white-space:pre-wrap;border-top:1px solid #333;pointer-events:none;';
+document.body.appendChild(debugEl);
+
+function dbg(msg) {
+  var line = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  _logLines.push(line);
+  debugEl.textContent += line + '\n';
+  debugEl.scrollTop = debugEl.scrollHeight;
+  /* Also forward to Rust via debug_event IPC so logs survive screen changes */
+  if (window.jarvis && window.jarvis.ipc) {
+    try { window.jarvis.ipc.send('debug_event', { msg: line }); } catch(e) {}
+  }
+}
+
+function showError(msg) { dbg('ERROR: ' + msg); }
+
+function inspectPlayerSurface(reason) {
+  var player = document.getElementById('ejs-player');
+  if (!player) return;
+  var rect = player.getBoundingClientRect();
+  var canvasCount = player.querySelectorAll('canvas').length;
+  var iframeCount = player.querySelectorAll('iframe').length;
+  var videoCount = player.querySelectorAll('video').length;
+  dbg(
+    'surface[' + reason + '] player=' +
+    Math.round(rect.width) + 'x' + Math.round(rect.height) +
+    ' canvases=' + canvasCount +
+    ' iframes=' + iframeCount +
+    ' videos=' + videoCount
+  );
+}
+
+function stabilizePlayerSurface(reason) {
+  var player = document.getElementById('ejs-player');
+  if (!player) return;
+
+  player.style.display = 'block';
+  player.style.position = 'fixed';
+  player.style.inset = '0';
+  player.style.width = '100vw';
+  player.style.height = '100vh';
+  player.style.background = '#000';
+  player.style.visibility = 'visible';
+  player.style.opacity = '1';
+
+  var surfaces = player.querySelectorAll('canvas, video, iframe');
+  for (var i = 0; i < surfaces.length; i++) {
+    var surface = surfaces[i];
+    surface.style.visibility = 'visible';
+    surface.style.opacity = '1';
+    surface.style.display = 'block';
+    surface.style.position = 'absolute';
+    surface.style.inset = '0';
+    surface.style.width = '100%';
+    surface.style.height = '100%';
+    surface.style.maxWidth = '100%';
+    surface.style.maxHeight = '100%';
+    surface.style.background = '#000';
+  }
+
+  inspectPlayerSurface(reason);
+}
+
+var playerObserver = null;
+
+function watchPlayerSurface() {
+  var player = document.getElementById('ejs-player');
+  if (!player || playerObserver) return;
+
+  playerObserver = new MutationObserver(function() {
+    stabilizePlayerSurface('mutation');
+  });
+
+  playerObserver.observe(player, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style', 'class', 'width', 'height']
+  });
+}
+
+window.onerror = function(msg, src, line, col, err) {
+  dbg('JS ERROR: ' + msg + ' at ' + src + ':' + line + ':' + col);
+};
+window.onunhandledrejection = function(e) {
+  dbg('PROMISE REJECT: ' + (e.reason ? (e.reason.message || e.reason) : 'unknown'));
+};
+
+dbg('emulator.html loaded');
+watchPlayerSurface();
+
+/* Monkey-patch getContext to force alpha:false on WebGL canvases.
+   WKWebView with transparent background causes WebGL canvases to be
+   invisible because the alpha channel makes everything see-through. */
+var _origGetContext = HTMLCanvasElement.prototype.getContext;
+HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+  if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+    attrs = attrs || {};
+    attrs.alpha = false;
+    attrs.preserveDrawingBuffer = true;
+    dbg('getContext(' + type + ') intercepted — forced alpha:false, preserveDrawingBuffer:true');
+  }
+  return _origGetContext.call(this, type, attrs);
+};
+
+/* ---- Boot ---- */
+function bootEmulator(romUrl, romName) {
+  var core = document.getElementById('core-select').value;
+  dbg('bootEmulator called: core=' + core + ' rom=' + romName + ' url=' + romUrl.substring(0, 80));
+
+  document.getElementById('launcher').style.display = 'none';
+  var player = document.getElementById('ejs-player');
+  player.style.display = 'block';
+  stabilizePlayerSurface('boot');
+  dbg('launcher hidden, player visible');
+
+  /* Auto-detect core from file extension */
+  var ext = romName.split('.').pop().toLowerCase();
+  var extCoreMap = {
+    'nes': 'nes', 'smc': 'snes', 'sfc': 'snes',
+    'gb': 'gb', 'gbc': 'gb', 'gba': 'gba',
+    'nds': 'nds', 'n64': 'n64', 'z64': 'n64', 'v64': 'n64',
+    'bin': 'segaMD', 'md': 'segaMD', 'smd': 'segaMD',
+    'sms': 'segaMS', 'gg': 'segaMS',
+    'iso': 'psx', 'cue': 'psx',
+    'a26': 'atari2600'
+  };
+  var detectedCore = extCoreMap[ext];
+  if (detectedCore && detectedCore !== core) {
+    dbg('Auto-corrected core: ' + core + ' -> ' + detectedCore + ' (based on .' + ext + ')');
+    core = detectedCore;
+  }
+
+  window.EJS_player = '#ejs-player';
+  window.EJS_gameUrl = romUrl;
+  window.EJS_core = core;
+  window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+  window.EJS_color = '#00e5ff';
+  window.EJS_backgroundColor = '#000000';
+  window.EJS_startOnLoaded = true;
+  window.EJS_gameName = romName.replace(/\.[^.]+$/, '');
+  window.EJS_ready = function() {
+    document.body.classList.add('emulator-active');
+    stabilizePlayerSurface('ready');
+    var attempts = 0;
+    var settleTimer = setInterval(function() {
+      attempts += 1;
+      stabilizePlayerSurface('settle-' + attempts);
+      if (attempts >= 20) clearInterval(settleTimer);
+    }, 250);
+    dbg('EmulatorJS READY — rendering directly (opaque WebView)');
+  };
+  dbg('EJS globals set: core=' + core + ' game=' + window.EJS_gameName + ', loading CDN script...');
+
+  var script = document.createElement('script');
+  script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+  script.onload = function() { dbg('CDN loader.js loaded OK'); };
+  script.onerror = function(e) {
+    dbg('CDN loader.js FAILED: ' + JSON.stringify(e));
+    showError('Failed to load EmulatorJS from CDN');
+  };
+  document.body.appendChild(script);
+  dbg('script tag appended');
+}
+
+bootBtn.addEventListener('click', function() {
+  dbg('BOOT clicked. selectedFile=' + !!selectedFile + ' selectedRomName=' + selectedRomName);
+  if (bootBtn.disabled) { dbg('boot btn disabled, ignoring'); return; }
+
+  /* From file picker — use blob URL directly */
+  if (selectedFile) {
+    dbg('Using file picker: ' + selectedFile.name + ' (' + selectedFile.size + ' bytes)');
+    var romUrl = URL.createObjectURL(selectedFile);
+    bootEmulator(romUrl, selectedFile.name);
+    return;
+  }
+
+  /* From ~/ROMs dropdown — load via IPC */
+  if (selectedRomName) {
+    dbg('Using IPC to load: ' + selectedRomName);
+    dbg('jarvis.ipc available: ' + !!(window.jarvis && window.jarvis.ipc));
+    if (!window.jarvis || !window.jarvis.ipc) {
+      dbg('ERROR: IPC not available');
+      return;
+    }
+    bootBtn.className = 'loading';
+    bootBtn.textContent = 'LOADING...';
+
+    dbg('Sending emulator_load_rom IPC...');
+    window.jarvis.ipc.request('emulator_load_rom', { filename: selectedRomName }).then(function(resp) {
+      dbg('IPC response received. error=' + (resp.error || 'none') + ' data_len=' + (resp.data ? resp.data.length : 0));
+      if (resp.error) {
+        showError('ROM load error: ' + resp.error);
+        return;
+      }
+      dbg('Decoding base64...');
+      try {
+        var raw = atob(resp.data);
+        var bytes = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        var blob = new Blob([bytes], { type: 'application/octet-stream' });
+        var romUrl = URL.createObjectURL(blob);
+        dbg('ROM decoded: ' + raw.length + ' bytes, blob URL created');
+        bootEmulator(romUrl, resp.filename || selectedRomName);
+      } catch (e) {
+        showError('Failed to decode ROM: ' + e.message);
+      }
+    }).catch(function(e) {
+      showError('IPC error: ' + (e.message || e));
+    });
+    return;
+  }
+
+  dbg('Nothing selected');
+});
+
+/* ---- Init: request ROM list ---- */
+dbg('Waiting for IPC bridge...');
+var ipcPoll = setInterval(function() {
+  if (window.jarvis && window.jarvis.ipc) {
+    clearInterval(ipcPoll);
+    dbg('IPC bridge ready, loading ROM list...');
+    loadRomList();
+  }
+}, 100);
+/* Timeout after 3s */
+setTimeout(function() {
+  clearInterval(ipcPoll);
+  if (!window.jarvis || !window.jarvis.ipc) {
+    romSelect.innerHTML = '<option value="" disabled selected>No IPC — use file picker</option>';
+  }
+}, 3000);
+
+/* Focus management — same pattern as tetris.html */
+document.addEventListener('click', function() { document.body.focus(); });
+window.addEventListener('focus', function() { document.body.focus(); });
+window.addEventListener('resize', function() { stabilizePlayerSurface('resize'); });
+</script>
+</body>
+</html>

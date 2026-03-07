@@ -29,6 +29,7 @@ const ALLOWED_GAMES: &[&str] = &[
     "draw",
     "subway",
     "videoplayer",
+    "emulator",
 ];
 
 // =============================================================================
@@ -107,6 +108,26 @@ impl JarvisApp {
         };
 
         let url = format!("jarvis://localhost/games/{}.html", game_name);
+
+        // Emulator needs an opaque webview — WebGL canvases are invisible in
+        // transparent WKWebViews because the alpha channel makes them see-through.
+        if game_name == "emulator" {
+            let original_url = self
+                .webviews
+                .as_ref()
+                .and_then(|r| r.get(pane_id))
+                .map(|h| h.current_url().to_string())
+                .unwrap_or_default();
+
+            // Destroy the existing transparent webview and recreate as opaque.
+            if let Some(ref mut registry) = self.webviews {
+                registry.destroy(pane_id);
+            }
+            self.create_webview_for_pane_opaque(pane_id, &url);
+            self.game_active.insert(pane_id, original_url);
+            tracing::info!(pane_id, game = %game_name, "Emulator launched (opaque WebView)");
+            return;
+        }
 
         if let Some(ref mut registry) = self.webviews {
             if let Some(handle) = registry.get_mut(pane_id) {

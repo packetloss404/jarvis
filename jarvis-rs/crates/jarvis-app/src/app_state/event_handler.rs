@@ -188,10 +188,15 @@ impl JarvisApp {
             InputResult::Action(action) => {
                 self.dispatch(action);
             }
-            InputResult::TerminalInput(_bytes) => {
-                // Webviews intercept all input before winit sees it, so this
-                // branch rarely fires. Terminal typing is handled natively by
-                // xterm.js through the focused webview.
+            InputResult::TerminalInput(bytes) => {
+                // Winit sees keyboard events when the webview hasn't yet
+                // taken first-responder (e.g. right after window focus or
+                // pane switch).  Forward the bytes to the focused PTY so
+                // the first few characters aren't silently dropped.
+                let focused = self.tiling.focused_id();
+                if let Err(e) = self.ptys.write_input(focused, &bytes) {
+                    tracing::warn!(focused, error = %e, "TerminalInput: PTY write failed");
+                }
             }
             InputResult::Consumed => {}
         }
@@ -387,7 +392,9 @@ impl JarvisApp {
                         // chrome gaps between/around panels are drag zones
                         let titlebar_h = self.config.window.titlebar_height as f64;
                         if y < titlebar_h {
-                            // Check if click lands on a tab before dragging
+                            // Focus the clicked tab (if any) and also allow
+                            // dragging — tabs span the full width so we must
+                            // handle both gestures from the same region.
                             if let Some(ref tab_bar) = self.chrome.tab_bar {
                                 let tab_count = tab_bar.tabs.len().max(1);
                                 let tab_w = viewport.width / tab_count as f64;
@@ -397,7 +404,6 @@ impl JarvisApp {
                                     self.tiling.focus_pane(target_id);
                                     self.notify_focus_changed();
                                     self.needs_redraw = true;
-                                    return;
                                 }
                             }
                             true

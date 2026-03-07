@@ -76,6 +76,29 @@ impl JarvisApp {
         pane_id: u32,
         url: &str,
     ) {
+        self.create_webview_for_pane_with_config(pane_id, WebViewConfig::with_url(url));
+    }
+
+    /// Create a webview for a pane with a specific URL and an opaque background.
+    ///
+    /// Used by the emulator panel — WebGL canvases are invisible in
+    /// transparent WebViews because the alpha channel makes them see-through.
+    pub(in crate::app_state) fn create_webview_for_pane_opaque(
+        &mut self,
+        pane_id: u32,
+        url: &str,
+    ) {
+        let mut config = WebViewConfig::with_url(url);
+        config.transparent = false;
+        self.create_webview_for_pane_with_config(pane_id, config);
+    }
+
+    /// Create a webview for a pane with a full config.
+    fn create_webview_for_pane_with_config(
+        &mut self,
+        pane_id: u32,
+        config: WebViewConfig,
+    ) {
         let window = match &self.window {
             Some(w) => w,
             None => {
@@ -108,11 +131,11 @@ impl JarvisApp {
             .map(|(_, r)| tiling_rect_to_wry(r))
             .unwrap_or_default();
 
-        let config = WebViewConfig::with_url(url);
+        let url_str = config.url.clone().unwrap_or_default();
         if let Err(e) = registry.create(pane_id, window.as_ref(), bounds, config) {
             tracing::error!(pane_id, error = %e, "Failed to create webview");
         } else {
-            tracing::info!(pane_id, url, "WebView created for pane");
+            tracing::info!(pane_id, url = %url_str, "WebView created for pane");
             self.inject_theme_into_all_webviews();
         }
     }

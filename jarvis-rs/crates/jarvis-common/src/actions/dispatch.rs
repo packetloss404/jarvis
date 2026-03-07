@@ -50,6 +50,7 @@ impl Action {
                 "draw" => "Open Draw",
                 "subway" => "Play Subway Surfers",
                 "videoplayer" => "Open Video Player",
+                "emulator" => "Launch Emulator",
                 _ => "Launch Game",
             },
             Action::OpenURL(ref url) => {
@@ -171,6 +172,7 @@ impl Action {
             Action::LaunchGame("doodlejump".into()),
             Action::LaunchGame("draw".into()),
             Action::LaunchGame("subway".into()),
+            Action::LaunchGame("emulator".into()),
             Action::OpenURL("https://kartbros.io".into()),
             Action::OpenURL("https://basketbros.io".into()),
             Action::OpenURL("https://footballbros.io".into()),

@@ -118,27 +118,9 @@ pub const IPC_INIT_SCRIPT: &str = r#"
         _origDispatch.call(window.jarvis.ipc, kind, payload);
     };
 
-    // =========================================================================
-    // Diagnostic event logging (temporary)
-    // =========================================================================
+    // Panel focus on click
     document.addEventListener('mousedown', function(e) {
         window.jarvis.ipc.send('panel_focus', {});
-        window.jarvis.ipc.send('debug_event', {
-            type: 'mousedown', x: e.clientX, y: e.clientY,
-            target: e.target.tagName + (e.target.id ? '#' + e.target.id : '')
-        });
-    }, true);
-    document.addEventListener('keydown', function(e) {
-        window.jarvis.ipc.send('debug_event', {
-            type: 'keydown', key: e.key, code: e.code,
-            meta: e.metaKey, shift: e.shiftKey
-        });
-    }, true);
-    document.addEventListener('focus', function() {
-        window.jarvis.ipc.send('debug_event', { type: 'focus' });
-    }, true);
-    document.addEventListener('blur', function() {
-        window.jarvis.ipc.send('debug_event', { type: 'blur' });
     }, true);
 
     // =========================================================================

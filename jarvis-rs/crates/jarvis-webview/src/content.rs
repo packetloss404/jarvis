@@ -251,6 +251,7 @@ mod tests {
             "panels/games/subway.html",
             "panels/games/draw.html",
             "panels/games/videoplayer.html",
+            "panels/games/emulator.html",
         ];
         for game in &games {
             let result = cp.resolve(game);
@@ -549,6 +550,7 @@ mod tests {
             "panels/games/subway.html",
             "panels/games/draw.html",
             "panels/games/videoplayer.html",
+            "panels/games/emulator.html",
             "panels/terminal/index.html",
             "panels/presence/index.html",
             "panels/settings/index.html",

@@ -46,6 +46,8 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "palette_hover",
     "palette_dismiss",
     "debug_event",
+    "emulator_list_roms",
+    "emulator_load_rom",
 ];
 
 /// Check whether an IPC message kind is in the allowlist.
@@ -106,7 +108,7 @@ impl JarvisApp {
                 self.needs_redraw = true;
             }
             "pty_input" => {
-                tracing::info!(pane_id, "pty_input received");
+                tracing::trace!(pane_id, "pty_input received");
                 self.handle_pty_input(pane_id, &msg.payload);
             }
             "pty_resize" => {
@@ -176,6 +178,12 @@ impl JarvisApp {
             }
             "read_file" => {
                 self.handle_read_file(pane_id, &msg.payload);
+            }
+            "emulator_list_roms" => {
+                self.handle_emulator_list_roms(pane_id, &msg.payload);
+            }
+            "emulator_load_rom" => {
+                self.handle_emulator_load_rom(pane_id, &msg.payload);
             }
             "clipboard_copy" => {
                 if let IpcPayload::Json(ref v) = msg.payload {
@@ -252,7 +260,7 @@ impl JarvisApp {
             }
             "debug_event" => {
                 if let IpcPayload::Json(ref v) = msg.payload {
-                    tracing::info!(pane_id, event = %v, "[JS] webview event");
+                    tracing::trace!(pane_id, event = %v, "[JS] webview event");
                 }
             }
             _ => {
@@ -329,10 +337,27 @@ impl JarvisApp {
         // When a game/URL is active on this pane, Escape navigates back
         if key == "Escape" {
             if let Some(original_url) = self.game_active.remove(&pane_id) {
-                tracing::info!(pane_id, "Exiting game, navigating back");
-                if let Some(ref mut registry) = self.webviews {
-                    if let Some(handle) = registry.get_mut(pane_id) {
-                        let _ = handle.load_url(&original_url);
+                // Check if this pane was using the emulator (opaque WebView).
+                // If so, destroy and recreate as transparent.
+                let is_emulator = self
+                    .webviews
+                    .as_ref()
+                    .and_then(|r| r.get(pane_id))
+                    .map(|h| h.current_url().contains("emulator"))
+                    .unwrap_or(false);
+
+                if is_emulator {
+                    tracing::info!(pane_id, "Exiting emulator, recreating transparent WebView");
+                    if let Some(ref mut registry) = self.webviews {
+                        registry.destroy(pane_id);
+                    }
+                    self.create_webview_for_pane_with_url(pane_id, &original_url);
+                } else {
+                    tracing::info!(pane_id, "Exiting game, navigating back");
+                    if let Some(ref mut registry) = self.webviews {
+                        if let Some(handle) = registry.get_mut(pane_id) {
+                            let _ = handle.load_url(&original_url);
+                        }
                     }
                 }
                 self.notify_focus_changed();

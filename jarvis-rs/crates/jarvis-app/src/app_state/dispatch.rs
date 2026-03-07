@@ -228,14 +228,32 @@ impl JarvisApp {
             Action::LaunchGame(ref game) => {
                 let pane_id = self.tiling.focused_id();
                 let game_url = format!("jarvis://localhost/games/{}.html", game);
-                if let Some(ref mut registry) = self.webviews {
-                    if let Some(handle) = registry.get_mut(pane_id) {
+
+                // Save original URL before navigating
+                if let Some(ref registry) = self.webviews {
+                    if let Some(handle) = registry.get(pane_id) {
                         let original_url = handle.current_url().to_string();
-                        if let Err(e) = handle.load_url(&game_url) {
-                            tracing::warn!(error = %e, "Failed to launch game");
-                        } else {
-                            tracing::info!(pane_id, game = %game, "Game launched");
-                            self.game_active.insert(pane_id, original_url);
+                        self.game_active.insert(pane_id, original_url);
+                    }
+                }
+
+                if game == "emulator" {
+                    // Emulator uses WebGL which requires a non-transparent WebView.
+                    // Destroy the existing transparent one and recreate as opaque.
+                    if let Some(ref mut registry) = self.webviews {
+                        registry.destroy(pane_id);
+                    }
+                    self.create_webview_for_pane_opaque(pane_id, &game_url);
+                    tracing::info!(pane_id, game = %game, "Emulator launched (opaque WebView)");
+                } else {
+                    if let Some(ref mut registry) = self.webviews {
+                        if let Some(handle) = registry.get_mut(pane_id) {
+                            if let Err(e) = handle.load_url(&game_url) {
+                                tracing::warn!(error = %e, "Failed to launch game");
+                                self.game_active.remove(&pane_id);
+                            } else {
+                                tracing::info!(pane_id, game = %game, "Game launched");
+                            }
                         }
                     }
                 }
