@@ -79,6 +79,10 @@ function Get-DirectoryId([string]$dirPath) {
 
 function Ensure-Directory([string]$dirPath) {
     $dirPath = Normalize-PathKey $dirPath
+    $rootPath = Normalize-PathKey $installRoot
+    if ($dirPath -eq $rootPath) {
+        return 'INSTALLFOLDER'
+    }
     if ($dirIds.ContainsKey($dirPath)) {
         return $dirIds[$dirPath]
     }
