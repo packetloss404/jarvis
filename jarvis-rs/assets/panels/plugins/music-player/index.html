@@ -7,26 +7,8 @@
 </head>
 <body>
   <div id="app">
-    <!-- Loading indicator (shown until JS init completes) -->
-    <div id="loading-screen"><div class="loading">Connecting to music server...</div></div>
+    <div id="loading-screen"><div class="loading">Loading music library...</div></div>
 
-    <!-- Setup screen (shown when not connected) -->
-    <div id="setup-screen" class="hidden">
-      <div class="setup-card">
-        <h2>Music Player Setup</h2>
-        <p>Enter the music server details to connect.</p>
-        <label>Server URL
-          <input type="text" id="setup-url" placeholder="http://localhost:8765" value="http://localhost:8765">
-        </label>
-        <label>Auth Token
-          <input type="text" id="setup-token" placeholder="Paste token from server terminal">
-        </label>
-        <button id="setup-connect">Connect</button>
-        <div id="setup-error" class="hidden"></div>
-      </div>
-    </div>
-
-    <!-- Main UI -->
     <div id="main-ui" class="hidden">
       <div id="sidebar">
         <div class="sidebar-header">Library</div>
@@ -39,6 +21,10 @@
           <input type="text" id="search-input" placeholder="Search...">
         </div>
         <div id="sidebar-list"></div>
+        <div id="sidebar-footer">
+          <div id="dir-display" title="Music directory"></div>
+          <button id="btn-rescan">Rescan</button>
+        </div>
       </div>
       <div id="content">
         <div id="content-header"></div>
@@ -47,7 +33,6 @@
     </div>
   </div>
 
-  <!-- Transport bar (always at bottom) -->
   <div id="transport" class="hidden">
     <div id="progress-bar">
       <div id="progress-fill"></div>

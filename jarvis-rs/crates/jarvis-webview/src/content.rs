@@ -82,11 +82,15 @@ impl ContentProvider {
         }
 
         // Check plugin directories: paths like "plugins/{id}/..."
+        // Try filesystem first, then fall through to embedded assets.
         if let Some(rest) = clean.strip_prefix("plugins/") {
             if let Some(slash_pos) = rest.find('/') {
                 let plugin_id = &rest[..slash_pos];
                 let asset_path = &rest[slash_pos + 1..];
-                return self.resolve_plugin_asset(plugin_id, asset_path);
+                if let Some(result) = self.resolve_plugin_asset(plugin_id, asset_path) {
+                    return Some(result);
+                }
+                // Fall through to embedded lookup below
             }
         }
 
@@ -146,6 +150,65 @@ impl ContentProvider {
     /// The base directory for assets.
     pub fn base_dir(&self) -> &Path {
         &self.base_dir
+    }
+
+    /// Discover plugins embedded at compile time in `assets/panels/plugins/`.
+    ///
+    /// Returns `(id, name, category, entry)` for each embedded plugin that has
+    /// a valid `plugin.toml` manifest.
+    pub fn discover_embedded_plugins() -> Vec<(String, String, String, String)> {
+        let mut plugins = Vec::new();
+
+        let plugins_dir = match EMBEDDED_PANELS.get_dir("plugins") {
+            Some(d) => d,
+            None => return plugins,
+        };
+
+        for subdir in plugins_dir.dirs() {
+            let id = match subdir.path().file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+
+            let manifest = match subdir.get_file(subdir.path().join("plugin.toml")) {
+                Some(f) => f,
+                None => continue,
+            };
+
+            let content = match manifest.contents_utf8() {
+                Some(s) => s,
+                None => continue,
+            };
+
+            #[derive(serde::Deserialize)]
+            #[serde(default)]
+            struct Manifest {
+                name: String,
+                category: String,
+                entry: String,
+            }
+
+            impl Default for Manifest {
+                fn default() -> Self {
+                    Self {
+                        name: String::new(),
+                        category: "Plugins".into(),
+                        entry: "index.html".into(),
+                    }
+                }
+            }
+
+            if let Ok(m) = toml::from_str::<Manifest>(content) {
+                let name = if m.name.is_empty() {
+                    id.clone()
+                } else {
+                    m.name
+                };
+                plugins.push((id, name, m.category, m.entry));
+            }
+        }
+
+        plugins
     }
 }
 

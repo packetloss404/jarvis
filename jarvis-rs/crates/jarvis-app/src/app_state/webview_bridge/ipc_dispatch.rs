@@ -49,6 +49,10 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "debug_event",
     "emulator_list_roms",
     "emulator_load_rom",
+    "music_init",
+    "music_scan",
+    "music_search",
+    "music_set_dir",
 ];
 
 /// Check whether an IPC message kind is in the allowlist.
@@ -188,6 +192,18 @@ impl JarvisApp {
             }
             "emulator_load_rom" => {
                 self.handle_emulator_load_rom(pane_id, &msg.payload);
+            }
+            "music_init" => {
+                self.handle_music_init(pane_id, &msg.payload);
+            }
+            "music_scan" => {
+                self.handle_music_scan(pane_id, &msg.payload);
+            }
+            "music_search" => {
+                self.handle_music_search(pane_id, &msg.payload);
+            }
+            "music_set_dir" => {
+                self.handle_music_set_dir(pane_id, &msg.payload);
             }
             "clipboard_copy" => {
                 if let IpcPayload::Json(ref v) = msg.payload {
@@ -402,6 +418,10 @@ mod tests {
         assert!(is_ipc_kind_allowed("window_drag"));
         assert!(is_ipc_kind_allowed("read_file"));
         assert!(is_ipc_kind_allowed("open_url"));
+        assert!(is_ipc_kind_allowed("music_init"));
+        assert!(is_ipc_kind_allowed("music_scan"));
+        assert!(is_ipc_kind_allowed("music_search"));
+        assert!(is_ipc_kind_allowed("music_set_dir"));
     }
 
     #[test]

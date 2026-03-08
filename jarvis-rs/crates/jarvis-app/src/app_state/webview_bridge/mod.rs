@@ -10,6 +10,7 @@ mod crypto_handlers;
 mod emulator_handlers;
 mod file_handlers;
 mod ipc_dispatch;
+mod music_handlers;
 mod lifecycle;
 mod presence_handlers;
 mod pty_handlers;

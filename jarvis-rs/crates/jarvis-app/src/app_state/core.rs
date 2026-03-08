@@ -132,6 +132,9 @@ pub struct JarvisApp {
     // Shared plugin directories handle (for config reload)
     pub(super) plugin_dirs: Option<Arc<RwLock<HashMap<String, PathBuf>>>>,
 
+    // Music library (local file scanning)
+    pub(super) music_library: Option<super::music_library::MusicLibrary>,
+
     // Native menu bar
     pub(super) _menu: Option<muda::Menu>,
     pub(super) menu_ids: Option<super::menu::MenuIds>,
@@ -194,6 +197,7 @@ impl JarvisApp {
             game_active: HashMap::new(),
             blanked_panes: HashSet::new(),
             plugin_dirs: None,
+            music_library: None,
             _menu: None,
             menu_ids: None,
         }
