@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis — The Multiplayer Desktop Environment</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#1e1e2e;--bg-deep:#11111b;--surface:#181825;--surface2:#313244;
+  --overlay:#45475a;--text:#cdd6f4;--text-muted:#6c7086;--subtext:#a6adc8;
+  --mauve:#cba6f7;--pink:#f5c2e7;--red:#f38ba8;--peach:#fab387;
+  --yellow:#f9e2af;--green:#a6e3a1;--teal:#94e2d5;--blue:#89b4fa;
+  --lavender:#b4befe;--sky:#89dceb;--gap:6px;--radius:8px;
+}
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--bg-deep);color:var(--text);
+  font-family:'SF Mono','JetBrains Mono','Fira Code','Cascadia Code','Consolas',monospace;
+  font-size:13px;line-height:1.6;
+}
+::selection{background:var(--mauve);color:var(--bg-deep)}
+
+/* ── Boot Screen ─────────────────────────────────────── */
+#boot-screen{
+  position:fixed;inset:0;z-index:1000;background:var(--bg-deep);
+  display:flex;align-items:center;justify-content:center;
+  transition:opacity .6s,visibility .6s;
+}
+#boot-screen.done{opacity:0;visibility:hidden;pointer-events:none}
+#boot-terminal{
+  width:min(720px,90vw);font-size:14px;line-height:1.9;color:var(--text-muted);
+  padding:2rem;
+}
+#boot-terminal .prompt{color:var(--mauve);font-weight:700}
+#boot-terminal .info{color:var(--green)}
+#boot-terminal .accent{color:var(--pink)}
+#boot-terminal .warn{color:var(--yellow)}
+#boot-terminal .cmd{color:var(--text)}
+#boot-skip{
+  position:fixed;bottom:2rem;right:2rem;z-index:1001;
+  color:var(--text-muted);font-size:12px;letter-spacing:.1em;
+  background:none;border:1px solid var(--surface2);border-radius:4px;
+  padding:.3rem .8rem;cursor:pointer;font-family:inherit;
+  transition:color .2s,border-color .2s;
+}
+#boot-skip:hover{color:var(--mauve);border-color:var(--mauve)}
+
+/* ── Hex Canvas ──────────────────────────────────────── */
+#hex-canvas{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity 1.5s}
+#hex-canvas.active{opacity:.5}
+
+/* ── Desktop Shell ───────────────────────────────────── */
+#desktop{
+  position:fixed;inset:0;z-index:1;
+  display:flex;flex-direction:column;
+  opacity:0;transition:opacity .8s;
+}
+#desktop.active{opacity:1}
+
+/* ── Tab Bar ─────────────────────────────────────────── */
+#tab-bar{
+  height:32px;background:var(--surface);border-bottom:1px solid var(--surface2);
+  display:flex;align-items:center;padding:0 .5rem;gap:2px;flex-shrink:0;
+  user-select:none;
+}
+.tab{
+  height:26px;padding:0 14px;display:flex;align-items:center;gap:6px;
+  border-radius:5px 5px 0 0;font-size:11px;letter-spacing:.04em;
+  color:var(--text-muted);cursor:pointer;transition:all .15s;
+  border:1px solid transparent;border-bottom:none;
+}
+.tab:hover{color:var(--subtext);background:rgba(205,214,244,.04)}
+.tab.active{
+  color:var(--text);background:var(--bg);
+  border-color:var(--surface2);
+}
+.tab .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.tab-spacer{flex:1}
+#tab-bar .presence{
+  font-size:10px;color:var(--text-muted);letter-spacing:.08em;
+  display:flex;align-items:center;gap:5px;padding-right:8px;
+}
+#tab-bar .presence .online-dot{
+  width:6px;height:6px;border-radius:50%;background:var(--green);
+  animation:pulse 2s infinite;
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── Tiling Container ────────────────────────────────── */
+#tiling{flex:1;display:flex;padding:var(--gap);gap:var(--gap);overflow:hidden;min-height:0}
+#col-left{flex:1.7;display:flex;flex-direction:column;gap:var(--gap);min-width:0}
+#col-right{flex:1;display:flex;flex-direction:column;gap:var(--gap);min-width:0}
+
+/* ── Resize Handle ───────────────────────────────────── */
+.resize-handle-v{
+  width:var(--gap);cursor:col-resize;flex-shrink:0;
+  position:relative;z-index:5;margin:0 calc(var(--gap) * -0.5);
+}
+.resize-handle-v::after{
+  content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:3px;height:40px;border-radius:3px;background:var(--surface2);
+  transition:background .2s,height .2s;
+}
+.resize-handle-v:hover::after{background:var(--mauve);height:60px}
+.resize-handle-h{
+  height:var(--gap);cursor:row-resize;flex-shrink:0;
+  position:relative;z-index:5;margin:calc(var(--gap) * -0.5) 0;
+}
+.resize-handle-h::after{
+  content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  height:3px;width:40px;border-radius:3px;background:var(--surface2);
+  transition:background .2s,width .2s;
+}
+.resize-handle-h:hover::after{background:var(--mauve);width:60px}
+
+/* ── Pane ────────────────────────────────────────────── */
+.pane{
+  background:var(--bg);border:1px solid var(--surface2);border-radius:var(--radius);
+  display:flex;flex-direction:column;overflow:hidden;min-height:0;
+  transition:border-color .2s,box-shadow .2s;position:relative;
+}
+.pane.focused{border-color:rgba(203,166,247,.3);box-shadow:0 0 20px rgba(203,166,247,.05)}
+.pane-header{
+  height:28px;background:var(--surface);border-bottom:1px solid var(--surface2);
+  display:flex;align-items:center;padding:0 10px;flex-shrink:0;
+  font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-muted);user-select:none;gap:8px;
+}
+.pane-header .pane-dot{width:6px;height:6px;border-radius:50%}
+.pane-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 14px;min-height:0}
+.pane-body::-webkit-scrollbar{width:6px}
+.pane-body::-webkit-scrollbar-track{background:transparent}
+.pane-body::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:3px}
+.pane-body::-webkit-scrollbar-thumb:hover{background:var(--overlay)}
+
+/* ── Terminal Pane ───────────────────────────────────── */
+#terminal-output{white-space:pre-wrap;word-break:break-word}
+#terminal-output .prompt{color:var(--mauve);font-weight:700}
+#terminal-output .info{color:var(--green)}
+#terminal-output .err{color:var(--red)}
+#terminal-output .muted{color:var(--text-muted)}
+#terminal-output .accent{color:var(--pink)}
+#terminal-output .warn{color:var(--yellow)}
+#terminal-output .blue{color:var(--blue)}
+#terminal-output .peach{color:var(--peach)}
+#terminal-output .teal{color:var(--teal)}
+#terminal-output .header{color:var(--mauve);font-weight:700}
+#terminal-output .table-key{color:var(--blue);display:inline-block;min-width:22ch}
+#terminal-output .table-val{color:var(--subtext)}
+#terminal-input-line{display:flex;align-items:center;margin-top:4px}
+#terminal-input-line .prompt{color:var(--mauve);font-weight:700;margin-right:0}
+#terminal-input{
+  background:none;border:none;color:var(--text);font:inherit;
+  flex:1;outline:none;caret-color:var(--mauve);padding:0;margin:0;
+}
+
+/* ── Claude Pane ─────────────────────────────────────── */
+.claude-msg{margin-bottom:16px}
+.claude-role{font-size:11px;font-weight:700;letter-spacing:.06em;margin-bottom:4px}
+.claude-role.user{color:var(--blue)}
+.claude-role.assistant{color:var(--mauve)}
+.claude-text{color:var(--subtext);line-height:1.7}
+.claude-text code{
+  background:var(--surface);padding:1px 5px;border-radius:3px;
+  font-size:12px;color:var(--peach);
+}
+.claude-cursor{
+  display:inline-block;width:7px;height:14px;background:var(--mauve);
+  animation:blink 1s step-end infinite;vertical-align:text-bottom;
+}
+@keyframes blink{50%{opacity:0}}
+#claude-topics{display:flex;flex-wrap:wrap;gap:4px;margin-top:12px}
+#claude-topics button{
+  background:var(--surface);border:1px solid var(--surface2);border-radius:4px;
+  color:var(--subtext);font:inherit;font-size:11px;padding:3px 10px;
+  cursor:pointer;transition:all .15s;letter-spacing:.03em;
+}
+#claude-topics button:hover{border-color:var(--mauve);color:var(--mauve)}
+
+/* ── Chat Pane ───────────────────────────────────────── */
+.chat-msg{margin-bottom:8px;animation:chatIn .3s ease-out}
+@keyframes chatIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.chat-user{font-weight:700;font-size:12px}
+.chat-text{color:var(--text-muted);font-size:12px}
+.chat-time{color:var(--overlay);font-size:10px;margin-left:6px}
+.chat-reaction{
+  display:inline-block;font-size:11px;padding:1px 5px;
+  background:var(--surface);border:1px solid var(--surface2);border-radius:10px;
+  margin-top:2px;cursor:default;
+}
+#chat-input-wrap{
+  display:flex;border-top:1px solid var(--surface2);padding:8px 10px;gap:6px;
+  flex-shrink:0;
+}
+#chat-input{
+  background:var(--surface);border:1px solid var(--surface2);border-radius:5px;
+  color:var(--text);font:inherit;font-size:12px;padding:5px 10px;flex:1;outline:none;
+}
+#chat-input:focus{border-color:rgba(203,166,247,.3)}
+#chat-input::placeholder{color:var(--overlay)}
+
+/* ── Status Bar ──────────────────────────────────────── */
+#status-bar{
+  height:24px;background:var(--surface);border-top:1px solid var(--surface2);
+  display:flex;align-items:center;padding:0 12px;flex-shrink:0;
+  font-size:10px;color:var(--text-muted);letter-spacing:.05em;gap:16px;
+  user-select:none;
+}
+#status-bar .s-mauve{color:var(--mauve)}
+#status-bar .s-green{color:var(--green)}
+#status-bar .s-yellow{color:var(--yellow)}
+#status-bar .sep{color:var(--surface2)}
+.status-right{margin-left:auto;display:flex;gap:14px;align-items:center}
+
+/* ── Command Palette ─────────────────────────────────── */
+#palette-overlay{
+  position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.5);
+  backdrop-filter:blur(8px);display:none;align-items:flex-start;
+  justify-content:center;padding-top:min(20vh,160px);
+}
+#palette-overlay.open{display:flex}
+#palette{
+  width:min(520px,90vw);background:var(--surface);
+  border:1px solid var(--surface2);border-radius:10px;
+  box-shadow:0 20px 60px rgba(0,0,0,.5),0 0 40px rgba(203,166,247,.06);
+  overflow:hidden;
+}
+#palette-input{
+  width:100%;background:none;border:none;border-bottom:1px solid var(--surface2);
+  color:var(--text);font:inherit;font-size:14px;padding:14px 18px;outline:none;
+}
+#palette-input::placeholder{color:var(--overlay)}
+#palette-list{max-height:320px;overflow-y:auto;padding:6px}
+#palette-list::-webkit-scrollbar{width:5px}
+#palette-list::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:3px}
+.palette-item{
+  padding:8px 14px;border-radius:6px;cursor:pointer;display:flex;
+  align-items:center;gap:10px;transition:background .1s;
+}
+.palette-item:hover,.palette-item.selected{background:rgba(203,166,247,.08)}
+.palette-item .p-label{flex:1;font-size:13px;color:var(--text)}
+.palette-item .p-cat{font-size:10px;color:var(--text-muted);letter-spacing:.08em}
+.palette-item .p-key{font-size:10px;color:var(--overlay)}
+
+/* ── Games (Tetris) Pane ─────────────────────────────── */
+#tetris-canvas{
+  display:block;margin:0 auto;
+  image-rendering:pixelated;background:var(--bg-deep);border:1px solid var(--surface2);
+}
+#tetris-score{font-size:11px;color:var(--text-muted);text-align:center;margin-top:6px}
+#tetris-controls{font-size:10px;color:var(--overlay);text-align:center;margin-top:4px;letter-spacing:.04em}
+
+/* ── Mobile ──────────────────────────────────────────── */
+@media(max-width:768px){
+  #tiling{flex-direction:column}
+  #col-left,#col-right{flex:1 !important}
+  .resize-handle-v{display:none}
+  .pane{min-height:180px}
+}
+</style>
+</head>
+<body>
+
+<!-- ─── BOOT SCREEN ──────────────────────────────────── -->
+<div id="boot-screen"><div id="boot-terminal"></div></div>
+<button id="boot-skip">SKIP &rarr;</button>
+
+<!-- ─── HEX CANVAS ───────────────────────────────────── -->
+<canvas id="hex-canvas"></canvas>
+
+<!-- ─── DESKTOP ──────────────────────────────────────── -->
+<div id="desktop">
+
+  <!-- Tab Bar -->
+  <div id="tab-bar">
+    <div class="tab active" data-pane="terminal"><div class="dot" style="background:var(--blue)"></div>terminal</div>
+    <div class="tab" data-pane="claude"><div class="dot" style="background:var(--mauve)"></div>claude</div>
+    <div class="tab" data-pane="chat"><div class="dot" style="background:var(--pink)"></div>#general</div>
+    <div class="tab-spacer"></div>
+    <div class="presence"><div class="online-dot"></div><span id="online-count">3 online</span></div>
+  </div>
+
+  <!-- Tiling Area -->
+  <div id="tiling">
+    <div id="col-left">
+      <!-- Terminal Pane -->
+      <div class="pane focused" id="pane-terminal" style="flex:1">
+        <div class="pane-header">
+          <div class="pane-dot" style="background:var(--blue)"></div>
+          TERMINAL &middot; interactive
+        </div>
+        <div class="pane-body" id="terminal-body">
+          <div id="terminal-output"></div>
+          <div id="terminal-input-line">
+            <span class="prompt">&#x276f; </span>
+            <input type="text" id="terminal-input" autofocus spellcheck="false" autocomplete="off">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="resize-handle-v" id="resize-v"></div>
+
+    <div id="col-right">
+      <!-- Claude Pane -->
+      <div class="pane" id="pane-claude" style="flex:1.1">
+        <div class="pane-header">
+          <div class="pane-dot" style="background:var(--mauve)"></div>
+          CLAUDE ASSISTANT
+        </div>
+        <div class="pane-body" id="claude-body">
+          <div id="claude-messages"></div>
+          <div id="claude-topics">
+            <button data-q="What is Jarvis?">what is jarvis?</button>
+            <button data-q="Tell me about the terminal">terminal</button>
+            <button data-q="How does the plugin system work?">plugins</button>
+            <button data-q="Tell me about the AI integration">ai integration</button>
+            <button data-q="How does the tiling work?">tiling</button>
+            <button data-q="Tell me about security and encryption">encryption</button>
+            <button data-q="What games are built in?">games</button>
+            <button data-q="Tell me about mobile companion">mobile</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="resize-handle-h" id="resize-h"></div>
+
+      <!-- Chat Pane -->
+      <div class="pane" id="pane-chat" style="flex:0.9">
+        <div class="pane-header">
+          <div class="pane-dot" style="background:var(--pink)"></div>
+          LIVE CHAT &middot; #general
+          <span style="margin-left:auto;font-size:9px;color:var(--green);letter-spacing:.15em">E2E</span>
+        </div>
+        <div class="pane-body" id="chat-body"></div>
+        <div id="chat-input-wrap">
+          <input type="text" id="chat-input" placeholder="say something...">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div id="status-bar">
+    <span><span class="s-mauve">JARVIS</span></span>
+    <span class="sep">|</span>
+    <span><span class="s-green">wgpu</span> vulkan/metal/dx12</span>
+    <span class="sep">|</span>
+    <span>layout: tiled</span>
+    <span class="sep">|</span>
+    <span>panes: <span id="pane-count">3</span></span>
+    <div class="status-right">
+      <span><span class="s-yellow">Ctrl+K</span> palette</span>
+      <span class="sep">|</span>
+      <span id="fps-counter">120 Hz</span>
+    </div>
+  </div>
+</div>
+
+<!-- ─── COMMAND PALETTE ──────────────────────────────── -->
+<div id="palette-overlay">
+  <div id="palette">
+    <input type="text" id="palette-input" placeholder="Type a command..." spellcheck="false">
+    <div id="palette-list"></div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   JARVIS INTERACTIVE WEBSITE
+   The site IS a Jarvis session.
+   ═══════════════════════════════════════════════════════ */
+
+// ── Hex Grid Background ──────────────────────────────
+(function(){
+  const c=document.getElementById('hex-canvas'),ctx=c.getContext('2d');
+  let w,h,cols,rows,mx=0,my=0;const S=28,s3=Math.sqrt(3);
+  function resize(){w=c.width=innerWidth;h=c.height=innerHeight;
+    cols=Math.ceil(w/(S*1.5))+2;rows=Math.ceil(h/(S*s3))+2}
+  addEventListener('resize',resize);resize();
+  addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY});
+  function hex(x,y,sz,a){ctx.beginPath();
+    for(let i=0;i<6;i++){const an=Math.PI/3*i-Math.PI/6;
+      const px=x+sz*Math.cos(an),py=y+sz*Math.sin(an);
+      i?ctx.lineTo(px,py):ctx.moveTo(px,py)}
+    ctx.closePath();ctx.strokeStyle=`rgba(203,166,247,${a})`;ctx.lineWidth=.5;ctx.stroke()}
+  let t=0;
+  function render(){t+=.004;ctx.clearRect(0,0,w,h);
+    for(let col=0;col<cols;col++)for(let row=0;row<rows;row++){
+      const x=col*S*1.5,y=row*S*s3+(col%2?S*s3/2:0);
+      const d=Math.sqrt((x-w/2)**2+(y-h/2)**2);
+      const dm=Math.sqrt((x-mx)**2+(y-my)**2);
+      const wave=Math.sin(d*.006-t*2)*.5+.5;
+      const mouse=Math.max(0,1-dm/250)*.15;
+      hex(x,y,S*.88,wave*.1+.02+mouse)}
+    requestAnimationFrame(render)}
+  render()
+})();
+
+// ── State ────────────────────────────────────────────
+const $=s=>document.querySelector(s);
+const termOut=$('#terminal-output');
+const termIn=$('#terminal-input');
+const termBody=$('#terminal-body');
+const claudeBody=$('#claude-body');
+const claudeMsgs=$('#claude-messages');
+const chatBody=$('#chat-body');
+let claudeBusy=false;
+
+// ── Utility: typed text ──────────────────────────────
+function span(cls,text){return `<span class="${cls}">${esc(text)}</span>`}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function raw(html){
+  const d=document.createElement('div');d.innerHTML=html;
+  termOut.appendChild(d);scrollTerm();
+}
+function line(text){raw(esc(text))}
+function scrollTerm(){termBody.scrollTop=termBody.scrollHeight}
+
+// ── Boot Sequence ────────────────────────────────────
+const bootLines=[
+  {t:'prompt',d:80,text:'> jarvis --log-level info'},
+  {t:'blank',d:200},
+  {t:'info',d:60,text:'[boot] initializing jarvis v0.1.0...'},
+  {t:'info',d:80,text:'[gpu]  wgpu backend: Vulkan | Metal | DirectX 12'},
+  {t:'info',d:60,text:'[gpu]  hex grid shader compiled (WGSL)'},
+  {t:'info',d:50,text:'[gpu]  instanced quad renderer ready'},
+  {t:'info',d:70,text:'[cfg]  loaded ~/.config/jarvis/config.toml (25 sections)'},
+  {t:'info',d:50,text:'[cfg]  theme: jarvis-dark (catppuccin mocha)'},
+  {t:'info',d:80,text:'[tile] binary split-tree initialized'},
+  {t:'info',d:60,text:'[pty]  3 terminal sessions spawned'},
+  {t:'info',d:50,text:'[web]  wry webview bridge active (29 IPC kinds)'},
+  {t:'info',d:70,text:'[ai]   claude opus connected (streaming + tool calling)'},
+  {t:'info',d:50,text:'[ai]   whisper transcription ready'},
+  {t:'info',d:80,text:'[plug] 3 plugins discovered, registered in palette'},
+  {t:'info',d:60,text:'[chat] 7 channels synced (#general, #discord, #help ...)'},
+  {t:'info',d:50,text:'[chat] ECDSA P-256 identity loaded, E2E ready'},
+  {t:'accent',d:80,text:'[net]  presence connected — 4 users online'},
+  {t:'info',d:50,text:'[sys]  event loop: 120 Hz (8ms poll)'},
+  {t:'blank',d:200},
+  {t:'accent',d:100,text:'jarvis ready. welcome.'},
+  {t:'blank',d:400},
+];
+
+const bootEl=$('#boot-terminal');
+let bootDone=false;
+
+async function boot(){
+  for(const l of bootLines){
+    if(bootDone)return;
+    if(l.t==='blank'){await sleep(l.d);continue}
+    const div=document.createElement('div');
+    if(l.t==='prompt')div.innerHTML=`<span class="prompt">${esc(l.text)}</span>`;
+    else if(l.t==='accent')div.innerHTML=`<span class="accent">${esc(l.text)}</span>`;
+    else div.innerHTML=`<span class="info">${esc(l.text)}</span>`;
+    bootEl.appendChild(div);bootEl.parentElement.scrollTop=bootEl.parentElement.scrollHeight;
+    await sleep(l.d);
+  }
+  finishBoot();
+}
+function finishBoot(){
+  if(bootDone)return;bootDone=true;
+  $('#boot-screen').classList.add('done');
+  $('#boot-skip').style.display='none';
+  $('#hex-canvas').classList.add('active');
+  $('#desktop').classList.add('active');
+  setTimeout(()=>{termIn.focus();startChat()},600);
+  // Welcome in terminal
+  raw(`<span class="header">JARVIS</span> <span class="muted">— multiplayer desktop environment</span>`);
+  raw(`<span class="muted">Type</span> <span class="info">help</span> <span class="muted">to see commands. Press</span> <span class="warn">Ctrl+K</span> <span class="muted">for command palette.</span>`);
+  raw('');
+  // Initial Claude message
+  addClaudeMsg('assistant',`Welcome. I'm the Claude assistant panel.\n\nAsk me anything about Jarvis, or click a topic below to learn more. This panel supports streaming responses, tool calling (up to 10 rounds), session history, and multiple concurrent instances.\n\nI can explain the architecture, the tiling engine, the plugin system, encryption, or anything else.`);
+}
+$('#boot-skip').onclick=finishBoot;
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+
+// ── Terminal Commands ────────────────────────────────
+const CMDS={
+  help(){
+    raw(`<span class="header">Available Commands</span>`);
+    raw('');
+    raw(`  <span class="info">help</span>            <span class="muted">show this help</span>`);
+    raw(`  <span class="info">features</span>        <span class="muted">list all jarvis features</span>`);
+    raw(`  <span class="info">architecture</span>    <span class="muted">show the 10-crate workspace</span>`);
+    raw(`  <span class="info">terminal</span>        <span class="muted">terminal emulation details</span>`);
+    raw(`  <span class="info">ai</span>              <span class="muted">AI assistant integration</span>`);
+    raw(`  <span class="info">chat</span>            <span class="muted">live chat & encryption</span>`);
+    raw(`  <span class="info">tiling</span>          <span class="muted">tiling window manager</span>`);
+    raw(`  <span class="info">plugins</span>         <span class="muted">plugin system</span>`);
+    raw(`  <span class="info">games</span>           <span class="muted">built-in games & emulator</span>`);
+    raw(`  <span class="info">mobile</span>          <span class="muted">mobile companion</span>`);
+    raw(`  <span class="info">config</span>          <span class="muted">show example config</span>`);
+    raw(`  <span class="info">keybinds</span>        <span class="muted">keyboard shortcuts</span>`);
+    raw(`  <span class="info">stats</span>           <span class="muted">system statistics</span>`);
+    raw(`  <span class="info">gpu</span>             <span class="muted">GPU rendering details</span>`);
+    raw(`  <span class="info">crypto</span>          <span class="muted">cryptographic identity</span>`);
+    raw(`  <span class="info">tetris</span>          <span class="muted">play tetris (arrow keys)</span>`);
+    raw(`  <span class="info">neofetch</span>        <span class="muted">system info</span>`);
+    raw(`  <span class="info">manual</span>          <span class="muted">open the full manual</span>`);
+    raw(`  <span class="info">clear</span>           <span class="muted">clear terminal</span>`);
+    raw('');
+  },
+  features(){
+    raw(`<span class="header">JARVIS FEATURES</span>`);
+    raw('');
+    const feats=[
+      ['Terminal Emulation','xterm.js v5, one PTY per pane, 10K scrollback, VT100'],
+      ['Claude AI Assistant','Streaming responses, tool calling, multi-session, Whisper voice'],
+      ['Live Chat','7 channels, ECDSA-signed messages, emoji reactions, image sharing'],
+      ['E2E Encryption','ECDH P-256 key exchange + AES-256-GCM for DMs and relay'],
+      ['Tiling WM','Binary split-tree, unlimited nesting, drag resize, zoom, stacks'],
+      ['GPU Rendering','wgpu (Vulkan/Metal/DX12), hex grid shaders, 120 Hz'],
+      ['Plugin System','HTML/JS/CSS plugins, jarvis:// protocol, IPC bridge'],
+      ['Command Palette','37+ actions, fuzzy search, plugin injection'],
+      ['Built-In Games','Tetris, Asteroids, Minesweeper, Pinball, retro emulator'],
+      ['Mobile Companion','QR pairing, E2E relay, workspace streaming'],
+      ['Presence','Real-time user status, poke notifications, online list'],
+      ['Settings Panel','Live preview, theme switching, 25+ config sections, hot-reload'],
+    ];
+    feats.forEach(([k,v])=>raw(`  <span class="teal">▸</span> <span class="blue">${esc(k)}</span>  <span class="muted">${esc(v)}</span>`));
+    raw('');
+  },
+  architecture(){
+    raw(`<span class="header">RUST WORKSPACE — 10 CRATES</span>`);
+    raw('');
+    const crates=[
+      ['jarvis-app','Window, event loop, action dispatch, subsystem coordination'],
+      ['jarvis-renderer','wgpu GPU rendering, hex grid shaders, UI chrome'],
+      ['jarvis-ai','Claude, Gemini, Whisper — streaming & tool calling'],
+      ['jarvis-tiling','Binary split tree, layout engine, pane management'],
+      ['jarvis-webview','wry WebView wrapper, IPC bridge, content provider'],
+      ['jarvis-social','Presence, chat, channels, identity, voice/screen-share'],
+      ['jarvis-config','TOML schema, validation, hot-reload, theme, plugins'],
+      ['jarvis-platform','OS abstractions: clipboard, paths, keybinds, crypto'],
+      ['jarvis-common','Foundation: Action, Event, Rect, PaneKind, Color'],
+      ['jarvis-relay','WebSocket relay server for E2E mobile bridging'],
+    ];
+    crates.forEach(([k,v])=>raw(`  <span class="peach">${esc(k.padEnd(20))}</span> <span class="muted">${esc(v)}</span>`));
+    raw('');
+    raw(`<span class="muted">Dependencies: winit 0.30, wgpu 24, wry 0.47, tokio 1, p256 0.13, aes-gcm 0.10</span>`);
+    raw('');
+  },
+  terminal(){
+    raw(`<span class="header">TERMINAL EMULATION</span>`);
+    raw('');
+    raw(`  <span class="table-key">Engine</span><span class="table-val">xterm.js v5.5.0 in WebView</span>`);
+    raw(`  <span class="table-key">PTY</span><span class="table-val">One per pane (portable-pty 0.9)</span>`);
+    raw(`  <span class="table-key">Scrollback</span><span class="table-val">10,000 lines (configurable 0-100K)</span>`);
+    raw(`  <span class="table-key">Escape Sequences</span><span class="table-val">Full VT100/xterm support</span>`);
+    raw(`  <span class="table-key">Clipboard</span><span class="table-val">System integration (copy/paste)</span>`);
+    raw(`  <span class="table-key">Links</span><span class="table-val">Auto-detected, clickable URLs</span>`);
+    raw(`  <span class="table-key">Cursor Styles</span><span class="table-val">Block, underline, beam</span>`);
+    raw(`  <span class="table-key">Bell</span><span class="table-val">Visual and audio alerts</span>`);
+    raw(`  <span class="table-key">Throughput</span><span class="table-val">~8 MB/s (64KB per frame)</span>`);
+    raw(`  <span class="table-key">Resize</span><span class="table-val">Synced via ResizeObserver</span>`);
+    raw('');
+  },
+  ai(){
+    raw(`<span class="header">AI ASSISTANT INTEGRATION</span>`);
+    raw('');
+    raw(`  <span class="table-key">Primary</span><span class="table-val">Claude Opus (streaming responses)</span>`);
+    raw(`  <span class="table-key">Alternative</span><span class="table-val">Gemini</span>`);
+    raw(`  <span class="table-key">Voice</span><span class="table-val">Whisper transcription (push-to-talk)</span>`);
+    raw(`  <span class="table-key">Tool Calling</span><span class="table-val">Automatic loops, up to 10 rounds</span>`);
+    raw(`  <span class="table-key">Sessions</span><span class="table-val">Persistent conversation history</span>`);
+    raw(`  <span class="table-key">Tracking</span><span class="table-val">Token usage across providers</span>`);
+    raw(`  <span class="table-key">Concurrency</span><span class="table-val">Multiple assistant panels simultaneously</span>`);
+    raw('');
+  },
+  chat(){
+    raw(`<span class="header">LIVE CHAT & PRESENCE</span>`);
+    raw('');
+    raw(`  <span class="table-key">Backend</span><span class="table-val">Supabase Realtime (WebSocket)</span>`);
+    raw(`  <span class="table-key">Channels</span><span class="table-val">#general #discord #showoff #help #random #games #memes</span>`);
+    raw(`  <span class="table-key">Signing</span><span class="table-val">Every message ECDSA-P256-SHA256 signed</span>`);
+    raw(`  <span class="table-key">DM Encryption</span><span class="table-val">ECDH key exchange + AES-256-GCM</span>`);
+    raw(`  <span class="table-key">Features</span><span class="table-val">Emoji reactions, image sharing, lightbox</span>`);
+    raw(`  <span class="table-key">Moderation</span><span class="table-val">Keyword filter, spam detection, rate limiting</span>`);
+    raw(`  <span class="table-key">Identity</span><span class="table-val">TOFU verification, signature badges, fingerprints</span>`);
+    raw(`  <span class="table-key">History</span><span class="table-val">500 messages/channel (ring buffer)</span>`);
+    raw('');
+  },
+  tiling(){
+    raw(`<span class="header">TILING WINDOW MANAGER</span>`);
+    raw('');
+    raw(`  <span class="table-key">Algorithm</span><span class="table-val">Binary split tree (recursive subdivision)</span>`);
+    raw(`  <span class="table-key">Nesting</span><span class="table-val">Unlimited depth</span>`);
+    raw(`  <span class="table-key">Operations</span><span class="table-val">Split H/V, resize, swap, zoom, close</span>`);
+    raw(`  <span class="table-key">Stacks</span><span class="table-val">Multiple panes per leaf (tabbed)</span>`);
+    raw(`  <span class="table-key">Auto-Split</span><span class="table-val">Direction based on pane aspect ratio</span>`);
+    raw(`  <span class="table-key">Drag Resize</span><span class="table-val">Visual feedback, ratio-based</span>`);
+    raw(`  <span class="table-key">Gap</span><span class="table-val">6px default (configurable 0-20)</span>`);
+    raw(`  <span class="table-key">Border Radius</span><span class="table-val">8px default (configurable 0-20)</span>`);
+    raw('');
+    raw(`  <span class="muted">Try dragging the resize handle between panes on this page!</span>`);
+    raw('');
+  },
+  plugins(){
+    raw(`<span class="header">PLUGIN SYSTEM</span>`);
+    raw('');
+    raw(`  <span class="accent">Tier 1: Bookmark Plugins</span>`);
+    raw(`  <span class="muted">  URLs configured directly in config.toml</span>`);
+    raw('');
+    raw(`  <span class="accent">Tier 2: Local Plugins</span>`);
+    raw(`  <span class="muted">  Full HTML/JS/CSS folders in ~/.config/jarvis/plugins/</span>`);
+    raw('');
+    raw(`  <span class="table-key">Protocol</span><span class="table-val">jarvis:// custom scheme for asset serving</span>`);
+    raw(`  <span class="table-key">IPC Bridge</span><span class="table-val">window.jarvis.ipc (send, request, on)</span>`);
+    raw(`  <span class="table-key">Integration</span><span class="table-val">Auto-registered in command palette</span>`);
+    raw(`  <span class="table-key">IPC Kinds</span><span class="table-val">29 allowed message types</span>`);
+    raw(`  <span class="table-key">Navigation</span><span class="table-val">Allowlisted: jarvis://, http(s)://, about:blank</span>`);
+    raw('');
+  },
+  games(){
+    raw(`<span class="header">BUILT-IN GAMES & EMULATOR</span>`);
+    raw('');
+    raw(`  <span class="accent">Embedded Games</span>`);
+    raw(`  <span class="muted">  Tetris, Asteroids, Minesweeper, Pinball, Doodle Jump,</span>`);
+    raw(`  <span class="muted">  Drawing Canvas, Subway Surfers, Video Player</span>`);
+    raw('');
+    raw(`  <span class="accent">External Games</span>`);
+    raw(`  <span class="muted">  KartBros, BasketBros, FootballBros, SoccerBros,</span>`);
+    raw(`  <span class="muted">  WrestleBros, Lichess, Excalidraw, Desmos, Monkeytype</span>`);
+    raw('');
+    raw(`  <span class="accent">Retro Emulator</span>`);
+    raw(`  <span class="muted">  NES, SNES, Game Boy, GBA, N64, Genesis</span>`);
+    raw(`  <span class="muted">  ROMs from ~/ROMs (max 64MB)</span>`);
+    raw('');
+    raw(`  <span class="info">Try it:</span> <span class="muted">type</span> <span class="warn">tetris</span> <span class="muted">to play right here!</span>`);
+    raw('');
+  },
+  mobile(){
+    raw(`<span class="header">MOBILE COMPANION</span>`);
+    raw('');
+    raw(`  <span class="table-key">Pairing</span><span class="table-val">QR code (Unicode half-block rendering)</span>`);
+    raw(`  <span class="table-key">Key Exchange</span><span class="table-val">ECDH P-256</span>`);
+    raw(`  <span class="table-key">Transport</span><span class="table-val">WebSocket relay (jarvis-relay binary)</span>`);
+    raw(`  <span class="table-key">Encryption</span><span class="table-val">AES-256-GCM derived from ECDH</span>`);
+    raw(`  <span class="table-key">Features</span><span class="table-val">PTY streaming, workspace capture</span>`);
+    raw(`  <span class="table-key">Sessions</span><span class="table-val">Persistent, revocable, TTL 300s</span>`);
+    raw(`  <span class="table-key">Rate Limit</span><span class="table-val">10 concurrent sessions per IP</span>`);
+    raw('');
+  },
+  config(){
+    raw(`<span class="header"># ~/.config/jarvis/config.toml</span>`);
+    raw('');
+    raw(`<span class="warn">[theme]</span>`);
+    raw(`<span class="blue">name</span> = <span class="info">"jarvis-dark"</span>`);
+    raw('');
+    raw(`<span class="warn">[layout]</span>`);
+    raw(`<span class="blue">gap</span> = <span class="peach">6</span>`);
+    raw(`<span class="blue">border_radius</span> = <span class="peach">8</span>`);
+    raw(`<span class="blue">padding</span> = <span class="peach">10</span>`);
+    raw('');
+    raw(`<span class="warn">[terminal]</span>`);
+    raw(`<span class="blue">scrollback</span> = <span class="peach">10000</span>`);
+    raw(`<span class="blue">cursor_style</span> = <span class="info">"beam"</span>`);
+    raw(`<span class="blue">cursor_blink</span> = <span class="accent">true</span>`);
+    raw('');
+    raw(`<span class="warn">[effects]</span>`);
+    raw(`<span class="blue">hex_grid</span> = <span class="accent">true</span>`);
+    raw(`<span class="blue">glow</span> = <span class="accent">true</span>`);
+    raw('');
+    raw(`<span class="warn">[[plugins]]</span>`);
+    raw(`<span class="blue">name</span> = <span class="info">"My Plugin"</span>`);
+    raw(`<span class="blue">path</span> = <span class="info">"~/.config/jarvis/plugins/my-plugin"</span>`);
+    raw('');
+    raw(`<span class="muted">25+ config sections. File-watched, hot-reloaded on save.</span>`);
+    raw('');
+  },
+  keybinds(){
+    raw(`<span class="header">KEYBOARD SHORTCUTS</span>`);
+    raw('');
+    const kb=[
+      ['Cmd+T','New pane'],['Cmd+D','Split vertical'],['Cmd+Shift+D','Split horizontal'],
+      ['Cmd+Shift+P','Command palette'],['Cmd+G','AI assistant'],['Cmd+J','Live chat'],
+      ['Cmd+W','Close pane'],['Tab','Cycle panes'],['Cmd+,','Settings'],
+      ['Cmd+F','Fullscreen'],['Opt+.','Push-to-talk'],['Cmd+1-5','Focus pane'],
+      ['Esc+Esc','Close pane'],
+    ];
+    kb.forEach(([k,v])=>raw(`  <span class="warn">${esc(k.padEnd(18))}</span> <span class="muted">${esc(v)}</span>`));
+    raw('');
+    raw(`<span class="muted">All keybinds are fully remappable via config.toml</span>`);
+    raw('');
+  },
+  stats(){
+    raw(`<span class="header">SYSTEM STATISTICS</span>`);
+    raw('');
+    raw(`  <span class="table-key">Rust Crates</span><span class="table-val">10</span>`);
+    raw(`  <span class="table-key">GPU Backend</span><span class="table-val">wgpu 24 (Vulkan / Metal / DX12)</span>`);
+    raw(`  <span class="table-key">Frame Rate</span><span class="table-val">120 Hz (8ms poll)</span>`);
+    raw(`  <span class="table-key">PTY Throughput</span><span class="table-val">~8 MB/s (64KB/frame)</span>`);
+    raw(`  <span class="table-key">IPC Kinds</span><span class="table-val">29 message types</span>`);
+    raw(`  <span class="table-key">Palette Actions</span><span class="table-val">37+</span>`);
+    raw(`  <span class="table-key">Chat Channels</span><span class="table-val">7 default</span>`);
+    raw(`  <span class="table-key">Chat Buffer</span><span class="table-val">500 msgs/channel</span>`);
+    raw(`  <span class="table-key">Scrollback</span><span class="table-val">10,000 lines default</span>`);
+    raw(`  <span class="table-key">Config Sections</span><span class="table-val">25+</span>`);
+    raw(`  <span class="table-key">Platforms</span><span class="table-val">macOS, Linux, Windows</span>`);
+    raw(`  <span class="table-key">Min Rust</span><span class="table-val">1.75+ (2021 edition)</span>`);
+    raw('');
+  },
+  gpu(){
+    raw(`<span class="header">GPU-ACCELERATED RENDERING</span>`);
+    raw('');
+    raw(`  <span class="table-key">Backend</span><span class="table-val">wgpu 24</span>`);
+    raw(`  <span class="table-key">APIs</span><span class="table-val">Vulkan, Metal, DirectX 12</span>`);
+    raw(`  <span class="table-key">Shaders</span><span class="table-val">WGSL (animated hex grid)</span>`);
+    raw(`  <span class="table-key">Renderer</span><span class="table-val">Instanced quad rendering</span>`);
+    raw(`  <span class="table-key">Frame Rate</span><span class="table-val">~120 Hz locked</span>`);
+    raw(`  <span class="table-key">UI Chrome</span><span class="table-val">Tab bar, status bar, palette</span>`);
+    raw(`  <span class="table-key">Effects</span><span class="table-val">Hex grid, glow, transparency</span>`);
+    raw(`  <span class="table-key">Metrics</span><span class="table-val">Real-time FPS counter</span>`);
+    raw('');
+    raw(`  <span class="muted">The hex grid on this page is a CSS recreation of the GPU shader.</span>`);
+    raw(`  <span class="muted">Move your mouse — the hexagons react to cursor proximity.</span>`);
+    raw('');
+  },
+  crypto(){
+    raw(`<span class="header">CRYPTOGRAPHIC IDENTITY</span>`);
+    raw('');
+    raw(`  <span class="table-key">Keypair</span><span class="table-val">ECDSA P-256 (persistent)</span>`);
+    raw(`  <span class="table-key">Fingerprint</span><span class="table-val">SHA-256 truncated to 8 bytes</span>`);
+    raw(`  <span class="table-key">Signing</span><span class="table-val">ECDSA-P256-SHA256 on every message</span>`);
+    raw(`  <span class="table-key">DM Encryption</span><span class="table-val">ECDH P-256 → AES-256-GCM</span>`);
+    raw(`  <span class="table-key">Relay Encryption</span><span class="table-val">ECDH-derived, persists across reconnect</span>`);
+    raw(`  <span class="table-key">Identity Model</span><span class="table-val">Trust-on-First-Use (TOFU)</span>`);
+    raw(`  <span class="table-key">Verification</span><span class="table-val">Signature badges in chat</span>`);
+    raw(`  <span class="table-key">XSS Prevention</span><span class="table-val">.textContent (never .innerHTML)</span>`);
+    raw(`  <span class="table-key">CSS Injection</span><span class="table-val">All theme values sanitized</span>`);
+    raw('');
+  },
+  neofetch(){
+    raw(`<span class="mauve">       ▄▄▄▄▄▄▄       </span>  <span class="blue">jarvis</span><span class="muted">@desktop</span>`);
+    raw(`<span class="mauve">     ▄█████████▄     </span>  <span class="muted">──────────────</span>`);
+    raw(`<span class="mauve">   ▄███████████▄    </span>  <span class="blue">OS</span>      <span class="muted">macOS / Linux / Windows</span>`);
+    raw(`<span class="mauve">  ████ JARVIS ████  </span>  <span class="blue">Lang</span>    <span class="muted">Rust 2021 (1.75+)</span>`);
+    raw(`<span class="mauve">  ██████████████   </span>  <span class="blue">GPU</span>     <span class="muted">wgpu (Vulkan/Metal/DX12)</span>`);
+    raw(`<span class="mauve">   ▀███████████▀    </span>  <span class="blue">Render</span>  <span class="muted">120 Hz, hex grid shader</span>`);
+    raw(`<span class="mauve">     ▀█████████▀     </span>  <span class="blue">Theme</span>   <span class="muted">Catppuccin Mocha</span>`);
+    raw(`<span class="mauve">       ▀▀▀▀▀▀▀       </span>  <span class="blue">Crates</span>  <span class="muted">10</span>`);
+    raw('');
+    raw(`  <span style="color:var(--red)">██</span><span style="color:var(--peach)">██</span><span style="color:var(--yellow)">██</span><span style="color:var(--green)">██</span><span style="color:var(--teal)">██</span><span style="color:var(--blue)">██</span><span style="color:var(--mauve)">██</span><span style="color:var(--pink)">██</span>`);
+    raw('');
+  },
+  clear(){termOut.innerHTML=''},
+  manual(){
+    raw(`<span class="info">Opening manual...</span>`);
+    window.open('manual/jarvis-manual.html','_blank');
+  },
+  tetris(){startTetris()},
+};
+
+// ── Terminal Input Handler ───────────────────────────
+termIn.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    const cmd=termIn.value.trim();termIn.value='';
+    if(!cmd)return;
+    raw(`<span class="prompt">❯ </span>${esc(cmd)}`);
+    const fn=CMDS[cmd.toLowerCase()];
+    if(fn)fn();
+    else if(cmd.toLowerCase().startsWith('cat ')){
+      const arg=cmd.slice(4).trim();
+      const mapped={'architecture.md':'architecture','config.toml':'config','readme':'features','help':'help'};
+      if(mapped[arg])CMDS[mapped[arg]]();
+      else raw(`<span class="err">cat: ${esc(arg)}: No such file</span>\n`);
+    }
+    else if(cmd.toLowerCase()==='ls'){
+      raw(`<span class="blue">architecture.md</span>  <span class="blue">config.toml</span>  <span class="blue">readme</span>  <span class="blue">features/</span>  <span class="blue">games/</span>`);raw('');
+    }
+    else raw(`<span class="err">command not found:</span> <span class="muted">${esc(cmd)}. Type</span> <span class="info">help</span> <span class="muted">for commands.</span>\n`);
+    scrollTerm();
+  }
+});
+
+// Click on terminal body to focus input
+$('#pane-terminal').addEventListener('click',()=>termIn.focus());
+
+// ── Claude Panel ─────────────────────────────────────
+const claudeResponses={
+  'What is Jarvis?':`Jarvis is a **multiplayer, GPU-accelerated desktop environment** built entirely in Rust.\n\nIt fuses terminal emulation, AI assistants, live encrypted chat, retro games, and a plugin system into a single tiled interface. Think of it as a tiling window manager that's also a social platform.\n\n**Key differentiators:**\n• Multiplayer-first — real-time chat and presence built in\n• AI-native — multiple concurrent Claude panels with streaming\n• GPU-rendered — wgpu with Vulkan/Metal/DX12, 120 Hz\n• E2E encrypted — ECDSA signing, ECDH key exchange, AES-256-GCM\n• Cross-platform — macOS, Linux, Windows\n\nThe codebase is organized as 10 Rust crates with clear boundaries: \`jarvis-app\`, \`jarvis-renderer\`, \`jarvis-ai\`, \`jarvis-tiling\`, \`jarvis-webview\`, \`jarvis-social\`, \`jarvis-config\`, \`jarvis-platform\`, \`jarvis-common\`, and \`jarvis-relay\`.`,
+
+  'Tell me about the terminal':`The terminal is powered by **xterm.js v5.5.0** running inside a WebView, with one PTY per pane via \`portable-pty\`.\n\n**Capabilities:**\n• Full VT100/xterm escape sequence support\n• 10,000 line scrollback (configurable up to 100K)\n• Clickable URL detection\n• Multiple cursor styles: block, underline, beam\n• System clipboard integration\n• Visual and audio bell alerts\n• Terminal-to-GUI resize sync via ResizeObserver\n\n**Performance:**\n• Up to 64 KB per frame, ~8 MB/s throughput\n• PTY output throttling prevents UI stalls\n• Environment sanitized (allowlist of safe variables)\n\nYou can run multiple independent shell sessions side by side in the tiling layout.`,
+
+  'How does the plugin system work?':`The plugin system has **two tiers:**\n\n**Tier 1 — Bookmark Plugins**\nSimple URL references in your \`config.toml\`. Point to any web app and it opens in a pane.\n\n**Tier 2 — Local Plugins**\nFull HTML/JS/CSS folders in \`~/.config/jarvis/plugins/\`. These get:\n• The \`jarvis://\` custom protocol for asset serving\n• Full IPC bridge via \`window.jarvis.ipc\`\n• Automatic registration in the command palette\n\n**IPC Bridge API:**\n\`\`\`javascript\nwindow.jarvis.ipc.send(kind, payload)    // fire-and-forget\nwindow.jarvis.ipc.request(kind, payload) // returns Promise\nwindow.jarvis.ipc.on(kind, callback)     // event listener\n\`\`\`\n\nThere are 29 allowed IPC message kinds covering PTY control, panel management, clipboard, crypto, and more. Navigation is restricted to \`jarvis://\`, \`http(s)://\`, and \`about:blank\`.`,
+
+  'Tell me about the AI integration':`Jarvis has **multi-provider AI integration:**\n\n**Claude (Primary)**\n• Streaming responses with token-by-token rendering\n• Tool calling with automatic loops (up to 10 rounds)\n• Session management with full conversation history\n• Token tracking across sessions\n• Multiple concurrent assistant panels\n\n**Gemini**\n• Alternative provider support\n• Same streaming interface\n\n**Whisper**\n• Voice transcription with push-to-talk (Option+.)\n• Audio captured and sent for transcription\n• Results appear in the assistant panel\n\nThe AI system lives in the \`jarvis-ai\` crate. Each assistant panel runs independently, so you can have multiple Claude conversations going simultaneously in different panes.`,
+
+  'How does the tiling work?':`The tiling engine uses a **binary split tree** — a data structure where:\n\n• Each **internal node** stores a split direction (horizontal or vertical) and a ratio\n• Each **leaf node** holds a pane reference\n• Layout is computed by **recursively subdividing** the available Rect\n\n**Operations:**\n• Split horizontal/vertical — creates a new sibling node\n• Resize — drag pane borders to adjust split ratios\n• Swap — exchange two panes' positions\n• Zoom — temporarily fullscreen a single pane\n• Close — remove a leaf and collapse the parent\n• Stack — multiple panes at one leaf (tabbed)\n\n**Smart defaults:**\n• Auto-split direction based on pane aspect ratio (wide → vertical, tall → horizontal)\n• Default gap: 6px, border radius: 8px\n• All configurable via TOML\n\nThe implementation lives in \`jarvis-tiling\` and handles layout, focus tracking, and pane lifecycle. You can actually resize the panes on this very page!`,
+
+  'Tell me about security and encryption':`Jarvis takes **cryptographic identity** seriously:\n\n**Identity**\n• Persistent ECDSA P-256 keypair stored locally\n• SHA-256 fingerprinting (truncated to 8 bytes)\n• Trust-on-First-Use (TOFU) verification model\n\n**Chat Signing**\n• Every message includes an ECDSA-P256-SHA256 signature\n• Signature verification badges displayed in chat\n• Prevents message tampering and impersonation\n\n**E2E Encrypted DMs**\n• ECDH P-256 key exchange between participants\n• AES-256-GCM symmetric encryption derived from shared secret\n• Keys never transmitted — only public key exchange\n\n**Relay Security**\n• Mobile relay uses same ECDH → AES-256 scheme\n• Cipher persists across reconnections (downgrade protection)\n• Session TTL 300s, rate limited to 10 concurrent per IP\n\n**Defense in Depth**\n• IPC message allowlist (compile-time enforced, 29 kinds)\n• Navigation allowlist (jarvis://, http(s)://, about:blank)\n• CSS injection prevention (all theme values sanitized)\n• XSS prevention (chat uses .textContent, never .innerHTML)\n• PTY environment sanitized (allowlist of safe variables)`,
+
+  'What games are built in?':`Jarvis comes loaded with games:\n\n**Embedded (runs in pane)**\n• Tetris, Asteroids, Minesweeper, Pinball\n• Doodle Jump, Drawing Canvas, Subway Surfers\n• Video Player\n\n**External (web-based)**\n• KartBros, BasketBros, FootballBros, SoccerBros\n• WrestleBros, BaseballBros\n• Lichess (chess), Excalidraw (whiteboard)\n• Desmos (graphing), Monkeytype (typing)\n\n**Retro Emulator**\n• Supports NES, SNES, Game Boy, GBA, N64, Genesis\n• Load ROMs from ~/ROMs directory (max 64 MB)\n• Full gamepad support\n\nAll games launch via the command palette or keybinds. They run inside tiled panes, so you can code in one pane and play Tetris in another.\n\nTry typing \`tetris\` in the terminal on this page!`,
+
+  'Tell me about mobile companion':`The **mobile companion** lets you access Jarvis from your phone:\n\n**Pairing**\n• QR code displayed on desktop (Unicode half-block rendering)\n• Scan with phone camera to establish connection\n• ECDH P-256 key exchange during pairing\n\n**Relay Server**\n• \`jarvis-relay\` — standalone WebSocket relay binary\n• Bridges desktop ↔ mobile with E2E encryption\n• AES-256-GCM derived from ECDH shared secret\n\n**Features**\n• PTY I/O streaming — use your terminal from your phone\n• Workspace capture — live screen streaming via JPEG (350ms intervals)\n• Session persistence and revocation\n\n**Security**\n• Session TTL: 300 seconds\n• Rate limited: 10 concurrent sessions per IP\n• Cipher persists across reconnections (no downgrade)\n\nThe relay is a separate binary that can run anywhere — on your machine, a VPS, or a shared server.`,
+};
+
+function addClaudeMsg(role,text){
+  const div=document.createElement('div');div.className='claude-msg';
+  const roleEl=document.createElement('div');roleEl.className=`claude-role ${role}`;
+  roleEl.textContent=role==='user'?'You':'Claude';
+  div.appendChild(roleEl);
+  const textEl=document.createElement('div');textEl.className='claude-text';
+  div.appendChild(textEl);claudeMsgs.appendChild(div);
+  if(role==='assistant'){streamText(textEl,text)}
+  else{textEl.textContent=text}
+  claudeBody.scrollTop=claudeBody.scrollHeight;
+}
+
+async function streamText(el,text){
+  claudeBusy=true;
+  const cursor=document.createElement('span');cursor.className='claude-cursor';
+  el.appendChild(cursor);
+  // Simple markdown-ish rendering
+  const chars=[...text];let buf='';
+  for(let i=0;i<chars.length;i++){
+    buf+=chars[i];
+    // Render in small chunks for speed
+    if(i%3===0||i===chars.length-1){
+      el.innerHTML=renderMd(buf);
+      el.appendChild(cursor);
+      claudeBody.scrollTop=claudeBody.scrollHeight;
+      await sleep(8);
+    }
+  }
+  cursor.remove();
+  el.innerHTML=renderMd(text);
+  claudeBody.scrollTop=claudeBody.scrollHeight;
+  claudeBusy=false;
+}
+
+function renderMd(text){
+  return esc(text)
+    .replace(/\*\*(.+?)\*\*/g,'<strong style="color:var(--text)">$1</strong>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\n/g,'<br>')
+    .replace(/• /g,'<span style="color:var(--mauve)">▸ </span>');
+}
+
+// Topic buttons
+$('#claude-topics').addEventListener('click',e=>{
+  const btn=e.target.closest('button');if(!btn||claudeBusy)return;
+  const q=btn.dataset.q;
+  addClaudeMsg('user',q);
+  setTimeout(()=>{
+    const resp=claudeResponses[q]||'I don\'t have information about that specific topic. Try one of the topic buttons below.';
+    addClaudeMsg('assistant',resp);
+  },300);
+});
+
+// ── Live Chat Simulation ─────────────────────────────
+const chatUsers=[
+  {name:'alice',color:'var(--teal)'},
+  {name:'bob',color:'var(--peach)'},
+  {name:'eve',color:'var(--pink)'},
+  {name:'mallory',color:'var(--yellow)'},
+  {name:'trent',color:'var(--lavender)'},
+  {name:'carol',color:'var(--green)'},
+];
+const chatMessages=[
+  {user:0,text:'just shipped the new plugin API, feels so clean',delay:2000},
+  {user:1,text:'nice, testing it now. the IPC bridge is solid',delay:4500},
+  {user:2,text:'the E2E DMs are working great btw',react:'🔒',delay:7000},
+  {user:3,text:'anyone tried the tetris in the command palette?',delay:11000},
+  {user:4,text:'yeah lol I played while waiting for cargo build',delay:14000},
+  {user:0,text:'120Hz rendering is so smooth',delay:18000},
+  {user:5,text:'just paired my phone via QR, the relay is instant',delay:22000},
+  {user:1,text:'the tiling engine handles 12 panes without breaking a sweat',delay:27000},
+  {user:2,text:'new theme looks amazing with catppuccin mocha',react:'💜',delay:32000},
+  {user:3,text:'whisper transcription is surprisingly accurate',delay:38000},
+  {user:0,text:'pushed a PR for the new settings panel',delay:43000},
+  {user:4,text:'the binary split tree visualization is so satisfying to watch',delay:49000},
+  {user:5,text:'just discovered you can stack tabs in a single pane leaf',delay:55000},
+  {user:1,text:'wgpu 24 upgrade went smoothly, vulkan perf is better',delay:62000},
+];
+let chatIdx=0;
+function addChat(user,text,reaction){
+  const div=document.createElement('div');div.className='chat-msg';
+  const h=new Date().getHours().toString().padStart(2,'0');
+  const m=new Date().getMinutes().toString().padStart(2,'0');
+  div.innerHTML=`<span class="chat-user" style="color:${user.color}">${esc(user.name)}</span><span class="chat-time">${h}:${m}</span><div class="chat-text">${esc(text)}</div>`;
+  if(reaction)div.innerHTML+=`<div class="chat-reaction">${reaction} 1</div>`;
+  chatBody.appendChild(div);chatBody.scrollTop=chatBody.scrollHeight;
+}
+function startChat(){
+  chatMessages.forEach(msg=>{
+    setTimeout(()=>{
+      addChat(chatUsers[msg.user],msg.text,msg.react);
+    },msg.delay);
+  });
+}
+// User chat input
+$('#chat-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    const text=e.target.value.trim();if(!text)return;e.target.value='';
+    addChat({name:'you',color:'var(--blue)'},text);
+  }
+});
+
+// ── Pane Focus ───────────────────────────────────────
+document.querySelectorAll('.pane').forEach(pane=>{
+  pane.addEventListener('mousedown',()=>{
+    document.querySelectorAll('.pane').forEach(p=>p.classList.remove('focused'));
+    pane.classList.add('focused');
+    // Update tab
+    const id=pane.id.replace('pane-','');
+    document.querySelectorAll('.tab').forEach(t=>{
+      t.classList.toggle('active',t.dataset.pane===id);
+    });
+  });
+});
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    const paneId=tab.dataset.pane;
+    const pane=document.getElementById('pane-'+paneId);
+    if(pane){
+      document.querySelectorAll('.pane').forEach(p=>p.classList.remove('focused'));
+      pane.classList.add('focused');
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+      tab.classList.add('active');
+      pane.scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
+  });
+});
+
+// ── Resize Handles ───────────────────────────────────
+(function(){
+  const vHandle=$('#resize-v');
+  const colLeft=$('#col-left');
+  const colRight=$('#col-right');
+  let dragging=false;
+  vHandle.addEventListener('mousedown',e=>{dragging=true;e.preventDefault()});
+  document.addEventListener('mousemove',e=>{
+    if(!dragging)return;
+    const tiling=$('#tiling');
+    const rect=tiling.getBoundingClientRect();
+    const x=e.clientX-rect.left;
+    const total=rect.width-12;// gaps
+    const ratio=Math.max(.2,Math.min(.8,x/total));
+    colLeft.style.flex=ratio;
+    colRight.style.flex=1-ratio;
+  });
+  document.addEventListener('mouseup',()=>{dragging=false});
+  // Horizontal handle
+  const hHandle=$('#resize-h');
+  const topPane=$('#pane-claude');
+  const botPane=$('#pane-chat');
+  let hDragging=false;
+  hHandle.addEventListener('mousedown',e=>{hDragging=true;e.preventDefault()});
+  document.addEventListener('mousemove',e=>{
+    if(!hDragging)return;
+    const col=$('#col-right');
+    const rect=col.getBoundingClientRect();
+    const y=e.clientY-rect.top;
+    const total=rect.height-12;
+    const ratio=Math.max(.2,Math.min(.8,y/total));
+    topPane.style.flex=ratio;
+    botPane.style.flex=1-ratio;
+  });
+  document.addEventListener('mouseup',()=>{hDragging=false});
+})();
+
+// ── Command Palette ──────────────────────────────────
+const paletteOverlay=$('#palette-overlay');
+const paletteInput=$('#palette-input');
+const paletteList=$('#palette-list');
+const paletteActions=[
+  {label:'Show Features',cat:'Info',action:()=>{CMDS.features();focusTerminal()}},
+  {label:'Show Architecture',cat:'Info',action:()=>{CMDS.architecture();focusTerminal()}},
+  {label:'Show Keybinds',cat:'Info',action:()=>{CMDS.keybinds();focusTerminal()}},
+  {label:'Show Config',cat:'Info',action:()=>{CMDS.config();focusTerminal()}},
+  {label:'Show Stats',cat:'Info',action:()=>{CMDS.stats();focusTerminal()}},
+  {label:'Terminal Details',cat:'Info',action:()=>{CMDS.terminal();focusTerminal()}},
+  {label:'AI Integration',cat:'Info',action:()=>{CMDS.ai();focusTerminal()}},
+  {label:'Chat & Encryption',cat:'Info',action:()=>{CMDS.chat();focusTerminal()}},
+  {label:'Tiling Engine',cat:'Info',action:()=>{CMDS.tiling();focusTerminal()}},
+  {label:'Plugin System',cat:'Info',action:()=>{CMDS.plugins();focusTerminal()}},
+  {label:'Games',cat:'Info',action:()=>{CMDS.games();focusTerminal()}},
+  {label:'Mobile Companion',cat:'Info',action:()=>{CMDS.mobile();focusTerminal()}},
+  {label:'GPU Rendering',cat:'Info',action:()=>{CMDS.gpu();focusTerminal()}},
+  {label:'Cryptographic Identity',cat:'Info',action:()=>{CMDS.crypto();focusTerminal()}},
+  {label:'Neofetch',cat:'System',action:()=>{CMDS.neofetch();focusTerminal()}},
+  {label:'Play Tetris',cat:'Games',action:()=>{CMDS.tetris();focusTerminal()}},
+  {label:'Clear Terminal',cat:'Terminal',action:()=>{CMDS.clear();focusTerminal()}},
+  {label:'Open Manual',cat:'Docs',action:()=>CMDS.manual()},
+  {label:'Ask Claude: What is Jarvis?',cat:'AI',action:()=>askClaude('What is Jarvis?')},
+  {label:'Ask Claude: Terminal',cat:'AI',action:()=>askClaude('Tell me about the terminal')},
+  {label:'Ask Claude: Plugins',cat:'AI',action:()=>askClaude('How does the plugin system work?')},
+  {label:'Ask Claude: Tiling',cat:'AI',action:()=>askClaude('How does the tiling work?')},
+  {label:'Ask Claude: Security',cat:'AI',action:()=>askClaude('Tell me about security and encryption')},
+  {label:'Ask Claude: Games',cat:'AI',action:()=>askClaude('What games are built in?')},
+];
+function askClaude(q){
+  if(claudeBusy)return;
+  addClaudeMsg('user',q);
+  setTimeout(()=>{
+    const resp=claudeResponses[q]||'I can help with that. Try clicking one of the topic buttons.';
+    addClaudeMsg('assistant',resp);
+  },300);
+}
+function focusTerminal(){
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('focused'));
+  $('#pane-terminal').classList.add('focused');
+  termIn.focus();scrollTerm();
+}
+let paletteSel=0;
+function openPalette(){
+  paletteOverlay.classList.add('open');paletteInput.value='';paletteInput.focus();
+  paletteSel=0;renderPalette('');
+}
+function closePalette(){paletteOverlay.classList.remove('open')}
+function renderPalette(q){
+  const lower=q.toLowerCase();
+  const filtered=q?paletteActions.filter(a=>a.label.toLowerCase().includes(lower)):paletteActions;
+  paletteSel=Math.max(0,Math.min(paletteSel,filtered.length-1));
+  paletteList.innerHTML=filtered.map((a,i)=>
+    `<div class="palette-item${i===paletteSel?' selected':''}" data-idx="${i}">
+      <span class="p-label">${esc(a.label)}</span>
+      <span class="p-cat">${esc(a.cat)}</span>
+    </div>`
+  ).join('');
+  paletteList.querySelectorAll('.palette-item').forEach((el,i)=>{
+    el.addEventListener('click',()=>{closePalette();filtered[i].action()});
+  });
+}
+paletteInput.addEventListener('input',()=>{paletteSel=0;renderPalette(paletteInput.value)});
+paletteInput.addEventListener('keydown',e=>{
+  const q=paletteInput.value.toLowerCase();
+  const filtered=q?paletteActions.filter(a=>a.label.toLowerCase().includes(q)):paletteActions;
+  if(e.key==='ArrowDown'){e.preventDefault();paletteSel=Math.min(paletteSel+1,filtered.length-1);renderPalette(paletteInput.value)}
+  else if(e.key==='ArrowUp'){e.preventDefault();paletteSel=Math.max(paletteSel-1,0);renderPalette(paletteInput.value)}
+  else if(e.key==='Enter'){e.preventDefault();if(filtered[paletteSel]){closePalette();filtered[paletteSel].action()}}
+  else if(e.key==='Escape'){closePalette()}
+});
+paletteOverlay.addEventListener('click',e=>{if(e.target===paletteOverlay)closePalette()});
+
+document.addEventListener('keydown',e=>{
+  // Ctrl+K or Cmd+K for palette
+  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();
+    paletteOverlay.classList.contains('open')?closePalette():openPalette();return}
+  if(e.key==='Escape'&&paletteOverlay.classList.contains('open')){closePalette();return}
+});
+
+// ── Tetris ───────────────────────────────────────────
+let tetrisRunning=false;
+function startTetris(){
+  if(tetrisRunning){raw(`<span class="warn">Tetris is already running in the terminal!</span>\n`);return}
+  tetrisRunning=true;
+  // Replace terminal body content with tetris
+  const termPane=$('#pane-terminal .pane-body');
+  const savedHTML=termPane.innerHTML;
+  const W=10,H=20,BS=18;
+  termPane.innerHTML=`<canvas id="tetris-canvas" width="${W*BS}" height="${H*BS}"></canvas>
+    <div id="tetris-score">Score: 0</div>
+    <div id="tetris-controls">Arrow keys to play &middot; ESC to quit</div>`;
+  const canvas=$('#tetris-canvas');
+  const tctx=canvas.getContext('2d');
+  const colors=['','#f38ba8','#fab387','#f9e2af','#a6e3a1','#89b4fa','#cba6f7','#f5c2e7'];
+  const shapes=[
+    [[1,1,1,1]],
+    [[1,1],[1,1]],
+    [[0,1,0],[1,1,1]],
+    [[1,0,0],[1,1,1]],
+    [[0,0,1],[1,1,1]],
+    [[1,1,0],[0,1,1]],
+    [[0,1,1],[1,1,0]],
+  ];
+  let board=Array.from({length:H},()=>Array(W).fill(0));
+  let score=0,piece,px,py,pid,gameOver=false,dropTimer;
+  function newPiece(){
+    pid=Math.floor(Math.random()*7);
+    piece=shapes[pid].map(r=>[...r]);
+    px=Math.floor((W-piece[0].length)/2);py=0;
+    if(!canPlace(piece,px,py)){gameOver=true;clearInterval(dropTimer);
+      $('#tetris-score').textContent=`Game Over! Score: ${score}`}
+  }
+  function canPlace(p,x,y){
+    for(let r=0;r<p.length;r++)for(let c=0;c<p[r].length;c++)
+      if(p[r][c]&&(x+c<0||x+c>=W||y+r>=H||board[y+r]?.[x+c]))return false;
+    return true;
+  }
+  function place(){
+    for(let r=0;r<piece.length;r++)for(let c=0;c<piece[r].length;c++)
+      if(piece[r][c])board[py+r][px+c]=pid+1;
+    // Clear lines
+    let lines=0;
+    for(let r=H-1;r>=0;r--){
+      if(board[r].every(c=>c)){board.splice(r,1);board.unshift(Array(W).fill(0));lines++;r++}
+    }
+    score+=[0,100,300,500,800][lines]||0;
+    $('#tetris-score').textContent=`Score: ${score}`;
+    newPiece();
+  }
+  function rotate(){
+    const rot=piece[0].map((_,c)=>piece.map(r=>r[c]).reverse());
+    if(canPlace(rot,px,py))piece=rot;
+  }
+  function draw(){
+    tctx.fillStyle='#11111b';tctx.fillRect(0,0,W*BS,H*BS);
+    // Grid
+    tctx.strokeStyle='#181825';tctx.lineWidth=.5;
+    for(let r=0;r<H;r++)for(let c=0;c<W;c++){tctx.strokeRect(c*BS,r*BS,BS,BS)}
+    // Board
+    for(let r=0;r<H;r++)for(let c=0;c<W;c++)if(board[r][c]){
+      tctx.fillStyle=colors[board[r][c]];tctx.fillRect(c*BS+1,r*BS+1,BS-2,BS-2);
+    }
+    // Current piece
+    if(!gameOver)for(let r=0;r<piece.length;r++)for(let c=0;c<piece[r].length;c++)
+      if(piece[r][c]){tctx.fillStyle=colors[pid+1];tctx.fillRect((px+c)*BS+1,(py+r)*BS+1,BS-2,BS-2)}
+  }
+  function tick(){if(gameOver)return;if(canPlace(piece,px,py+1))py++;else place();draw()}
+  newPiece();draw();dropTimer=setInterval(tick,500);
+  function tetrisKey(e){
+    if(e.key==='Escape'){
+      clearInterval(dropTimer);tetrisRunning=false;
+      document.removeEventListener('keydown',tetrisKey);
+      termPane.innerHTML=savedHTML;termIn.focus();return;
+    }
+    if(gameOver)return;
+    if(e.key==='ArrowLeft'&&canPlace(piece,px-1,py)){px--;e.preventDefault()}
+    else if(e.key==='ArrowRight'&&canPlace(piece,px+1,py)){px++;e.preventDefault()}
+    else if(e.key==='ArrowDown'){if(canPlace(piece,px,py+1))py++;e.preventDefault()}
+    else if(e.key==='ArrowUp'){rotate();e.preventDefault()}
+    draw();
+  }
+  document.addEventListener('keydown',tetrisKey);
+}
+
+// ── FPS Counter ──────────────────────────────────────
+(function(){
+  let frames=0,last=performance.now();
+  const el=$('#fps-counter');
+  function tick(){
+    frames++;const now=performance.now();
+    if(now-last>=1000){el.textContent=frames+' Hz';frames=0;last=now}
+    requestAnimationFrame(tick);
+  }
+  tick();
+})();
+
+// ── Online Count Animation ───────────────────────────
+(function(){
+  const el=$('#online-count');
+  const counts=['3 online','4 online','4 online','5 online','4 online','3 online','4 online','5 online','6 online','5 online'];
+  let i=0;
+  setInterval(()=>{i=(i+1)%counts.length;el.textContent=counts[i]},8000);
+})();
+
+// ── Start ────────────────────────────────────────────
+boot();
+</script>
+</body>
+</html>
