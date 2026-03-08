@@ -249,16 +249,13 @@ impl JarvisApp {
                     self.create_webview_for_pane_opaque(pane_id, &game_url);
                     tracing::info!(pane_id, game = %game, "Emulator launched (opaque WebView)");
                 } else {
+                    // Recreate the webview so the jarvis:// custom protocol
+                    // handler fires correctly on Windows WebView2.
                     if let Some(ref mut registry) = self.webviews {
-                        if let Some(handle) = registry.get_mut(pane_id) {
-                            if let Err(e) = handle.load_url(&game_url) {
-                                tracing::warn!(error = %e, "Failed to launch game");
-                                self.game_active.remove(&pane_id);
-                            } else {
-                                tracing::info!(pane_id, game = %game, "Game launched");
-                            }
-                        }
+                        registry.destroy(pane_id);
                     }
+                    self.create_webview_for_pane_with_url(pane_id, &game_url);
+                    tracing::info!(pane_id, game = %game, "Game launched");
                 }
             }
             Action::OpenURL(ref url) => {
@@ -269,14 +266,31 @@ impl JarvisApp {
                     url.clone()
                 };
                 let pane_id = self.tiling.focused_id();
-                if let Some(ref mut registry) = self.webviews {
-                    if let Some(handle) = registry.get_mut(pane_id) {
-                        let original_url = handle.current_url().to_string();
-                        if let Err(e) = handle.load_url(&normalized) {
-                            tracing::warn!(error = %e, url = %normalized, "Failed to open URL");
-                        } else {
-                            tracing::info!(pane_id, url = %normalized, "URL navigation requested");
+                // For jarvis:// URLs, destroy and recreate the webview so the
+                // custom protocol handler is properly wired up (WebView2 on
+                // Windows does not route load_url through the protocol handler).
+                if normalized.starts_with("jarvis://") {
+                    if let Some(ref registry) = self.webviews {
+                        if let Some(handle) = registry.get(pane_id) {
+                            let original_url = handle.current_url().to_string();
                             self.game_active.insert(pane_id, original_url);
+                        }
+                    }
+                    if let Some(ref mut registry) = self.webviews {
+                        registry.destroy(pane_id);
+                    }
+                    self.create_webview_for_pane_with_url(pane_id, &normalized);
+                    tracing::info!(pane_id, url = %normalized, "URL navigation requested (recreated webview)");
+                } else {
+                    if let Some(ref mut registry) = self.webviews {
+                        if let Some(handle) = registry.get_mut(pane_id) {
+                            let original_url = handle.current_url().to_string();
+                            if let Err(e) = handle.load_url(&normalized) {
+                                tracing::warn!(error = %e, url = %normalized, "Failed to open URL");
+                            } else {
+                                tracing::info!(pane_id, url = %normalized, "URL navigation requested");
+                                self.game_active.insert(pane_id, original_url);
+                            }
                         }
                     }
                 }

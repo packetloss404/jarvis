@@ -350,20 +350,14 @@ impl JarvisApp {
                     .map(|h| h.current_url().contains("emulator"))
                     .unwrap_or(false);
 
-                if is_emulator {
-                    tracing::info!(pane_id, "Exiting emulator, recreating transparent WebView");
-                    if let Some(ref mut registry) = self.webviews {
-                        registry.destroy(pane_id);
-                    }
-                    self.create_webview_for_pane_with_url(pane_id, &original_url);
-                } else {
-                    tracing::info!(pane_id, "Exiting game, navigating back");
-                    if let Some(ref mut registry) = self.webviews {
-                        if let Some(handle) = registry.get_mut(pane_id) {
-                            let _ = handle.load_url(&original_url);
-                        }
-                    }
+                // Always destroy and recreate the webview when navigating
+                // back, since WebView2 on Windows doesn't route load_url
+                // through the custom protocol handler for jarvis:// URLs.
+                tracing::info!(pane_id, is_emulator, "Exiting game/plugin, recreating WebView");
+                if let Some(ref mut registry) = self.webviews {
+                    registry.destroy(pane_id);
                 }
+                self.create_webview_for_pane_with_url(pane_id, &original_url);
                 self.notify_focus_changed();
                 return;
             }
