@@ -38,6 +38,10 @@ After registration, clients exchange JSON **envelopes** (`key_exchange`, `plaint
 
 Mobile sends periodic JSON `{"type":"ping"}` on the WebSocket. The relay **does not forward** these over bridge links (desktop never used them); WebSocket **Ping** frames are still answered with **Pong** as usual.
 
+## Conformance
+
+`session_ready` (and future relay control messages) are covered by shared JSON under [`jarvis-rs/testdata/relay/`](../../testdata/relay/); `jarvis-relay` and `jarvis-app` tests deserialize or serialize against the same file.
+
 ## Run
 
 ```bash
