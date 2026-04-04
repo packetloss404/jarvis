@@ -8,6 +8,8 @@ interface SessionTokenInputProps {
   currentToken: string | null;
   onConnect: (token: string) => void;
   onDisconnect: () => void;
+  onScanPress?: () => void;
+  onSettingsPress?: () => void;
 }
 
 const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
@@ -17,6 +19,8 @@ export default function SessionTokenInput({
   currentToken,
   onConnect,
   onDisconnect,
+  onScanPress,
+  onSettingsPress,
 }: SessionTokenInputProps) {
   const [inputValue, setInputValue] = useState('');
 
@@ -50,6 +54,11 @@ export default function SessionTokenInput({
         }} numberOfLines={1}>
           {truncated}
         </Text>
+        {onSettingsPress ? (
+          <TouchableOpacity onPress={onSettingsPress} style={{ padding: 4 }}>
+            <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.tabInactive }}>[?]</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity onPress={onDisconnect} style={{ padding: 4 }}>
           <Text style={{ fontFamily: mono, fontSize: 10, color: 'rgba(255, 100, 100, 0.6)' }}>
             [disconnect]
@@ -74,6 +83,16 @@ export default function SessionTokenInput({
           [error]
         </Text>
       )}
+      {onScanPress ? (
+        <TouchableOpacity onPress={onScanPress} style={{ paddingVertical: 4 }}>
+          <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.primary }}>[scan]</Text>
+        </TouchableOpacity>
+      ) : null}
+      {onSettingsPress ? (
+        <TouchableOpacity onPress={onSettingsPress} style={{ paddingVertical: 4 }}>
+          <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.tabInactive }}>[?]</Text>
+        </TouchableOpacity>
+      ) : null}
       <TextInput
         value={inputValue}
         onChangeText={setInputValue}

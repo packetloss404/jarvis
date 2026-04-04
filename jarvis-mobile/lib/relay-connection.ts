@@ -1,6 +1,9 @@
 import { createRelayCipher, type RelayCipher } from './crypto';
+import { parsePairingString } from './parse-pairing';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export { parsePairingString } from './parse-pairing';
 
 export interface PaneInfo {
   id: number;
@@ -25,34 +28,6 @@ export interface IRelayConnection {
   getStatus(): ConnectionStatus;
 }
 
-/**
- * Parse a pairing string into relay URL + session ID.
- *
- * Accepts:
- *   - "jarvis://pair?relay=wss://host/ws&session=abc123&dhpub=..."
- *   - "wss://host/ws|abc123"  (compact format)
- *   - "wss://host/ws"         (session generated server-side — not used yet)
- */
-function parsePairingData(input: string): { relayUrl: string; sessionId: string; dhPubkey?: string } {
-  // URL format: jarvis://pair?relay=...&session=...&dhpub=...
-  if (input.startsWith('jarvis://')) {
-    const url = new URL(input);
-    const relay = url.searchParams.get('relay') || '';
-    const session = url.searchParams.get('session') || '';
-    const dhpub = url.searchParams.get('dhpub') || undefined;
-    return { relayUrl: relay, sessionId: session, dhPubkey: dhpub };
-  }
-
-  // Pipe-delimited: "wss://host/ws|session_id"
-  if (input.includes('|')) {
-    const [relayUrl, sessionId] = input.split('|', 2);
-    return { relayUrl, sessionId };
-  }
-
-  // Bare URL (for testing)
-  return { relayUrl: input, sessionId: '' };
-}
-
 // WebSocket connection through the relay server.
 export class RelayConnection implements IRelayConnection {
   private status: ConnectionStatus = 'disconnected';
@@ -72,7 +47,7 @@ export class RelayConnection implements IRelayConnection {
   private static readonly MAX_BACKOFF = 30000;
 
   connect(pairingData: string, callbacks: RelayConnectionCallbacks): void {
-    const parsed = parsePairingData(pairingData);
+    const parsed = parsePairingString(pairingData);
     this.relayUrl = parsed.relayUrl;
     this.sessionId = parsed.sessionId;
     this.desktopDhPubkey = parsed.dhPubkey;

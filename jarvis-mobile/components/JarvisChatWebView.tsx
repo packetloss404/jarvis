@@ -4,11 +4,13 @@ import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { buildChatHTML } from '../lib/jarvis-chat-html';
 import { theme } from '../lib/theme';
+import { useWebViewAndroidBack } from '../hooks/useWebViewAndroidBack';
 
 export default function JarvisChatWebView() {
   const webViewRef = useRef<WebView>(null);
   const insets = useSafeAreaInsets();
   const htmlRef = useRef(buildChatHTML());
+  const { onNavigationStateChange } = useWebViewAndroidBack(webViewRef);
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
@@ -38,6 +40,7 @@ export default function JarvisChatWebView() {
           scrollEnabled={false}
           keyboardDisplayRequiresUserAction={false}
           onMessage={handleMessage}
+          onNavigationStateChange={onNavigationStateChange}
           onError={(e) => console.log('Chat WebView error:', e.nativeEvent)}
         />
       </View>

@@ -1,11 +1,16 @@
-import React, { useRef, useCallback } from 'react';
-import { View, Text } from 'react-native';
+import React, { useRef, useCallback, useEffect, useState } from 'react';
+import { View, Text, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../lib/theme';
 import TerminalWebView, { TerminalWebViewHandle } from './TerminalWebView';
 import SessionTokenInput from './SessionTokenInput';
+import PairingQrScanner from './PairingQrScanner';
 import { useRelayConnection } from '../hooks/useRelayConnection';
+import { usePairingDeepLink } from '../contexts/PairingDeepLinkContext';
 import type { PaneInfo } from '../lib/relay-connection';
+
+const paneMono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 function PaneIndicator({ panes, activePaneId }: { panes: PaneInfo[]; activePaneId: number }) {
   if (panes.length <= 1) return null;
@@ -35,7 +40,7 @@ function PaneIndicator({ panes, activePaneId }: { panes: PaneInfo[]; activePaneI
       {activePane && (
         <Text style={{
           color: 'rgba(0, 212, 255, 0.5)',
-          fontFamily: 'Menlo',
+          fontFamily: paneMono,
           fontSize: 10,
           marginLeft: 4,
         }}>
@@ -48,11 +53,15 @@ function PaneIndicator({ panes, activePaneId }: { panes: PaneInfo[]; activePaneI
 
 export default function CodeTerminal() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const terminalRef = useRef<TerminalWebViewHandle>(null);
+  const [qrOpen, setQrOpen] = useState(false);
+  const { pendingPairingUrl, clearPendingPairingUrl } = usePairingDeepLink();
 
   const {
     status,
     sessionToken,
+    terminalReady,
     connect,
     disconnect,
     onTerminalReady,
@@ -64,10 +73,21 @@ export default function CodeTerminal() {
     switchToPrev,
   } = useRelayConnection(terminalRef);
 
+  useEffect(() => {
+    if (!terminalReady || !pendingPairingUrl) return;
+    const p = pendingPairingUrl;
+    clearPendingPairingUrl();
+    void connect(p);
+  }, [terminalReady, pendingPairingUrl, connect, clearPendingPairingUrl]);
+
   const handleSwipe = useCallback((direction: 'prev' | 'next') => {
     if (direction === 'prev') switchToPrev();
     else switchToNext();
   }, [switchToPrev, switchToNext]);
+
+  const openSettings = useCallback(() => {
+    router.push('/settings');
+  }, [router]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg, paddingTop: insets.top }}>
@@ -76,6 +96,8 @@ export default function CodeTerminal() {
         currentToken={sessionToken}
         onConnect={connect}
         onDisconnect={disconnect}
+        onScanPress={() => setQrOpen(true)}
+        onSettingsPress={openSettings}
       />
       <PaneIndicator panes={panes} activePaneId={activePaneId} />
       <TerminalWebView
@@ -84,6 +106,11 @@ export default function CodeTerminal() {
         onInput={onTerminalInput}
         onResize={onTerminalResize}
         onSwipe={handleSwipe}
+      />
+      <PairingQrScanner
+        visible={qrOpen}
+        onClose={() => setQrOpen(false)}
+        onPairingScanned={(data) => void connect(data)}
       />
     </View>
   );

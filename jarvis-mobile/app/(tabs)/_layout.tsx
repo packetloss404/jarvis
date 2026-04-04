@@ -42,6 +42,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: '[ code ]',
+          tabBarAccessibilityLabel: 'Relay terminal pairing and remote code',
           tabBarLabel: ({ focused }) => <TabLabel label="[ code ]" focused={focused} />,
           tabBarIcon: ({ focused }) => (
             <Text style={{
@@ -58,6 +59,7 @@ export default function TabLayout() {
         name="chat"
         options={{
           title: '[ chat ]',
+          tabBarAccessibilityLabel: 'Livechat Supabase WebView',
           tabBarLabel: ({ focused }) => <TabLabel label="[ chat ]" focused={focused} />,
           tabBarIcon: ({ focused }) => (
             <Text style={{
@@ -66,6 +68,23 @@ export default function TabLayout() {
               color: focused ? theme.colors.tabActive : theme.colors.tabInactive,
             }}>
               //
+            </Text>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="claude"
+        options={{
+          title: '[ claude ]',
+          tabBarAccessibilityLabel: 'Claude Code web',
+          tabBarLabel: ({ focused }) => <TabLabel label="[ claude ]" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <Text style={{
+              fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+              fontSize: 16,
+              color: focused ? theme.colors.tabActive : theme.colors.tabInactive,
+            }}>
+              {'{ }'}
             </Text>
           ),
         }}

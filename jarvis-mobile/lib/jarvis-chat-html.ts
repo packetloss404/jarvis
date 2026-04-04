@@ -6,6 +6,9 @@
  * - Crypto via Web Crypto API (not Rust IPC)
  * - Mobile-friendly CSS (touch targets, viewport, safe areas)
  * - No close button or file-path IPC
+ *
+ * When the desktop panel changes, run `npm run sync:chat-html` to refresh
+ * vendor/chat-index.from-jarvis-rs.html, then merge any HTML/JS/CSS updates into this bundle.
  */
 
 export function buildChatHTML(): string {

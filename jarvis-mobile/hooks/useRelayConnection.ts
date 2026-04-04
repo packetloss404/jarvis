@@ -135,6 +135,7 @@ export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewH
   return {
     status,
     sessionToken,
+    terminalReady,
     connect,
     disconnect,
     onTerminalReady,
