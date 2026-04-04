@@ -1,6 +1,6 @@
 # Jarvis repository architecture
 
-This document explains **what lives where** and **which tree is authoritative** for new work. It is the short map; the [manual](docs/manual/README.md) is the long-form reference.
+This document explains **what lives where** and **which tree is authoritative** for new work. It is the short map; the [manual](docs/manual/README.md) (under **`docs/`**, with the marketing site) is the long-form reference. **Development-only** notes and analysis live under **`dev/`** (including pathforward).
 
 ---
 
@@ -52,8 +52,9 @@ Everything that powered the **original macOS-only** experience now lives under *
 
 | Path | Role |
 |------|------|
-| [`docs/`](docs/) | Manual, plugins doc, internal plans, pathforward analyses |
-| [`tests/`](tests/) | Python tests; [`pytest.ini`](pytest.ini) sets `pythonpath = legacy` |
+| [`docs/`](docs/) | **Website** and published docs: marketing pages (`docs/index.html`), [technical manual](docs/manual/README.md), plugins doc |
+| [`dev/`](dev/) | **Development documentation** only: pathforward analysis (`dev/pathforward/`), archived planning (`dev/_archive/`), and similar internal write-ups |
+| [`legacy/tests/`](legacy/tests/) | Python tests for the **legacy** stack; [`pytest.ini`](pytest.ini) sets `pythonpath = legacy`, `testpaths = legacy/tests` |
 | [`scripts/`](scripts/) | Shell/PowerShell helpers (legacy workflow, packaging) |
 | [`relay/`](relay/) | Deployment scripts for relay infrastructure (not the `jarvis-relay` crate source) |
 | [`resources/`](resources/) | Icons/assets for legacy macOS packaging (e.g. DMG) |
@@ -73,5 +74,5 @@ Everything that powered the **original macOS-only** experience now lives under *
 ## Further reading
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — builds, tests, lockfile  
-- [docs/pathforward/finalfindings.md](docs/pathforward/finalfindings.md) — strategic analysis (some paths are historical; see status note at top of that file if present)  
+- [dev/pathforward/finalfindings.md](dev/pathforward/finalfindings.md) — strategic analysis (some paths are historical; see status note at top of that file if present)  
 - [docs/manual/02-getting-started.md](docs/manual/02-getting-started.md) — install and build details  

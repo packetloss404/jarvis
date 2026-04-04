@@ -51,17 +51,21 @@ Further detail: **[docs/manual/README.md](docs/manual/README.md)** (full technic
 ```
 jarvis/
   jarvis-rs/           # PRIMARY: Rust desktop app (develop here)
+    testdata/          # Shared wire-protocol JSON fixtures (relay ↔ desktop tests)
   legacy/              # Legacy macOS stack: Python + Swift/Metal (maintenance only)
     main.py            # Legacy entrypoint
     metal-app/         # Swift/Metal frontend
     jarvis/            # Python package (config, commands, …)
+    tests/             # Python tests for legacy (pytest; see repo pytest.ini)
     skills/, voice/, connectors/, presence/
     requirements.txt   # Legacy Python deps
     requirements.lock  # Pinned lockfile (pip-tools)
   jarvis-mobile/       # React Native companion (thin client)
   scripts/             # login, start, setup, packaging helpers (mostly legacy flow)
-  docs/                # Manual, plugins, internal plans
-  tests/               # Python tests (pytest; see pytest.ini)
+  docs/                # Website + published manual (and plugins doc); built HTML is gitignored
+  dev/                 # Development docs only (pathforward analysis, etc.)
+    pathforward/       # Strategic / model-sourced codebase write-ups
+    _archive/          # Dated internal plans (kept for history; not the live manual)
   relay/               # Deployment helpers (separate from app crates)
   resources/           # Packaging / DMG resources (legacy macOS release)
 ```
@@ -126,8 +130,9 @@ OAuth refresh:
 |-----|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Repo map, primary vs legacy, mobile |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Builds, tests, dependency lock, PR hints |
-| [docs/manual/README.md](docs/manual/README.md) | Full Jarvis technical manual |
+| [docs/manual/README.md](docs/manual/README.md) | Full Jarvis technical manual (lives under **`docs/`** with the site) |
 | [docs/plugins/plugins.md](docs/plugins/plugins.md) | Plugin system (Rust app) |
+| [dev/pathforward/finalfindings.md](dev/pathforward/finalfindings.md) | Strategic codebase analysis (under **`dev/`**; see also **`dev/_archive/`** for older plans) |
 | [CHANGELOG.md](CHANGELOG.md) | High-level history from git (themes over time) |
 
 ---

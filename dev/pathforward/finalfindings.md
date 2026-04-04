@@ -11,7 +11,7 @@ The following structural recommendations from this document have been **partiall
 - **Legacy isolation:** The Python + Swift/Metal stack now lives under **`legacy/`** (e.g. `legacy/main.py`, `legacy/metal-app/`, `legacy/jarvis/`, `legacy/requirements.txt`). Helper scripts are under **`scripts/`**.
 - **Duplicate root HTML:** Standalone game/chat `*.html` at the repository root were removed; canonical panel sources are under `jarvis-rs/assets/panels/`.
 - **Python pinning:** `legacy/requirements.lock` is generated with **pip-tools** (`pip-compile`); see [CONTRIBUTING.md](../../CONTRIBUTING.md).
-- **Python tests:** Live under **`tests/`** with `pytest.ini` setting `pythonpath = legacy`.
+- **Python tests:** Live under **`legacy/tests/`** with `pytest.ini` setting `pythonpath = legacy`.
 
 When a finding cites `main.py` or `metal-app/` at repo root, read that as **`legacy/main.py`** and **`legacy/metal-app/`** unless the finding is explicitly about historical layout.
 

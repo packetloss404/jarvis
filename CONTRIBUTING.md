@@ -9,7 +9,8 @@ Thank you for helping improve Jarvis. This repository intentionally holds **two*
 | **Primary product (default)** | [`jarvis-rs/`](jarvis-rs/) | Almost all new features, bug fixes, and UX work for the cross-platform app. |
 | **Legacy macOS stack** | [`legacy/`](legacy/) | Maintenance only: Python orchestration, Swift/Metal UI, and old voice/skills paths. Do not add new product surface here unless you are explicitly supporting the legacy release. |
 | **Mobile companion** | [`jarvis-mobile/`](jarvis-mobile/) | React Native client; keep it a thin companion relative to the desktop app. |
-| **Docs** | [`docs/`](docs/) | Manual, plugins, internal plans, pathforward analysis. |
+| **Website & manual** | [`docs/`](docs/) | Marketing site, technical manual, plugins doc — publishable / contributor-facing. |
+| **Dev docs** | [`dev/`](dev/) | Internal development notes, pathforward analysis (`dev/pathforward/`), archived plans (`dev/_archive/`). |
 
 Read **[ARCHITECTURE.md](ARCHITECTURE.md)** for a full map of directories and boundaries.
 
@@ -22,6 +23,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 cargo build --release
 ```
+
+Optional: compile the GitHub release checker module with `cargo test -p jarvis-app --features updater` (the `updater` feature is off by default until it is wired into the UI).
 
 Release-style binaries land under `jarvis-rs/target/release/` (`jarvis` or `jarvis.exe`).
 
@@ -56,10 +59,10 @@ pip install -r legacy/requirements.txt
 pytest
 ```
 
-`tests/test_game_windows.py` and `tests/test_dm_bot.py` are oriented toward manual or integration use; the default `pytest` run in CI-style workflows can skip them if needed:
+`legacy/tests/test_game_windows.py` and `legacy/tests/test_dm_bot.py` are oriented toward manual or integration use; the default `pytest` run in CI-style workflows can skip them if needed:
 
 ```bash
-pytest --ignore=tests/test_game_windows.py --ignore=tests/test_dm_bot.py
+pytest --ignore=legacy/tests/test_game_windows.py --ignore=legacy/tests/test_dm_bot.py
 ```
 
 ## Updating legacy Python dependencies
@@ -73,6 +76,15 @@ pytest --ignore=tests/test_game_windows.py --ignore=tests/test_dm_bot.py
    ```
 
 3. Commit both `legacy/requirements.txt` and `legacy/requirements.lock`.
+
+## Manual HTML (`docs/manual/`)
+
+The single-file manual (`jarvis-manual.html`) is **not** tracked in git. Generate it from the Markdown chapters:
+
+```bash
+cd docs/manual
+python build_html.py
+```
 
 ## Pull requests
 

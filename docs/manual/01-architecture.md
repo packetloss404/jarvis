@@ -41,7 +41,7 @@ jarvis/
     requirements.txt
   jarvis-mobile/         # React Native companion (thin client)
   scripts/               # start/login/setup/package helpers
-  tests/                 # Python tests (pytest; pythonpath = legacy)
+  legacy/tests/          # Python tests for legacy stack (pytest; pythonpath = legacy)
   docs/                  # Manual, plugins, plans
 ```
 

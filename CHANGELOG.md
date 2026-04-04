@@ -18,7 +18,7 @@ Changes on your branch that are not yet tagged or released should be listed here
 
 ### Documentation, marketing site & analysis
 
-- Unified codebase analysis with an interactive HTML dashboard and strategic write-up (`docs/pathforward/`).
+- Unified codebase analysis with an interactive HTML dashboard and strategic write-up (`dev/pathforward/`).
 - Interactive Jarvis marketing site simulating a live session (tiles, terminal, chat, palette, games).
 - Manual refreshed for embedded assets, transparency, and newer platform behavior.
 
