@@ -6,7 +6,7 @@ import { PaneBufferManager } from '../lib/pane-buffer';
 import { isRelayDebugEnabled } from '../lib/env';
 
 export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewHandle | null>) {
-  const connectionRef = useRef<IRelayConnection>(createRelayConnection('relay'));
+  const connectionRef = useRef<IRelayConnection>(createRelayConnection());
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [terminalReady, setTerminalReady] = useState(false);

@@ -1,10 +1,10 @@
-import { createRelayConnection } from '../lib/relay-connection';
+import { MockRelayConnection } from './mock-relay-connection';
 
 jest.setTimeout(15000);
 
 describe('MockRelayConnection', () => {
   it('connects and echoes typed characters', (done) => {
-    const c = createRelayConnection('mock');
+    const c = new MockRelayConnection();
     let output = '';
     c.connect('ignored', {
       onOutput(d) {
