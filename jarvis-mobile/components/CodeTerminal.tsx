@@ -2,7 +2,7 @@ import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { View, Text, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { theme } from '../lib/theme';
+import { theme, scaledFont } from '../lib/theme';
 import TerminalWebView, { TerminalWebViewHandle } from './TerminalWebView';
 import SessionTokenInput from './SessionTokenInput';
 import PairingQrScanner from './PairingQrScanner';
@@ -41,7 +41,7 @@ function PaneIndicator({ panes, activePaneId }: { panes: PaneInfo[]; activePaneI
         <Text style={{
           color: 'rgba(0, 212, 255, 0.5)',
           fontFamily: paneMono,
-          fontSize: 10,
+          fontSize: scaledFont(10),
           marginLeft: 4,
         }}>
           {activePane.title}
@@ -71,6 +71,9 @@ export default function CodeTerminal() {
     activePaneId,
     switchToNext,
     switchToPrev,
+    lastRelayError,
+    relayDebug,
+    lastRelayEvent,
   } = useRelayConnection(terminalRef);
 
   useEffect(() => {
@@ -89,6 +92,10 @@ export default function CodeTerminal() {
     router.push('/settings');
   }, [router]);
 
+  const openHelp = useCallback(() => {
+    router.push('/help');
+  }, [router]);
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg, paddingTop: insets.top }}>
       <SessionTokenInput
@@ -98,7 +105,23 @@ export default function CodeTerminal() {
         onDisconnect={disconnect}
         onScanPress={() => setQrOpen(true)}
         onSettingsPress={openSettings}
+        onHelpPress={openHelp}
       />
+      {lastRelayError ? (
+        <View style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(80, 20, 20, 0.35)' }}>
+          <Text style={{ fontFamily: paneMono, fontSize: scaledFont(10), color: '#ff9999' }} selectable>
+            Relay: {lastRelayError}
+          </Text>
+        </View>
+      ) : null}
+      {status === 'connecting' ? (
+        <View style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
+          <Text style={{ fontFamily: paneMono, fontSize: scaledFont(9), color: theme.colors.tabInactive }}>
+            Connecting to relay… If this hangs, check the relay URL, desktop Jarvis, and network. Chat issues are
+            separate (Supabase) — see [help].
+          </Text>
+        </View>
+      ) : null}
       <PaneIndicator panes={panes} activePaneId={activePaneId} />
       <TerminalWebView
         ref={terminalRef}
@@ -112,6 +135,24 @@ export default function CodeTerminal() {
         onClose={() => setQrOpen(false)}
         onPairingScanned={(data) => void connect(data)}
       />
+      {relayDebug ? (
+        <View
+          style={{
+            position: 'absolute',
+            right: 8,
+            bottom: 8,
+            padding: 6,
+            backgroundColor: 'rgba(0,0,0,0.75)',
+            borderRadius: 4,
+            maxWidth: '85%',
+          }}
+          pointerEvents="none"
+        >
+          <Text style={{ fontFamily: paneMono, fontSize: scaledFont(9), color: theme.colors.tabInactive }}>
+            relay: {lastRelayEvent || '—'}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

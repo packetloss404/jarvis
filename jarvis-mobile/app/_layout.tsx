@@ -27,6 +27,17 @@ export default function RootLayout() {
             headerTitleStyle: { fontFamily: 'monospace', fontSize: 14 },
           }}
         />
+        <Stack.Screen
+          name="help"
+          options={{
+            headerShown: true,
+            presentation: 'modal',
+            title: '[ help ]',
+            headerStyle: { backgroundColor: theme.colors.tabBar },
+            headerTintColor: theme.colors.primarySolid,
+            headerTitleStyle: { fontFamily: 'monospace', fontSize: 14 },
+          }}
+        />
       </Stack>
     </PairingDeepLinkProvider>
   );

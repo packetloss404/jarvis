@@ -3,6 +3,7 @@ import type { TerminalWebViewHandle } from '../components/TerminalWebView';
 import { createRelayConnection, IRelayConnection, ConnectionStatus, PaneInfo } from '../lib/relay-connection';
 import { loadSessionToken, saveSessionToken, clearSessionToken } from '../lib/session-store';
 import { PaneBufferManager } from '../lib/pane-buffer';
+import { isRelayDebugEnabled } from '../lib/env';
 
 export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewHandle | null>) {
   const connectionRef = useRef<IRelayConnection>(createRelayConnection('relay'));
@@ -11,6 +12,9 @@ export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewH
   const [terminalReady, setTerminalReady] = useState(false);
   const [panes, setPanes] = useState<PaneInfo[]>([]);
   const [activePaneId, setActivePaneId] = useState(1);
+  const [lastRelayError, setLastRelayError] = useState<string | null>(null);
+  const [lastRelayEvent, setLastRelayEvent] = useState<string>('');
+  const relayDebug = isRelayDebugEnabled();
 
   const activePaneIdRef = useRef(1);
   const bufferRef = useRef(new PaneBufferManager());
@@ -54,6 +58,7 @@ export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewH
 
   const connectToRelay = useCallback((token: string) => {
     bufferRef.current.clearAll();
+    setLastRelayError(null);
     connectionRef.current.connect(token, {
       onOutput(data: string) {
         terminalRef.current?.writeOutput(data);
@@ -84,10 +89,18 @@ export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewH
         terminalRef.current?.setConnectionStatus(newStatus, message);
       },
       onError(error: string) {
+        setLastRelayError(error);
         terminalRef.current?.writeOutput(`\r\n\x1b[31m[relay error: ${error}]\x1b[0m\r\n`);
       },
+      ...(relayDebug
+        ? {
+            onRelayProtocolEvent(t: string) {
+              setLastRelayEvent(t);
+            },
+          }
+        : {}),
     });
-  }, [terminalRef]);
+  }, [terminalRef, relayDebug]);
 
   // Auto-connect when terminal is ready and token exists
   useEffect(() => {
@@ -106,6 +119,8 @@ export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewH
     connectionRef.current.disconnect();
     setStatus('disconnected');
     setSessionToken(null);
+    setLastRelayError(null);
+    setLastRelayEvent('');
     setPanes([]);
     bufferRef.current.clearAll();
     await clearSessionToken();
@@ -145,5 +160,8 @@ export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewH
     activePaneId,
     switchToNext,
     switchToPrev,
+    lastRelayError,
+    relayDebug,
+    lastRelayEvent,
   };
 }

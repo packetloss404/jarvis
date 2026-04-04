@@ -17,6 +17,8 @@ export interface RelayConnectionCallbacks {
   onPaneList?: (panes: PaneInfo[], focusedId: number) => void;
   onStatusChange: (status: ConnectionStatus, message?: string) => void;
   onError: (error: string) => void;
+  /** Dev-only: last relay envelope type (EXPO_PUBLIC_RELAY_DEBUG). */
+  onRelayProtocolEvent?: (eventType: string) => void;
 }
 
 export interface IRelayConnection {
@@ -111,6 +113,7 @@ export class RelayConnection implements IRelayConnection {
   }
 
   private handleRelayMessage(msg: any): void {
+    this.callbacks?.onRelayProtocolEvent?.(typeof msg?.type === 'string' ? msg.type : 'unknown');
     switch (msg.type) {
       // Relay control messages
       case 'session_ready':

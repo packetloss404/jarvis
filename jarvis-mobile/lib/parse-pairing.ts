@@ -4,7 +4,7 @@
  * Accepts:
  *   - "jarvis://pair?relay=wss://host/ws&session=abc123&dhpub=..."
  *   - "wss://host/ws|abc123"  (compact format)
- *   - "wss://host/ws"         (bare URL; session may be assigned server-side)
+ *   - "wss://host/ws"         (bare URL; session id empty until relay assigns one — not used on mobile yet)
  */
 export function parsePairingString(input: string): { relayUrl: string; sessionId: string; dhPubkey?: string } {
   const trimmed = input.trim();

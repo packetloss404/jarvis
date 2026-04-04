@@ -3,7 +3,8 @@ import { View, Platform, KeyboardAvoidingView, Text, TouchableOpacity } from 're
 import { WebView, WebViewNavigation } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
-import { theme } from '../lib/theme';
+import * as Linking from 'expo-linking';
+import { theme, scaledFont } from '../lib/theme';
 import { useWebViewAndroidBack } from '../hooks/useWebViewAndroidBack';
 
 const CLAUDE_CODE_URL = 'https://claude.ai/code';
@@ -27,7 +28,21 @@ export default function ClaudeCodeWebView() {
   const insets = useSafeAreaInsets();
   const { onNavigationStateChange } = useWebViewAndroidBack(webViewRef);
 
-  const onNavigationRequest = useCallback((_event: WebViewNavigation) => true, []);
+  const onNavigationRequest = useCallback((event: WebViewNavigation) => {
+    const u = event.url;
+    const isOAuthHost =
+      /accounts\.google\.com\/(o\/oauth2|signin)/.test(u) ||
+      /login\.microsoftonline\.com/.test(u) ||
+      /appleid\.apple\.com\/auth/.test(u);
+    if (isOAuthHost) {
+      const redirect = Linking.createURL('oauth/callback');
+      void WebBrowser.openAuthSessionAsync(u, redirect).finally(() => {
+        WebBrowser.maybeCompleteAuthSession();
+      });
+      return false;
+    }
+    return true;
+  }, []);
 
   const openInSystemBrowser = useCallback(() => {
     void WebBrowser.openBrowserAsync(CLAUDE_CODE_URL);
@@ -57,13 +72,13 @@ export default function ClaudeCodeWebView() {
           }}
         >
           <TouchableOpacity onPress={reload} style={{ paddingVertical: 4 }}>
-            <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.primary }}>[reload]</Text>
+            <Text style={{ fontFamily: mono, fontSize: scaledFont(10), color: theme.colors.primary }}>[reload]</Text>
           </TouchableOpacity>
-          <Text style={{ fontFamily: mono, fontSize: 9, color: theme.colors.tabInactive, flex: 1 }} numberOfLines={1}>
-            claude.ai (use browser if sign-in fails)
+          <Text style={{ fontFamily: mono, fontSize: scaledFont(9), color: theme.colors.tabInactive, flex: 1 }} numberOfLines={1}>
+            claude.ai (OAuth may open system browser)
           </Text>
           <TouchableOpacity onPress={openInSystemBrowser} style={{ paddingVertical: 4 }}>
-            <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.primarySolid }}>[browser]</Text>
+            <Text style={{ fontFamily: mono, fontSize: scaledFont(10), color: theme.colors.primarySolid }}>[browser]</Text>
           </TouchableOpacity>
         </View>
         <WebView

@@ -1,16 +1,19 @@
-import React, { useRef, useCallback } from 'react';
-import { View, Platform, KeyboardAvoidingView } from 'react-native';
+import React, { useRef, useCallback, useState } from 'react';
+import { View, Platform, KeyboardAvoidingView, Text } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { buildChatHTML } from '../lib/jarvis-chat-html';
-import { theme } from '../lib/theme';
+import { theme, scaledFont } from '../lib/theme';
 import { useWebViewAndroidBack } from '../hooks/useWebViewAndroidBack';
+
+const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 export default function JarvisChatWebView() {
   const webViewRef = useRef<WebView>(null);
   const insets = useSafeAreaInsets();
   const htmlRef = useRef(buildChatHTML());
   const { onNavigationStateChange } = useWebViewAndroidBack(webViewRef);
+  const [httpError, setHttpError] = useState<string | null>(null);
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
@@ -30,6 +33,14 @@ export default function JarvisChatWebView() {
       keyboardVerticalOffset={insets.top}
     >
       <View style={{ flex: 1, paddingTop: insets.top }}>
+        {httpError ? (
+          <View style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(60, 30, 10, 0.4)' }}>
+            <Text style={{ fontFamily: mono, fontSize: scaledFont(10), color: '#ffcc88' }}>
+              Livechat: network or HTTP issue ({httpError}). This is separate from the relay — check Wi‑Fi, VPN, and
+              Supabase/CDN reachability.
+            </Text>
+          </View>
+        ) : null}
         <WebView
           ref={webViewRef}
           source={{ html: htmlRef.current }}
@@ -41,7 +52,9 @@ export default function JarvisChatWebView() {
           keyboardDisplayRequiresUserAction={false}
           onMessage={handleMessage}
           onNavigationStateChange={onNavigationStateChange}
-          onError={(e) => console.log('Chat WebView error:', e.nativeEvent)}
+          onLoadEnd={() => setHttpError(null)}
+          onHttpError={(e) => setHttpError(String(e.nativeEvent.statusCode))}
+          onError={() => setHttpError('load failed')}
         />
       </View>
     </KeyboardAvoidingView>

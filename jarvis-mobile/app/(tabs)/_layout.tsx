@@ -1,13 +1,13 @@
 import { Tabs } from 'expo-router';
 import { Text, Platform } from 'react-native';
-import { theme } from '../../lib/theme';
+import { theme, scaledFont } from '../../lib/theme';
 
 function TabLabel({ label, focused }: { label: string; focused: boolean }) {
   return (
     <Text
       style={{
         fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-        fontSize: 10,
+        fontSize: scaledFont(10),
         letterSpacing: 1,
         color: focused ? theme.colors.tabActive : theme.colors.tabInactive,
         textShadowColor: focused ? 'rgba(0, 212, 255, 0.4)' : 'transparent',
@@ -25,6 +25,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        freezeOnBlur: false,
         tabBarStyle: {
           backgroundColor: theme.colors.tabBar,
           borderTopColor: theme.colors.tabBarBorder,
@@ -47,7 +48,7 @@ export default function TabLayout() {
           tabBarIcon: ({ focused }) => (
             <Text style={{
               fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-              fontSize: 18,
+              fontSize: scaledFont(18),
               color: focused ? theme.colors.tabActive : theme.colors.tabInactive,
             }}>
               &gt;_
@@ -64,7 +65,7 @@ export default function TabLayout() {
           tabBarIcon: ({ focused }) => (
             <Text style={{
               fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-              fontSize: 18,
+              fontSize: scaledFont(18),
               color: focused ? theme.colors.tabActive : theme.colors.tabInactive,
             }}>
               //
@@ -81,7 +82,7 @@ export default function TabLayout() {
           tabBarIcon: ({ focused }) => (
             <Text style={{
               fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-              fontSize: 16,
+              fontSize: scaledFont(16),
               color: focused ? theme.colors.tabActive : theme.colors.tabInactive,
             }}>
               {'{ }'}

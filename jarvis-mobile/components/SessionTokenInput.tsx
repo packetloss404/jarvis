@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, TextInput, Text, TouchableOpacity, Platform } from 'react-native';
-import { theme } from '../lib/theme';
+import { theme, scaledFont } from '../lib/theme';
 import type { ConnectionStatus } from '../lib/relay-connection';
 
 interface SessionTokenInputProps {
@@ -10,9 +10,11 @@ interface SessionTokenInputProps {
   onDisconnect: () => void;
   onScanPress?: () => void;
   onSettingsPress?: () => void;
+  onHelpPress?: () => void;
 }
 
 const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+const fs = (n: number) => scaledFont(n);
 
 export default function SessionTokenInput({
   status,
@@ -21,6 +23,7 @@ export default function SessionTokenInput({
   onDisconnect,
   onScanPress,
   onSettingsPress,
+  onHelpPress,
 }: SessionTokenInputProps) {
   const [inputValue, setInputValue] = useState('');
 
@@ -45,22 +48,27 @@ export default function SessionTokenInput({
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.border,
       }}>
-        <Text style={{ fontFamily: mono, fontSize: 10, color: statusColor }}>
+        <Text style={{ fontFamily: mono, fontSize: fs(10), color: statusColor }}>
           [{statusLabel}]
         </Text>
         <Text style={{
-          fontFamily: mono, fontSize: 10, color: theme.colors.text,
+          fontFamily: mono, fontSize: fs(10), color: theme.colors.text,
           marginLeft: 8, flex: 1,
         }} numberOfLines={1}>
           {truncated}
         </Text>
+        {onHelpPress ? (
+          <TouchableOpacity onPress={onHelpPress} style={{ padding: 4 }}>
+            <Text style={{ fontFamily: mono, fontSize: fs(10), color: theme.colors.primary }}>[help]</Text>
+          </TouchableOpacity>
+        ) : null}
         {onSettingsPress ? (
           <TouchableOpacity onPress={onSettingsPress} style={{ padding: 4 }}>
-            <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.tabInactive }}>[?]</Text>
+            <Text style={{ fontFamily: mono, fontSize: fs(10), color: theme.colors.tabInactive }}>[?]</Text>
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity onPress={onDisconnect} style={{ padding: 4 }}>
-          <Text style={{ fontFamily: mono, fontSize: 10, color: 'rgba(255, 100, 100, 0.6)' }}>
+          <Text style={{ fontFamily: mono, fontSize: fs(10), color: 'rgba(255, 100, 100, 0.6)' }}>
             [disconnect]
           </Text>
         </TouchableOpacity>
@@ -79,18 +87,23 @@ export default function SessionTokenInput({
       gap: 8,
     }}>
       {status === 'error' && (
-        <Text style={{ fontFamily: mono, fontSize: 10, color: '#ff6b6b' }}>
+        <Text style={{ fontFamily: mono, fontSize: fs(10), color: '#ff6b6b' }}>
           [error]
         </Text>
       )}
       {onScanPress ? (
         <TouchableOpacity onPress={onScanPress} style={{ paddingVertical: 4 }}>
-          <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.primary }}>[scan]</Text>
+          <Text style={{ fontFamily: mono, fontSize: fs(10), color: theme.colors.primary }}>[scan]</Text>
+        </TouchableOpacity>
+      ) : null}
+      {onHelpPress ? (
+        <TouchableOpacity onPress={onHelpPress} style={{ paddingVertical: 4 }}>
+          <Text style={{ fontFamily: mono, fontSize: fs(10), color: theme.colors.primary }}>[help]</Text>
         </TouchableOpacity>
       ) : null}
       {onSettingsPress ? (
         <TouchableOpacity onPress={onSettingsPress} style={{ paddingVertical: 4 }}>
-          <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.tabInactive }}>[?]</Text>
+          <Text style={{ fontFamily: mono, fontSize: fs(10), color: theme.colors.tabInactive }}>[?]</Text>
         </TouchableOpacity>
       ) : null}
       <TextInput
@@ -111,7 +124,7 @@ export default function SessionTokenInput({
           borderRadius: 3,
           color: theme.colors.primary,
           fontFamily: mono,
-          fontSize: 11,
+          fontSize: fs(11),
           paddingHorizontal: 8,
           paddingVertical: 5,
         }}
@@ -121,7 +134,7 @@ export default function SessionTokenInput({
         disabled={!inputValue.trim()}
         style={{ opacity: inputValue.trim() ? 1 : 0.3 }}
       >
-        <Text style={{ fontFamily: mono, fontSize: 10, color: theme.colors.primary, fontWeight: 'bold' }}>
+        <Text style={{ fontFamily: mono, fontSize: fs(10), color: theme.colors.primary, fontWeight: 'bold' }}>
           [connect]
         </Text>
       </TouchableOpacity>
