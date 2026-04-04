@@ -18,6 +18,9 @@ legacy/metal-app/.build/
 # Rust build
 jarvis-rs/target/
 
+# Generated from docs/manual/build_html.py (source of truth: markdown chapters)
+docs/manual/jarvis-manual.html
+
 # Config (user-specific)
 # Note: ~/.config/jarvis/ is outside repo, but local config testing
 .config/
