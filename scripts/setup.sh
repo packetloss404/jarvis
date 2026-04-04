@@ -8,7 +8,7 @@
 # - Builds the Swift/Metal app
 # - Creates config directory with defaults
 #
-# Usage: ./setup.sh [--dev]
+# Usage: ./scripts/setup.sh [--dev]
 #
 
 set -e  # Exit on error
@@ -88,8 +88,8 @@ fi
 # SETUP DIRECTORIES
 # =============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -97,9 +97,9 @@ echo -e "${BLUE}  Creating Directory Structure${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Python module directories
-mkdir -p jarvis/config
-mkdir -p jarvis/commands
-mkdir -p jarvis/session
+mkdir -p legacy/jarvis/config
+mkdir -p legacy/jarvis/commands
+mkdir -p legacy/jarvis/session
 mkdir -p tests
 
 # Resources
@@ -137,7 +137,7 @@ pip install --upgrade pip >/dev/null 2>&1
 
 # Install dependencies
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
-pip install -r requirements.txt >/dev/null 2>&1
+pip install -r legacy/requirements.txt >/dev/null 2>&1
 echo -e "${GREEN}✓${NC} Python dependencies installed"
 
 # =============================================================================
@@ -149,7 +149,7 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLUE}  Building Swift/Metal App${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-cd metal-app
+cd legacy/metal-app
 
 if [[ "$1" == "--dev" ]]; then
     echo -e "${YELLOW}Building debug configuration...${NC}"
@@ -161,7 +161,7 @@ fi
 
 cd ..
 
-if [[ -f "metal-app/.build/release/JarvisBootup" ]] || [[ -f "metal-app/.build/debug/JarvisBootup" ]]; then
+if [[ -f "legacy/metal-app/.build/release/JarvisBootup" ]] || [[ -f "legacy/metal-app/.build/debug/JarvisBootup" ]]; then
     echo -e "${GREEN}✓${NC} Swift app built successfully"
 else
     echo -e "${RED}Error: Swift build failed${NC}"
@@ -183,7 +183,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo -e "${YELLOW}Creating default config...${NC}"
     # Run Python to create default config
     source .venv/bin/activate
-    python3 -c "from jarvis.config.loader import load_config; load_config()" 2>/dev/null
+    PYTHONPATH=legacy python3 -c "from jarvis.config.loader import load_config; load_config()" 2>/dev/null
     echo -e "${GREEN}✓${NC} Config created at $CONFIG_FILE"
 else
     echo -e "${GREEN}✓${NC} Config exists at $CONFIG_FILE"
@@ -199,7 +199,7 @@ echo -e "${GREEN}  ✓ Setup Complete!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "To start Jarvis:"
-echo -e "  ${BLUE}./start.sh --jarvis${NC}"
+echo -e "  ${BLUE}./scripts/start.sh${NC}"
 echo ""
 echo -e "Configuration:"
 echo -e "  ${BLUE}$CONFIG_FILE${NC}"

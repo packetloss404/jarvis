@@ -18,15 +18,19 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(__file__))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LEGACY_ROOT = REPO_ROOT / "legacy"
+sys.path.insert(0, str(LEGACY_ROOT))
 from game_event_log import GameEventLog
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-METAL_APP = os.path.join(PROJECT_DIR, "metal-app", ".build", "debug", "JarvisBootup")
-BASE_PATH = PROJECT_DIR
-ASTEROIDS_PATH = os.path.join(PROJECT_DIR, "asteroids.html")
-TETRIS_PATH = os.path.join(PROJECT_DIR, "tetris.html")
+PROJECT_DIR = str(REPO_ROOT)
+METAL_APP = str(LEGACY_ROOT / "metal-app" / ".build" / "debug" / "JarvisBootup")
+BASE_PATH = str(LEGACY_ROOT)
+_GAMES = str(REPO_ROOT / "jarvis-rs" / "assets" / "panels" / "games")
+ASTEROIDS_PATH = os.path.join(_GAMES, "asteroids.html")
+TETRIS_PATH = os.path.join(_GAMES, "tetris.html")
 
 
 class TestMetalBridge:

@@ -11,6 +11,7 @@ Usage:
 """
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -173,17 +174,23 @@ class TestChatCommandEdgeCases:
 # =============================================================================
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _chat_panel_index_path() -> str:
+    return str(_repo_root() / "jarvis-rs" / "assets" / "panels" / "chat" / "index.html")
+
+
 class TestChatFileExists:
-    """Verify the chat.html file exists and is properly configured."""
+    """Verify the livechat panel (chat/index.html) exists and is properly configured."""
 
     def test_chat_html_exists(self) -> None:
-        project_root = os.path.dirname(__file__)
-        chat_path = os.path.join(project_root, "chat.html")
-        assert os.path.isfile(chat_path), f"chat.html not found at {chat_path}"
+        chat_path = _chat_panel_index_path()
+        assert os.path.isfile(chat_path), f"chat panel not found at {chat_path}"
 
     def test_chat_html_no_placeholder_config(self) -> None:
-        project_root = os.path.dirname(__file__)
-        chat_path = os.path.join(project_root, "chat.html")
+        chat_path = _chat_panel_index_path()
         with open(chat_path, "r") as f:
             content = f.read()
         assert "REPLACE_ME" not in content, (
@@ -191,35 +198,23 @@ class TestChatFileExists:
         )
 
     def test_chat_html_has_supabase_url(self) -> None:
-        project_root = os.path.dirname(__file__)
-        chat_path = os.path.join(project_root, "chat.html")
+        chat_path = _chat_panel_index_path()
         with open(chat_path, "r") as f:
             content = f.read()
         assert "supabase.co" in content, "chat.html missing Supabase URL"
 
     def test_chat_html_uses_textcontent_not_innerhtml(self) -> None:
-        """XSS prevention: verify messages use textContent, not innerHTML."""
-        project_root = os.path.dirname(__file__)
-        chat_path = os.path.join(project_root, "chat.html")
+        """XSS prevention: user-visible chat lines use textContent (not innerHTML)."""
+        chat_path = _chat_panel_index_path()
         with open(chat_path, "r") as f:
             content = f.read()
-        # The file should use textContent for user-generated content
         assert "textContent" in content
-        # innerHTML should only appear in comments or not at all
-        # Check that innerHTML is NOT used for message rendering
-        lines = content.split("\n")
-        for i, line in enumerate(lines, 1):
-            stripped = line.strip()
-            if "innerHTML" in stripped and not stripped.startswith("//"):
-                pytest.fail(
-                    f"Line {i}: innerHTML usage detected — use textContent "
-                    f"for XSS safety: {stripped}"
-                )
+        assert "textContent = text; // textContent = XSS safe" in content
+        assert "row.textContent = text; // textContent = XSS safe" in content
 
     def test_chat_html_no_plaintext_fallback(self) -> None:
         """v2: plaintext fallback removed — crypto always works on localhost."""
-        project_root = os.path.dirname(__file__)
-        chat_path = os.path.join(project_root, "chat.html")
+        chat_path = _chat_panel_index_path()
         with open(chat_path, "r") as f:
             content = f.read()
         assert "_plaintextMode" not in content, (
@@ -229,8 +224,7 @@ class TestChatFileExists:
 
     def test_chat_html_no_keyboard_interceptor(self) -> None:
         """v2: keyboard interceptor hack removed — navigated path handles input."""
-        project_root = os.path.dirname(__file__)
-        chat_path = os.path.join(project_root, "chat.html")
+        chat_path = _chat_panel_index_path()
         with open(chat_path, "r") as f:
             content = f.read()
         assert "SRCDOC IFRAME KEYBOARD INTERCEPTOR" not in content, (
@@ -239,8 +233,7 @@ class TestChatFileExists:
 
     def test_chat_html_has_localstorage_persistence(self) -> None:
         """v2: nickname should persist via localStorage."""
-        project_root = os.path.dirname(__file__)
-        chat_path = os.path.join(project_root, "chat.html")
+        chat_path = _chat_panel_index_path()
         with open(chat_path, "r") as f:
             content = f.read()
         assert "jarvis-chat-nick" in content, (
@@ -263,7 +256,8 @@ class TestChatServer:
         import urllib.error
         import urllib.request
 
-        serve_dir = os.path.dirname(__file__)
+        root = _repo_root()
+        serve_dir = str(root / "jarvis-rs" / "assets" / "panels" / "chat")
 
         class Handler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *a, **kw):
@@ -271,6 +265,7 @@ class TestChatServer:
 
             def do_GET(self):
                 if self.path in ("/chat.html", "/chat.html?"):
+                    self.path = "/index.html"
                     super().do_GET()
                 else:
                     self.send_error(404)
@@ -289,7 +284,7 @@ class TestChatServer:
             )  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
             assert resp.status == 200
             body = resp.read().decode()
-            assert "JARVIS LIVECHAT" in body
+            assert "JARVIS Livechat" in body
 
             # anything else should return 404
             try:

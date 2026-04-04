@@ -22,6 +22,17 @@ from presence.identity import load_identity, save_display_name
 
 # New config system (Phase 2)
 from jarvis.config.loader import load_config, config_to_json
+from jarvis.commands.detection import (
+    ASTEROIDS_PATH,
+    CHAT_PANEL_DIR,
+    DOODLEJUMP_PATH,
+    DRAW_PATH,
+    MINESWEEPER_PATH,
+    PINBALL_PATH,
+    SUBWAY_PATH,
+    TETRIS_PATH,
+    VIDEOPLAYER_PATH,
+)
 
 # Persistent log file — survives across sessions, rotates at 5MB
 LOG_PATH = os.path.join(os.path.dirname(__file__), "jarvis.log")
@@ -477,15 +488,6 @@ async def main():
         ]
         return any(phrase in normalized for phrase in split_phrases)
 
-    PINBALL_PATH = os.path.join(os.path.dirname(__file__), "pinball.html")
-    MINESWEEPER_PATH = os.path.join(os.path.dirname(__file__), "minesweeper.html")
-    TETRIS_PATH = os.path.join(os.path.dirname(__file__), "tetris.html")
-    DRAW_PATH = os.path.join(os.path.dirname(__file__), "draw.html")
-    SUBWAY_PATH = os.path.join(os.path.dirname(__file__), "subway.html")
-    DOODLEJUMP_PATH = os.path.join(os.path.dirname(__file__), "doodlejump.html")
-    ASTEROIDS_PATH = os.path.join(os.path.dirname(__file__), "asteroids.html")
-    VIDEOPLAYER_PATH = os.path.join(os.path.dirname(__file__), "videoplayer.html")
-    CHAT_PATH = os.path.join(os.path.dirname(__file__), "chat.html")
     CHAT_SERVER_PORT = 19847
     _chat_server_url = None  # Set when server starts
 
@@ -503,15 +505,16 @@ async def main():
         import http.server
         import threading
 
-        serve_dir = os.path.dirname(__file__)
+        serve_dir = CHAT_PANEL_DIR
 
         class ChatHandler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=serve_dir, **kwargs)
 
             def do_GET(self):
-                # Only serve chat.html — reject everything else
+                # URL stays /chat.html for Metal/WKWebView; file is panels/chat/index.html
                 if self.path in ("/chat.html", "/chat.html?"):
+                    self.path = "/index.html"
                     super().do_GET()
                 else:
                     self.send_error(404)

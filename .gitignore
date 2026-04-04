@@ -12,8 +12,8 @@ data/
 .coverage
 htmlcov/
 
-# Swift build
-metal-app/.build/
+# Swift build (legacy macOS app)
+legacy/metal-app/.build/
 
 # Rust build
 jarvis-rs/target/
@@ -23,4 +23,4 @@ jarvis-rs/target/
 .config/
 
 # Claude Code local settings
-.claude/settings.local.json
+.claude/

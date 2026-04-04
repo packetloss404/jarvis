@@ -291,21 +291,26 @@ The application supports:
 
 ## 2. Repository Structure
 
-The repository root (`jarvis/`) contains both the legacy Python/Swift stack and the Rust rewrite:
+The repository root groups the primary Rust app, the legacy macOS stack, docs, and tooling:
 
 ```
 jarvis/
-  README.md              # Project overview (documents the Python stack)
-  main.py                # Legacy Python entry point
-  metal-app/             # Legacy Swift/Metal frontend
-  skills/                # Legacy Python AI skill system
-  voice/                 # Legacy Python audio capture
-  connectors/            # Legacy Python service integrations
-  jarvis-rs/             # Rust workspace (the rewrite)
-    Cargo.toml           # Workspace manifest
-    crates/              # All workspace crates
-    assets/              # Bundled HTML/JS/CSS panel assets
-  docs/                  # Documentation
+  README.md              # Rust-first overview + legacy pointers
+  ARCHITECTURE.md        # Where things live
+  jarvis-rs/             # PRIMARY: Rust workspace
+    Cargo.toml
+    crates/
+    assets/panels/
+  legacy/                # Legacy macOS Python + Swift/Metal
+    main.py
+    metal-app/
+    jarvis/
+    skills/, voice/, connectors/, presence/
+    requirements.txt
+  jarvis-mobile/
+  scripts/
+  tests/
+  docs/
 ```
 
 ---
@@ -931,7 +936,7 @@ window.jarvis.ipc.send('keybind', { key, ctrl, alt, shift, meta })
 The original Jarvis was built with:
 
 - **`main.py`** -- Python entry point handling mic capture, Metal bridge, and event loop
-- **`metal-app/`** -- Swift/Metal frontend rendering a 3D reactive orb, hex grid, and chat panels
+- **`legacy/metal-app/`** -- Swift/Metal frontend rendering a 3D reactive orb, hex grid, and chat panels
 - **`skills/`** -- Python AI skill system with Gemini routing, Claude Agent SDK integration, code tools, domain hunting, paper matching, stream moderation
 - **`voice/`** -- Python audio capture (push-to-talk) and Whisper transcription
 - **`connectors/`** -- Python service integrations (Claude proxy, token tracker, SQLite reader, HTTP client)
@@ -944,7 +949,7 @@ The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform 
 
 | Legacy Component | Rust Replacement |
 |-----------------|------------------|
-| `metal-app/` (Swift/Metal) | `jarvis-renderer` (wgpu -- Vulkan/Metal/DX12) |
+| `legacy/metal-app/` (Swift/Metal) | `jarvis-renderer` (wgpu -- Vulkan/Metal/DX12) |
 | `main.py` event loop | `jarvis-app` (winit event loop) |
 | Metal 3D orb | wgpu background pipeline (hex grid shader) |
 | Swift chat panels | `jarvis-webview` (wry WebViews with HTML/JS/CSS) |
@@ -964,7 +969,7 @@ The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform 
 - Both stacks currently coexist in the repository
 - The Rust binary is `jarvis` (from `jarvis-app`)
 - The legacy Python entry point is `main.py` at the project root
-- The legacy Swift app is in `metal-app/`
+- The legacy Swift app is in `legacy/metal-app/`
 - The Rust workspace is self-contained in `jarvis-rs/`
 - Bundled web assets (HTML/JS/CSS for panels and games) are in `jarvis-rs/assets/`
 
@@ -1178,14 +1183,14 @@ The legacy application uses a Python backend with a Swift/Metal frontend. It onl
 
 ```bash
 cd jarvis
-./start.sh
+./scripts/start.sh
 ```
 
-The `start.sh` script:
+The `scripts/start.sh` script:
 
 1. Creates a Python virtual environment (`.venv/`) if it does not exist
-2. Installs/updates Python dependencies from `requirements.txt`
-3. Builds the Metal app (`metal-app/.build/debug/JarvisBootup`) if needed
+2. Installs/updates Python dependencies from `legacy/requirements.txt`
+3. Builds the Metal app (`legacy/metal-app/.build/debug/JarvisBootup`) if needed
 4. Runs `main.py`
 
 ### Manual Setup
@@ -1198,20 +1203,20 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # Install Python dependencies
-pip install -r requirements.txt
+pip install -r legacy/requirements.txt
 
 # Build the Swift Metal app
-cd metal-app
+cd legacy/metal-app
 swift build
 cd ..
 
 # Run
-python main.py
+python legacy/main.py
 ```
 
 ### Python Dependencies
 
-The main `requirements.txt` includes:
+The main `legacy/requirements.txt` includes:
 
 | Package | Purpose |
 |---------|---------|
@@ -1391,7 +1396,7 @@ Copy `.env.example` to `.env` and fill in what you need. All values are optional
 The legacy Python app uses the Claude Agent SDK and authenticates via an OAuth token. Run the login script to set this up:
 
 ```bash
-./login.sh
+./scripts/login.sh
 ```
 
 This script:
@@ -1400,7 +1405,9 @@ This script:
 2. Extracts the access token from the macOS Keychain (`Claude Code-credentials`)
 3. Writes the token to `.env` as `CLAUDE_CODE_OAUTH_TOKEN`
 
-The token expires periodically; re-run `./login.sh` when authentication fails.
+The token expires periodically; re-run `./scripts/login.sh` when authentication fails.
+
+On Windows, use `./scripts/login.ps1` instead (credentials are read from `%USERPROFILE%\.claude\.credentials.json`).
 
 ---
 

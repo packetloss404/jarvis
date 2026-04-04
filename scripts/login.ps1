@@ -2,7 +2,8 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$EnvFile = Join-Path $ScriptDir ".env"
+$RepoRoot = Split-Path -Parent $ScriptDir
+$EnvFile = Join-Path $RepoRoot ".env"
 
 Write-Host "Logging into Claude Code..."
 $env:CLAUDECODE = $null

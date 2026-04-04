@@ -6,7 +6,7 @@ Jarvis chat panel's online-users list, and exchanges E2E-encrypted
 DMs with a real Jarvis instance.
 
 Usage:
-    .venv/bin/python3 test_dm_bot.py [--nick BotUser] [--verbose]
+    .venv/bin/python3 tests/test_dm_bot.py [--nick BotUser] [--verbose]
 """
 
 import argparse
@@ -27,7 +27,7 @@ try:
     from cryptography.hazmat.primitives import hashes, serialization
 except ImportError as e:
     print(f"Missing dependency: {e}")
-    print("Run with the project venv:  .venv/bin/python3 test_dm_bot.py")
+    print("Run with the project venv:  .venv/bin/python3 tests/test_dm_bot.py")
     sys.exit(1)
 
 # ── constants ────────────────────────────────────────────────────

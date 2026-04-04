@@ -258,7 +258,8 @@ colors:
     def test_get_config_path(self):
         """Should return correct config path."""
         path = get_config_path()
-        assert str(path).endswith(".config/jarvis/config.yaml")
+        assert path.name == "config.yaml"
+        assert path.parent.name == "jarvis"
 
 
 # =============================================================================

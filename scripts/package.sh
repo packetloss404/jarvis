@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # Usage:
-#   ./package.sh [--release] [--notarize]
+#   ./scripts/package.sh [--release] [--notarize]
 #
 # Options:
 #   --release    Build release configuration (default: debug)
@@ -29,8 +29,8 @@ set -e
 # CONFIGURATION
 # =============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
 # App metadata
 APP_NAME="Jarvis"
@@ -66,13 +66,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Directories
-BUILD_DIR="$SCRIPT_DIR/build"
+BUILD_DIR="$REPO_ROOT/build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DMG_PATH="$BUILD_DIR/${APP_NAME}-${APP_VERSION}.dmg"
-RESOURCES_DIR="$SCRIPT_DIR/resources"
+RESOURCES_DIR="$REPO_ROOT/resources"
 
 # Metal app paths
-METAL_APP_DIR="$SCRIPT_DIR/metal-app"
+METAL_APP_DIR="$REPO_ROOT/legacy/metal-app"
 SWIFT_BUILD_DIR="$METAL_APP_DIR/.build"
 
 # =============================================================================
@@ -141,7 +141,7 @@ build_swift() {
         swift build
     fi
     
-    cd "$SCRIPT_DIR"
+    cd "$REPO_ROOT"
     
     log_success "Swift build complete"
 }
@@ -179,21 +179,28 @@ create_app_bundle() {
     # Copy Python files for bundled execution
     # Note: App will use system Python or create venv on first launch
     mkdir -p "$APP_BUNDLE/Contents/Resources/python"
-    cp -R "$SCRIPT_DIR/jarvis" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
-    cp -R "$SCRIPT_DIR/skills" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
-    cp -R "$SCRIPT_DIR/voice" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
-    cp -R "$SCRIPT_DIR/presence" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/config.py" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/main.py" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/requirements.txt" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
+    cp -R "$REPO_ROOT/legacy/jarvis" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
+    cp -R "$REPO_ROOT/legacy/skills" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
+    cp -R "$REPO_ROOT/legacy/voice" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
+    cp -R "$REPO_ROOT/legacy/presence" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
+    cp "$REPO_ROOT/legacy/config.py" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
+    cp "$REPO_ROOT/legacy/main.py" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
+    cp "$REPO_ROOT/legacy/requirements.txt" "$APP_BUNDLE/Contents/Resources/python/" 2>/dev/null || true
     
-    # Copy HTML game files
-    for game in pinball minesweeper tetris draw doodlejump asteroids subway videoplayer chat; do
-        cp "$SCRIPT_DIR/${game}.html" "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
+    # Copy HTML game files (canonical copies under jarvis-rs panel assets)
+    PANEL_GAMES="$REPO_ROOT/jarvis-rs/assets/panels/games"
+    for game in pinball minesweeper tetris draw doodlejump asteroids subway videoplayer; do
+        if [[ -f "$PANEL_GAMES/${game}.html" ]]; then
+            cp "$PANEL_GAMES/${game}.html" "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
+        fi
     done
+    if [[ -f "$REPO_ROOT/jarvis-rs/assets/panels/chat/index.html" ]]; then
+        cp "$REPO_ROOT/jarvis-rs/assets/panels/chat/index.html" \
+            "$APP_BUNDLE/Contents/Resources/chat.html" 2>/dev/null || true
+    fi
     
     # Copy game assets
-    cp -R "$SCRIPT_DIR/data" "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
+    cp -R "$REPO_ROOT/legacy/data" "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
     
     # Create Info.plist
     create_info_plist

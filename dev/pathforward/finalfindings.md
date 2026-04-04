@@ -3,6 +3,18 @@
 **Date:** 2026-03-25
 **Sources:** Synthesized from 30 parallel analysis agents across three independent reviews (Gemini, GPT, Minimax)
 
+### Repository layout status (post-2026-04)
+
+The following structural recommendations from this document have been **partially or fully applied** in the tree; prose below may still use older path examples for historical context:
+
+- **Rust-first product:** Active development targets `jarvis-rs/`; see root [README.md](../../README.md) and [ARCHITECTURE.md](../../ARCHITECTURE.md).
+- **Legacy isolation:** The Python + Swift/Metal stack now lives under **`legacy/`** (e.g. `legacy/main.py`, `legacy/metal-app/`, `legacy/jarvis/`, `legacy/requirements.txt`). Helper scripts are under **`scripts/`**.
+- **Duplicate root HTML:** Standalone game/chat `*.html` at the repository root were removed; canonical panel sources are under `jarvis-rs/assets/panels/`.
+- **Python pinning:** `legacy/requirements.lock` is generated with **pip-tools** (`pip-compile`); see [CONTRIBUTING.md](../../CONTRIBUTING.md).
+- **Python tests:** Live under **`tests/`** with `pytest.ini` setting `pythonpath = legacy`.
+
+When a finding cites `main.py` or `metal-app/` at repo root, read that as **`legacy/main.py`** and **`legacy/metal-app/`** unless the finding is explicitly about historical layout.
+
 ---
 
 ## Executive Summary

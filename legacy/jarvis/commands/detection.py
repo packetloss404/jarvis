@@ -14,19 +14,25 @@ import re
 # CONSTANTS - GAME PATHS
 # =============================================================================
 
-JARVIS_DIR = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
+_PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../legacy/jarvis
+LEGACY_ROOT = os.path.dirname(_PKG_ROOT)  # .../legacy
+REPO_ROOT = os.path.dirname(LEGACY_ROOT)  # git repository root
+JARVIS_DIR = LEGACY_ROOT  # legacy macOS stack root (main.py, data/, etc.)
 
-PINBALL_PATH = os.path.join(JARVIS_DIR, "pinball.html")
-MINESWEEPER_PATH = os.path.join(JARVIS_DIR, "minesweeper.html")
-TETRIS_PATH = os.path.join(JARVIS_DIR, "tetris.html")
-DRAW_PATH = os.path.join(JARVIS_DIR, "draw.html")
-SUBWAY_PATH = os.path.join(JARVIS_DIR, "subway.html")
-DOODLEJUMP_PATH = os.path.join(JARVIS_DIR, "doodlejump.html")
-ASTEROIDS_PATH = os.path.join(JARVIS_DIR, "asteroids.html")
-VIDEOPLAYER_PATH = os.path.join(JARVIS_DIR, "videoplayer.html")
-CHAT_PATH = os.path.join(JARVIS_DIR, "chat.html")
+# Canonical panel assets live under the Rust app tree (see ARCHITECTURE.md).
+_PANELS_DIR = os.path.join(REPO_ROOT, "jarvis-rs", "assets", "panels")
+_GAMES_DIR = os.path.join(_PANELS_DIR, "games")
+CHAT_PANEL_DIR = os.path.join(_PANELS_DIR, "chat")
+
+PINBALL_PATH = os.path.join(_GAMES_DIR, "pinball.html")
+MINESWEEPER_PATH = os.path.join(_GAMES_DIR, "minesweeper.html")
+TETRIS_PATH = os.path.join(_GAMES_DIR, "tetris.html")
+DRAW_PATH = os.path.join(_GAMES_DIR, "draw.html")
+SUBWAY_PATH = os.path.join(_GAMES_DIR, "subway.html")
+DOODLEJUMP_PATH = os.path.join(_GAMES_DIR, "doodlejump.html")
+ASTEROIDS_PATH = os.path.join(_GAMES_DIR, "asteroids.html")
+VIDEOPLAYER_PATH = os.path.join(_GAMES_DIR, "videoplayer.html")
+CHAT_PATH = os.path.join(CHAT_PANEL_DIR, "index.html")
 
 SUBWAY_CLIPS_DIR = os.path.join(JARVIS_DIR, "data", "subway_clips")
 MEMES_DIR = os.path.join(JARVIS_DIR, "data", "memes")
