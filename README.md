@@ -4,7 +4,30 @@ A multiplayer vibe coding experience — games, chats, and vibes.
 
 ![Jarvis](screenshot.png)
 
-Jarvis is a shared desktop environment where multiple AI assistants, retro arcade games, live chat, and a reactive visual shell coexist on one screen. This repository is organized so **one codebase is obviously “the product”** and everything else is supporting or historical.
+Jarvis is a shared desktop environment where multiple AI assistants, retro arcade games, live chat, and a reactive visual shell coexist on one screen. Under the hood it's a from-scratch, cross-platform **Rust "shared OS"**: a winit/wgpu-rendered fullscreen shell that hosts embedded WebView panels inside a BSP tiling window manager, with a multiplayer backplane, a sandboxed multi-LLM agent runtime, and an end-to-end-encrypted mobile bridge layered on top. This repository is organized so **one codebase is obviously “the product”** and everything else is supporting or historical.
+
+---
+
+## What's actually in here
+
+The `jarvis-rs` workspace is a 10-crate Cargo workspace (~34k lines of Rust). The headline subsystems:
+
+- **Custom wgpu/WGSL GPU renderer** — not a UI-toolkit wrapper. Hand-written WGSL shaders (`background`, `boot`, `effects`, `text`), quad/text/effects pipelines, boot screen, and command palette (`jarvis-renderer`).
+- **4-platform BSP tiling window manager** — a `SplitNode` tree (split / remove / swap / adjust-ratio, unit-tested) with native window control on **macOS / Windows / X11 / Wayland** (`jarvis-tiling`).
+- **Multi-provider AI runtime** — a unified `AiClient` trait over **Claude + Gemini** clients, a generic SSE streaming parser, skill-based provider routing (`SkillRouter`), and token tracking (`jarvis-ai`).
+- **Sandboxed AI tool-use** — a real safe execution layer: `ToolSandbox` canonicalizes paths, rejects escapes outside the sandbox dir, blocks secret paths (`.ssh` / `.aws` / `.gnupg` / `.env` / `/etc/passwd`), and runs only an allowlisted command set.
+- **Voice input** — OpenAI **Whisper** (`whisper-1`) STT client, with `Debug` impls that redact API keys.
+- **Supabase Realtime multiplayer** — a full **Phoenix Channels** WebSocket client (monotonic ref counter, heartbeat task, connect timeout, auto-reconnect with channel rejoin) carrying presence, chat, and broadcast events (activity, game invites, pokes) (`jarvis-social`).
+- **End-to-end-encrypted mobile bridge** — pair by scanning a QR (`jarvis://pair?relay=&session=&dhpub=`): **p256 ECDH** key exchange + **AES-256-GCM** with a random per-message nonce (`RelayCipher`), Supabase-Auth JWT identity, brokered through a **standalone relay server** binary (`jarvis-relay`) with per-IP rate limiting, session TTL, and zero-knowledge forwarding (it never inspects payloads).
+- **Embedded panels** — real terminal (PTY via `portable-pty`), chat, AI assistant, settings, status bar, presence — plus arcade games (asteroids, tetris, pinball, doodlejump, subway, minesweeper, draw, video player, emulator) and a local music player.
+- **Local music library** — `lofty` tag reader across 8 audio formats, stable path-hash IDs, cover-art detection, and caching.
+- **Plugin system** — scans `~/.config/jarvis/plugins/*/plugin.toml` manifests with HTML entry points.
+- **Live config hot-reload** — TOML config watched via `notify` with debounce, plus a theme engine with CSS sanitization, crash reporting, and a GitHub-Releases auto-updater.
+- **Companion mobile app** — an Expo / React Native client (`jarvis-mobile`) with QR + deep-link pairing and terminal / chat / Claude WebViews.
+
+Engineering signals: **649 test functions across 76 files** (tiling tree algorithms, config reload/watcher, plugin manifest parsing, shared wire-protocol JSON fixtures exercised by both relay and desktop), release-profile tuning, and only a handful of explicit, platform-scoped stubs (e.g. `workspace_capture` on Windows/Linux still trails the macOS CoreGraphics implementation).
+
+See **[ARCHITECTURE.md](ARCHITECTURE.md)** and the full technical manual at **[docs/manual/README.md](docs/manual/README.md)** for the crate-by-crate breakdown.
 
 ---
 
@@ -35,7 +58,7 @@ cargo test --workspace
 
 Panel HTML/CSS/JS is canonical under **`jarvis-rs/assets/panels/`** (bundled via `include_dir` at compile time). Do not add parallel copies at the repository root.
 
-**Relay server** (optional, for mobile / pairing):
+**Relay server** (optional, for mobile / pairing — the standalone E2E-encrypted broker):
 
 ```bash
 cd jarvis-rs
@@ -43,6 +66,23 @@ cargo build --release --bin jarvis-relay
 ```
 
 Further detail: **[docs/manual/README.md](docs/manual/README.md)** (full technical manual).
+
+---
+
+## Workspace crates (`jarvis-rs/crates/`)
+
+| Crate | Role |
+|-------|------|
+| `jarvis-app` | Orchestrator: `JarvisApp` core, event dispatch, PTY bridge, WebView IPC bridge (18 handler modules), and the mobile/relay `ws_server` bridge. |
+| `jarvis-renderer` | wgpu GPU context, quad/text/effects pipelines, custom WGSL shaders, boot screen, command palette. |
+| `jarvis-tiling` | BSP split-tree + native window management for macOS / Windows / X11 / Wayland. |
+| `jarvis-ai` | `AiClient` trait, Claude + Gemini clients, SSE streaming, `SkillRouter`, `ToolSandbox`, token tracker, Whisper STT. |
+| `jarvis-social` | Supabase Realtime (Phoenix Channels) client, presence, chat, identity, feature-gated voice / screen-share / pair-programming. |
+| `jarvis-config` | TOML loader, schema, theme/colors, validation, plugin manifest scanner, live hot-reload. |
+| `jarvis-webview` | `wry` WebView manager, IPC, `include_dir` content loader, theme bridge with CSS sanitization. |
+| `jarvis-relay` | Standalone WebSocket relay binary: session store, rate limiter, TTL; never inspects (E2E) payloads. |
+| `jarvis-platform` | Input/keymap, crash reporting, OS paths. |
+| `jarvis-common` | Shared types/actions. |
 
 ---
 
@@ -139,7 +179,7 @@ OAuth refresh:
 
 ## Skills (legacy voice routing)
 
-On the **legacy** stack, voice can be routed through Gemini into skills (code assistant, domains, papers, firewall, VibeToText). The **Rust** app has its own assistant and panel architecture; see the manual for current behavior.
+On the **legacy** stack, voice can be routed through Gemini into skills (code assistant, domains, papers, firewall, VibeToText). The **Rust** app has its own assistant, Whisper voice input, and panel architecture; see the manual for current behavior.
 
 ---
 
