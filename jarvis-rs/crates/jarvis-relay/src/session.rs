@@ -13,12 +13,14 @@ pub enum Role {
     Mobile,
     Host,
     Spectator,
+    Member,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionKind {
     Bridge,
     Broadcast,
+    Room,
 }
 
 impl Role {
@@ -26,6 +28,7 @@ impl Role {
         match self {
             Role::Desktop | Role::Mobile => SessionKind::Bridge,
             Role::Host | Role::Spectator => SessionKind::Broadcast,
+            Role::Member => SessionKind::Room,
         }
     }
 }
@@ -42,9 +45,22 @@ pub struct BroadcastSession {
     pub created_at: Instant,
 }
 
+/// One participant in an N:N room session.
+pub struct RoomMember {
+    pub member_id: String,
+    pub tx: mpsc::Sender<String>,
+}
+
+/// Symmetric N:N session. Every member's frames fan out to all other members.
+pub struct RoomSession {
+    pub members: Vec<RoomMember>,
+    pub created_at: Instant,
+}
+
 pub enum Session {
     Bridge(BridgeSession),
     Broadcast(BroadcastSession),
+    Room(RoomSession),
 }
 
 pub struct BroadcastRegistration {
@@ -75,6 +91,7 @@ impl SessionStore {
             let existing_kind = match existing {
                 Session::Bridge(_) => SessionKind::Bridge,
                 Session::Broadcast(_) => SessionKind::Broadcast,
+                Session::Room(_) => SessionKind::Room,
             };
             if existing_kind == kind {
                 return Ok(false);
@@ -93,6 +110,10 @@ impl SessionStore {
                 spectator_txs: Vec::new(),
                 created_at: Instant::now(),
             }),
+            SessionKind::Room => Session::Room(RoomSession {
+                members: Vec::new(),
+                created_at: Instant::now(),
+            }),
         };
 
         map.insert(session_id.to_string(), session);
@@ -109,7 +130,7 @@ impl SessionStore {
         let mut map = self.sessions.write().await;
         let session = match map.get_mut(session_id) {
             Some(Session::Bridge(session)) => session,
-            Some(Session::Broadcast(_)) => return Err("session kind mismatch"),
+            Some(_) => return Err("session kind mismatch"),
             None => return Err("session not found"),
         };
 
@@ -143,7 +164,7 @@ impl SessionStore {
         let mut map = self.sessions.write().await;
         let session = match map.get_mut(session_id) {
             Some(Session::Broadcast(session)) => session,
-            Some(Session::Bridge(_)) => return Err("session kind mismatch"),
+            Some(_) => return Err("session kind mismatch"),
             None => return Err("session not found"),
         };
 
@@ -165,12 +186,90 @@ impl SessionStore {
         })
     }
 
+    /// Register a room member's sender. If a member with the same `member_id`
+    /// already exists, its `tx` is replaced (reconnect); otherwise a new member
+    /// is appended. The session must already exist (see `ensure_session`).
+    pub async fn register_room(
+        &self,
+        session_id: &str,
+        member_id: String,
+        tx: mpsc::Sender<String>,
+    ) -> Result<(), &'static str> {
+        let mut map = self.sessions.write().await;
+        let session = match map.get_mut(session_id) {
+            Some(Session::Room(session)) => session,
+            Some(_) => return Err("session kind mismatch"),
+            None => return Err("session not found"),
+        };
+
+        if let Some(existing) = session.members.iter_mut().find(|m| m.member_id == member_id) {
+            existing.tx = tx;
+        } else {
+            session.members.push(RoomMember { member_id, tx });
+        }
+
+        Ok(())
+    }
+
+    /// Every member's sender EXCEPT the one matching `member_id`, so a member
+    /// never receives its own frames.
+    pub async fn room_targets_excluding(
+        &self,
+        session_id: &str,
+        member_id: &str,
+    ) -> Vec<mpsc::Sender<String>> {
+        let map = self.sessions.read().await;
+        match map.get(session_id) {
+            Some(Session::Room(session)) => session
+                .members
+                .iter()
+                .filter(|m| m.member_id != member_id)
+                .map(|m| m.tx.clone())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Current roster of member IDs for a room.
+    pub async fn room_member_ids(&self, session_id: &str) -> Vec<String> {
+        let map = self.sessions.read().await;
+        match map.get(session_id) {
+            Some(Session::Room(session)) => {
+                session.members.iter().map(|m| m.member_id.clone()).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Number of members currently in a room.
+    pub async fn room_member_count(&self, session_id: &str) -> usize {
+        let map = self.sessions.read().await;
+        match map.get(session_id) {
+            Some(Session::Room(session)) => session.members.len(),
+            _ => 0,
+        }
+    }
+
+    /// Remove a member from a room. If the room is now empty, the session is
+    /// removed and `true` is returned.
+    pub async fn unregister_member(&self, session_id: &str, member_id: &str) -> bool {
+        let mut map = self.sessions.write().await;
+        if let Some(Session::Room(session)) = map.get_mut(session_id) {
+            session.members.retain(|m| m.member_id != member_id);
+            if session.members.is_empty() {
+                map.remove(session_id);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Get the peer's sender for forwarding.
     pub async fn get_peer_tx(&self, session_id: &str, role: Role) -> Option<mpsc::Sender<String>> {
         let map = self.sessions.read().await;
         let session = match map.get(session_id)? {
             Session::Bridge(session) => session,
-            Session::Broadcast(_) => return None,
+            _ => return None,
         };
         match role {
             Role::Desktop => session.mobile_tx.clone(),
@@ -237,6 +336,9 @@ impl SessionStore {
                         return true;
                     }
                 }
+                // Room sessions use `unregister_member` (keyed by member_id), not
+                // the role-based path. Reaching here would be a caller bug.
+                Session::Room(_) => return false,
             }
         }
         false
@@ -256,6 +358,10 @@ impl SessionStore {
                         && session.spectator_txs.is_empty()
                         && now.duration_since(session.created_at) > max_age
                 }
+                Session::Room(session) => {
+                    session.members.is_empty()
+                        && now.duration_since(session.created_at) > max_age
+                }
             };
             if stale {
                 tracing::info!(session_id = %id, "Reaping stale session");
@@ -272,5 +378,106 @@ impl SessionStore {
     /// Number of active sessions.
     pub async fn count(&self) -> usize {
         self.sessions.read().await.len()
+    }
+}
+
+#[cfg(test)]
+mod room_tests {
+    use super::*;
+
+    fn chan() -> (mpsc::Sender<String>, mpsc::Receiver<String>) {
+        mpsc::channel::<String>(8)
+    }
+
+    #[tokio::test]
+    async fn register_room_adds_members() {
+        let store = SessionStore::new();
+        store.ensure_session("s", SessionKind::Room).await.unwrap();
+
+        let (a_tx, _a_rx) = chan();
+        let (b_tx, _b_rx) = chan();
+        store.register_room("s", "a".into(), a_tx).await.unwrap();
+        store.register_room("s", "b".into(), b_tx).await.unwrap();
+
+        assert_eq!(store.room_member_count("s").await, 2);
+        let mut ids = store.room_member_ids("s").await;
+        ids.sort();
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn room_targets_exclude_sender_include_others() {
+        let store = SessionStore::new();
+        store.ensure_session("s", SessionKind::Room).await.unwrap();
+
+        let (a_tx, _a_rx) = chan();
+        let (b_tx, mut b_rx) = chan();
+        let (c_tx, mut c_rx) = chan();
+        store.register_room("s", "a".into(), a_tx).await.unwrap();
+        store.register_room("s", "b".into(), b_tx).await.unwrap();
+        store.register_room("s", "c".into(), c_tx).await.unwrap();
+
+        // Sender "a" fans out to b and c, but not a.
+        let targets = store.room_targets_excluding("s", "a").await;
+        assert_eq!(targets.len(), 2);
+        for t in targets {
+            t.send("hello".into()).await.unwrap();
+        }
+        assert_eq!(b_rx.recv().await.unwrap(), "hello");
+        assert_eq!(c_rx.recv().await.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn member_reconnect_replaces_tx() {
+        let store = SessionStore::new();
+        store.ensure_session("s", SessionKind::Room).await.unwrap();
+
+        let (old_tx, mut old_rx) = chan();
+        store.register_room("s", "a".into(), old_tx).await.unwrap();
+
+        // Reconnect with the same member_id -> tx is replaced, not duplicated.
+        let (new_tx, mut new_rx) = chan();
+        store.register_room("s", "a".into(), new_tx).await.unwrap();
+        assert_eq!(store.room_member_count("s").await, 1);
+
+        // A frame to the (other-excluding) roster from a different member reaches
+        // only the new tx. Add a second member to be the sender.
+        let (b_tx, _b_rx) = chan();
+        store.register_room("s", "b".into(), b_tx).await.unwrap();
+        let targets = store.room_targets_excluding("s", "b").await;
+        assert_eq!(targets.len(), 1);
+        targets[0].send("ping".into()).await.unwrap();
+        assert_eq!(new_rx.recv().await.unwrap(), "ping");
+        // The old channel never received it.
+        assert!(old_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn unregister_member_removes_session_when_empty() {
+        let store = SessionStore::new();
+        store.ensure_session("s", SessionKind::Room).await.unwrap();
+
+        let (a_tx, _a_rx) = chan();
+        let (b_tx, _b_rx) = chan();
+        store.register_room("s", "a".into(), a_tx).await.unwrap();
+        store.register_room("s", "b".into(), b_tx).await.unwrap();
+
+        // Removing one member keeps the session alive.
+        assert!(!store.unregister_member("s", "a").await);
+        assert!(store.exists("s").await);
+        assert_eq!(store.room_member_count("s").await, 1);
+
+        // Removing the last member drops the session and returns true.
+        assert!(store.unregister_member("s", "b").await);
+        assert!(!store.exists("s").await);
+    }
+
+    #[tokio::test]
+    async fn reap_stale_removes_empty_old_room() {
+        let store = SessionStore::new();
+        store.ensure_session("s", SessionKind::Room).await.unwrap();
+        // Empty room reaped once it exceeds max_age (0 here).
+        store.reap_stale(std::time::Duration::from_secs(0)).await;
+        assert!(!store.exists("s").await);
     }
 }
