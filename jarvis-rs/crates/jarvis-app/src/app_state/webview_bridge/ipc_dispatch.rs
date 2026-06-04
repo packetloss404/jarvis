@@ -32,7 +32,6 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "panel_toggle",
     "open_settings",
     "status_bar_init",
-    "launch_game",
     "ping",
     "boot_complete",
     "chat_stream_control",
@@ -166,9 +165,6 @@ impl JarvisApp {
             }
             "open_settings" => {
                 self.handle_open_settings(pane_id);
-            }
-            "launch_game" => {
-                self.handle_launch_game(pane_id, &msg.payload);
             }
             "status_bar_init" => {
                 self.handle_status_bar_init(pane_id);

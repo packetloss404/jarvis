@@ -55,6 +55,7 @@ pub fn discover_local_plugins(dir: &PathBuf) -> Vec<LocalPlugin> {
             name: String,
             category: String,
             entry: String,
+            opaque: bool,
         }
 
         impl Default for Manifest {
@@ -63,6 +64,7 @@ pub fn discover_local_plugins(dir: &PathBuf) -> Vec<LocalPlugin> {
                     name: String::new(),
                     category: "Plugins".into(),
                     entry: "index.html".into(),
+                    opaque: false,
                 }
             }
         }
@@ -79,6 +81,7 @@ pub fn discover_local_plugins(dir: &PathBuf) -> Vec<LocalPlugin> {
                     name,
                     category: m.category,
                     entry: m.entry,
+                    opaque: m.opaque,
                 });
             }
             Err(e) => {

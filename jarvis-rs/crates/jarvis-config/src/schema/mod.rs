@@ -7,7 +7,6 @@ mod auto_open;
 mod background;
 mod effects;
 mod font;
-mod games;
 mod keybind_config;
 mod layout;
 mod livechat;
@@ -30,7 +29,6 @@ pub use auto_open::*;
 pub use background::*;
 pub use effects::*;
 pub use font::*;
-pub use games::*;
 pub use keybind_config::*;
 pub use layout::*;
 pub use livechat::*;
@@ -77,7 +75,6 @@ pub struct JarvisConfig {
     pub voice: VoiceConfig,
     pub keybinds: KeybindConfig,
     pub panels: PanelsConfig,
-    pub games: GamesConfig,
     pub livechat: LivechatConfig,
     pub presence: PresenceConfig,
     pub performance: PerformanceConfig,
@@ -241,15 +238,6 @@ mod tests {
         assert_eq!(config.panels.history.max_messages, 1000);
         assert!(config.panels.input.multiline);
         assert!(config.panels.focus.border_glow);
-    }
-
-    #[test]
-    fn default_config_has_correct_games() {
-        let config = JarvisConfig::default();
-        assert!(config.games.enabled.wordle);
-        assert!(config.games.enabled.tetris);
-        assert!(config.games.fullscreen.escape_to_exit);
-        assert!(config.games.custom_paths.is_empty());
     }
 
     #[test]
@@ -441,20 +429,18 @@ solid_color = "#1a1a1a"
     }
 
     #[test]
-    fn custom_games_in_toml() {
-        let toml_str = r#"
-[games.enabled]
-wordle = false
-
-[[games.custom_paths]]
-name = "my-game"
-path = "/path/to/game"
-"#;
-        let config: JarvisConfig = toml::from_str(toml_str).unwrap();
-        assert!(!config.games.enabled.wordle);
-        assert!(config.games.enabled.tetris); // default preserved
-        assert_eq!(config.games.custom_paths.len(), 1);
-        assert_eq!(config.games.custom_paths[0].name, "my-game");
+    fn default_config_seeds_bookmarks() {
+        let config = JarvisConfig::default();
+        assert_eq!(config.plugins.bookmarks.len(), 6);
+        let lichess = config
+            .plugins
+            .bookmarks
+            .iter()
+            .find(|b| b.name == "Lichess")
+            .expect("Lichess bookmark seeded");
+        assert_eq!(lichess.url, "https://lichess.org");
+        assert_eq!(lichess.category, "Games");
+        assert!(config.plugins.local.is_empty());
     }
 
     // =========================================================================

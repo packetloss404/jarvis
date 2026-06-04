@@ -19,19 +19,6 @@ const MAX_INPUT_LEN: usize = 4096;
 /// Allowed panel names for the `open_panel` IPC command.
 const ALLOWED_PANELS: &[&str] = &["terminal", "assistant", "chat", "settings", "presence"];
 
-/// Allowed game names for the `launch_game` IPC command.
-const ALLOWED_GAMES: &[&str] = &[
-    "tetris",
-    "asteroids",
-    "minesweeper",
-    "pinball",
-    "doodlejump",
-    "draw",
-    "subway",
-    "videoplayer",
-    "emulator",
-];
-
 // =============================================================================
 // IPC HANDLERS
 // =============================================================================
@@ -84,62 +71,6 @@ impl JarvisApp {
     pub(in crate::app_state) fn handle_assistant_ready(&mut self, pane_id: u32) {
         tracing::debug!(pane_id, "Assistant panel ready");
         self.ensure_assistant_runtime();
-    }
-
-    /// Handle `launch_game` — launch a fullscreen game in the requesting panel.
-    ///
-    /// The payload must contain `{ "game": "tetris" | "asteroids" | ... }`.
-    pub(in crate::app_state) fn handle_launch_game(&mut self, pane_id: u32, payload: &IpcPayload) {
-        let game_name = match payload {
-            IpcPayload::Json(obj) => obj.get("game").and_then(|v| v.as_str()),
-            _ => None,
-        };
-
-        let game_name = match game_name {
-            Some(name) if ALLOWED_GAMES.contains(&name) => name,
-            Some(name) => {
-                tracing::warn!(pane_id, game = %name, "launch_game: unknown game name");
-                return;
-            }
-            None => {
-                tracing::warn!(pane_id, "launch_game: missing game name");
-                return;
-            }
-        };
-
-        let url = format!("jarvis://localhost/games/{}.html", game_name);
-
-        // Emulator needs an opaque webview — WebGL canvases are invisible in
-        // transparent WKWebViews because the alpha channel makes them see-through.
-        if game_name == "emulator" {
-            let original_url = self
-                .webviews
-                .as_ref()
-                .and_then(|r| r.get(pane_id))
-                .map(|h| h.current_url().to_string())
-                .unwrap_or_default();
-
-            // Destroy the existing transparent webview and recreate as opaque.
-            if let Some(ref mut registry) = self.webviews {
-                registry.destroy(pane_id);
-            }
-            self.create_webview_for_pane_opaque(pane_id, &url);
-            self.game_active.insert(pane_id, original_url);
-            tracing::info!(pane_id, game = %game_name, "Emulator launched (opaque WebView)");
-            return;
-        }
-
-        if let Some(ref mut registry) = self.webviews {
-            if let Some(handle) = registry.get_mut(pane_id) {
-                let original_url = handle.current_url().to_string();
-                if let Err(e) = handle.load_url(&url) {
-                    tracing::warn!(pane_id, error = %e, "Failed to launch game");
-                } else {
-                    tracing::info!(pane_id, game = %game_name, "Game launched");
-                    self.game_active.insert(pane_id, original_url);
-                }
-            }
-        }
     }
 
     /// Handle `open_panel` — open a new tiling pane with the requested panel.

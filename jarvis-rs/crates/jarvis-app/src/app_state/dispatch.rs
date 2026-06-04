@@ -228,36 +228,6 @@ impl JarvisApp {
                     }
                 }
             }
-            Action::LaunchGame(ref game) => {
-                let pane_id = self.tiling.focused_id();
-                let game_url = format!("jarvis://localhost/games/{}.html", game);
-
-                // Save original URL before navigating
-                if let Some(ref registry) = self.webviews {
-                    if let Some(handle) = registry.get(pane_id) {
-                        let original_url = handle.current_url().to_string();
-                        self.game_active.insert(pane_id, original_url);
-                    }
-                }
-
-                if game == "emulator" {
-                    // Emulator uses WebGL which requires a non-transparent WebView.
-                    // Destroy the existing transparent one and recreate as opaque.
-                    if let Some(ref mut registry) = self.webviews {
-                        registry.destroy(pane_id);
-                    }
-                    self.create_webview_for_pane_opaque(pane_id, &game_url);
-                    tracing::info!(pane_id, game = %game, "Emulator launched (opaque WebView)");
-                } else {
-                    // Recreate the webview so the jarvis:// custom protocol
-                    // handler fires correctly on Windows WebView2.
-                    if let Some(ref mut registry) = self.webviews {
-                        registry.destroy(pane_id);
-                    }
-                    self.create_webview_for_pane_with_url(pane_id, &game_url);
-                    tracing::info!(pane_id, game = %game, "Game launched");
-                }
-            }
             Action::OpenURL(ref url) => {
                 // Normalize: auto-prepend https:// if no scheme is provided
                 let normalized = if !url.contains("://") {
@@ -279,8 +249,26 @@ impl JarvisApp {
                     if let Some(ref mut registry) = self.webviews {
                         registry.destroy(pane_id);
                     }
-                    self.create_webview_for_pane_with_url(pane_id, &normalized);
-                    tracing::info!(pane_id, url = %normalized, "URL navigation requested (recreated webview)");
+                    // Plugins may request an opaque webview (e.g. WebGL games):
+                    // parse the plugin id from jarvis://localhost/plugins/<id>/...
+                    // and consult its manifest.
+                    let opaque = plugin_id_from_url(&normalized)
+                        .and_then(|id| {
+                            self.config
+                                .plugins
+                                .local
+                                .iter()
+                                .find(|lp| lp.id == id)
+                        })
+                        .map(|lp| lp.opaque)
+                        .unwrap_or(false);
+                    if opaque {
+                        self.create_webview_for_pane_opaque(pane_id, &normalized);
+                        tracing::info!(pane_id, url = %normalized, "URL navigation requested (recreated opaque webview)");
+                    } else {
+                        self.create_webview_for_pane_with_url(pane_id, &normalized);
+                        tracing::info!(pane_id, url = %normalized, "URL navigation requested (recreated webview)");
+                    }
                 } else {
                     if let Some(ref mut registry) = self.webviews {
                         if let Some(handle) = registry.get_mut(pane_id) {
@@ -359,5 +347,48 @@ impl JarvisApp {
         }
 
         self.update_window_title();
+    }
+}
+
+/// Extract the plugin id from a `jarvis://localhost/plugins/<id>/...` URL.
+///
+/// Returns `None` for any URL that is not a plugin URL.
+fn plugin_id_from_url(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("jarvis://")?;
+    // Skip the authority (e.g. "localhost") up to the first '/'.
+    let path = rest.split_once('/').map(|(_, p)| p).unwrap_or(rest);
+    let after = path.strip_prefix("plugins/")?;
+    let id = after.split('/').next()?;
+    if id.is_empty() {
+        None
+    } else {
+        Some(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_id_from_url;
+
+    #[test]
+    fn parses_plugin_id() {
+        assert_eq!(
+            plugin_id_from_url("jarvis://localhost/plugins/emulator/index.html"),
+            Some("emulator")
+        );
+        assert_eq!(
+            plugin_id_from_url("jarvis://localhost/plugins/tetris/index.html"),
+            Some("tetris")
+        );
+    }
+
+    #[test]
+    fn non_plugin_urls_return_none() {
+        assert_eq!(
+            plugin_id_from_url("jarvis://localhost/settings/index.html"),
+            None
+        );
+        assert_eq!(plugin_id_from_url("https://lichess.org"), None);
+        assert_eq!(plugin_id_from_url("jarvis://localhost/plugins/"), None);
     }
 }

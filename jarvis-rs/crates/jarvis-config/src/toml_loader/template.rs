@@ -136,18 +136,6 @@ name = "jarvis-dark"
 # show_indicator = true
 # border_glow = true
 
-[games.enabled]
-# wordle = true
-# connections = true
-# asteroids = true
-# tetris = true
-# pinball = true
-# doodlejump = true
-# minesweeper = true
-# draw = true
-# subway = true
-# videoplayer = true
-
 [livechat]
 # enabled = true
 # server_port = 19847
@@ -198,15 +186,17 @@ name = "jarvis-dark"
 
 # -- Plugins --
 # Bookmark plugins appear in the command palette and open as webview panes.
+# A set of default bookmarks (Lichess, Monkeytype, Excalidraw, Desmos,
+# Hacker News, Spotify) is seeded automatically. Add your own below:
 # [[plugins.bookmarks]]
 # name = "Spotify"
 # url = "https://open.spotify.com"
 # category = "Web"
 
 # [[plugins.bookmarks]]
-# name = "Hacker News"
-# url = "https://news.ycombinator.com"
-# category = "Web"
+# name = "Lichess"
+# url = "https://lichess.org"
+# category = "Games"
 
 # Local plugins are discovered automatically from:
 #   ~/.config/jarvis/plugins/<plugin-id>/plugin.toml

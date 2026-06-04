@@ -1,0 +1,4 @@
+name = "Emulator"
+category = "Games"
+entry = "index.html"
+opaque = true

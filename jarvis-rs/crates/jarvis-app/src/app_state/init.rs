@@ -122,14 +122,15 @@ impl JarvisApp {
         let content_provider = ContentProvider::new(&panels_path);
 
         // Discover embedded (first-party) plugins and merge with filesystem plugins
-        for (id, name, category, entry) in ContentProvider::discover_embedded_plugins() {
+        for plugin in ContentProvider::discover_embedded_plugins() {
             // Only add if not already discovered from filesystem (filesystem takes precedence)
-            if !self.config.plugins.local.iter().any(|lp| lp.id == id) {
+            if !self.config.plugins.local.iter().any(|lp| lp.id == plugin.id) {
                 self.config.plugins.local.push(jarvis_config::schema::LocalPlugin {
-                    id,
-                    name,
-                    category,
-                    entry,
+                    id: plugin.id,
+                    name: plugin.name,
+                    category: plugin.category,
+                    entry: plugin.entry,
+                    opaque: plugin.opaque,
                 });
             }
         }

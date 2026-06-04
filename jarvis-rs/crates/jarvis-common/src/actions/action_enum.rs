@@ -37,9 +37,6 @@ pub enum Action {
     /// Never dispatched to the app — intercepted by the palette key handler.
     OpenURLPrompt,
 
-    // -- Games --
-    LaunchGame(String),
-
     // -- Web --
     OpenURL(String),
 
