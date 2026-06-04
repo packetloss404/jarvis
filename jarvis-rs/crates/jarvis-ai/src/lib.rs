@@ -1,6 +1,6 @@
 //! AI engine for Jarvis.
 //!
-//! Provides Claude, Gemini, and Whisper API clients with:
+//! Provides Claude and Whisper API clients with:
 //! - Streaming (SSE) support
 //! - Tool calling (function use)
 //! - Session management with automatic tool-call loops
@@ -8,7 +8,6 @@
 //! - Skill-based routing between providers
 
 pub mod claude;
-pub mod gemini;
 pub mod router;
 pub mod session;
 pub mod streaming;
@@ -19,7 +18,6 @@ pub mod whisper;
 use async_trait::async_trait;
 
 pub use claude::{ClaudeClient, ClaudeConfig};
-pub use gemini::{GeminiClient, GeminiConfig};
 pub use router::{Provider, Skill, SkillRouter};
 pub use session::Session;
 pub use token_tracker::TokenTracker;

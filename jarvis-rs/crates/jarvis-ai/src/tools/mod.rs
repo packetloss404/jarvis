@@ -6,7 +6,7 @@
 mod definitions;
 mod sandbox;
 
-pub use definitions::{builtin_tools, to_claude_tool, to_gemini_tool};
+pub use definitions::{builtin_tools, to_claude_tool};
 pub use sandbox::ToolSandbox;
 
 #[cfg(test)]

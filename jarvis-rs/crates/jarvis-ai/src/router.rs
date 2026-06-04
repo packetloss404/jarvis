@@ -1,7 +1,7 @@
 //! Skill router — dispatches AI requests to the appropriate provider.
 //!
-//! The router selects between Claude, Gemini, or other providers
-//! based on the task type, cost, and availability.
+//! The router selects between registered providers based on the task type,
+//! cost, and availability. Currently Claude is the only built-in provider.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +12,6 @@ use crate::{AiClient, AiError, AiResponse, Message, ToolDefinition};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Provider {
     Claude,
-    Gemini,
 }
 
 /// A skill that can be routed to a specific provider.

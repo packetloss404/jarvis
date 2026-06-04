@@ -120,12 +120,3 @@ pub fn to_claude_tool(tool: &ToolDefinition) -> serde_json::Value {
         "input_schema": tool.parameters,
     })
 }
-
-/// Convert a tool definition to the Gemini API format.
-pub fn to_gemini_tool(tool: &ToolDefinition) -> serde_json::Value {
-    serde_json::json!({
-        "name": tool.name,
-        "description": tool.description,
-        "parameters": tool.parameters,
-    })
-}
