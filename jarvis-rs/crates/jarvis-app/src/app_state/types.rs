@@ -8,6 +8,9 @@ use jarvis_social::UserStatus;
 pub(super) enum AssistantEvent {
     /// The assistant runtime has initialized with the given model.
     Initialized { model_name: String },
+    /// The active AI provider changed (e.g. via the UI switcher). Carries the
+    /// lowercase provider label ("claude" | "openai" | "minimax").
+    ProviderChanged { provider: String },
     /// A streaming text chunk arrived.
     StreamChunk(String),
     /// The assistant requested a (read-only) tool call.

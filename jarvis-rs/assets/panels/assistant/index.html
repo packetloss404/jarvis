@@ -59,6 +59,31 @@ body {
   animation: pulse-dot 2.5s ease-in-out infinite;
 }
 
+#provider-select {
+  background: transparent;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  padding: 2px 4px;
+  outline: none;
+  cursor: pointer;
+  transition: color var(--transition-speed) ease,
+              border-color var(--transition-speed) ease;
+}
+
+#provider-select:hover,
+#provider-select:focus {
+  color: var(--color-text);
+  border-color: var(--color-border-focused);
+}
+
+#provider-select option {
+  background: rgba(10, 14, 20, 0.98);
+  color: var(--color-text);
+}
+
 #close-btn {
   background: none;
   border: none;
@@ -382,6 +407,12 @@ body {
 <div id="header">
   <span id="header-title">Assistant</span>
   <div id="header-status">
+    <select id="provider-select" title="AI provider">
+      <option value="claude">Claude</option>
+      <option value="openai">OpenAI</option>
+      <option value="minimax">MiniMax</option>
+      <option value="gemini">Gemini</option>
+    </select>
     <div class="status-dot"></div>
     <span id="status-text">ready</span>
   </div>
@@ -436,6 +467,19 @@ const sendBtn = document.getElementById('send-btn');
 const cmdHint = document.getElementById('cmd-hint');
 const statusText = document.getElementById('status-text');
 const headerTitle = document.getElementById('header-title');
+const providerSelect = document.getElementById('provider-select');
+
+// Reflects the currently active provider; updated on load and on switch.
+let currentProvider = 'claude';
+
+// User picked a different provider — tell Rust to rebuild the client.
+providerSelect.addEventListener('change', function() {
+  var provider = providerSelect.value;
+  if (provider === currentProvider) return;
+  currentProvider = provider;
+  statusText.textContent = 'switching...';
+  sendIpc('set_ai_provider', { provider: provider });
+});
 
 // ================================================================
 // COMMANDS
@@ -717,6 +761,17 @@ function registerIpcHandlers() {
   ipcBridge.on('assistant_config', function(payload) {
     if (payload && payload.model_name) {
       headerTitle.textContent = escapeHtml(payload.model_name);
+    }
+  });
+
+  // Reflect the active provider in the dropdown (on load and after a switch).
+  ipcBridge.on('assistant_provider', function(payload) {
+    if (payload && payload.provider) {
+      currentProvider = payload.provider;
+      providerSelect.value = payload.provider;
+      if (statusText.textContent === 'switching...') {
+        statusText.textContent = 'ready';
+      }
     }
   });
 

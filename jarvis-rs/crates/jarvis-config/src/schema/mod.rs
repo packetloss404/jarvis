@@ -3,6 +3,7 @@
 //! All structs use `serde(default)` so partial configs work correctly.
 //! Missing fields are filled with sensible defaults matching the Python schema.
 
+mod assistant;
 mod auto_open;
 mod background;
 mod effects;
@@ -25,6 +26,7 @@ mod visualizer;
 mod voice;
 mod window;
 
+pub use assistant::*;
 pub use auto_open::*;
 pub use background::*;
 pub use effects::*;
@@ -73,6 +75,7 @@ pub struct JarvisConfig {
     pub visualizer: VisualizerConfig,
     pub startup: StartupConfig,
     pub voice: VoiceConfig,
+    pub assistant: AssistantConfig,
     pub keybinds: KeybindConfig,
     pub panels: PanelsConfig,
     pub livechat: LivechatConfig,
@@ -216,6 +219,38 @@ mod tests {
         assert_eq!(config.voice.sample_rate, 24000);
         assert_eq!(config.voice.whisper_sample_rate, 16000);
         assert_eq!(config.voice.ptt.key, "Option+Period");
+    }
+
+    #[test]
+    fn default_config_has_correct_assistant() {
+        let config = JarvisConfig::default();
+        // Provider defaults to Claude; per-provider overrides are empty so the
+        // client defaults (and env-only API keys) apply.
+        assert_eq!(config.assistant.provider, AiProvider::Claude);
+        assert!(config.assistant.openai.model.is_empty());
+        assert!(config.assistant.openai.base_url.is_empty());
+        assert!(config.assistant.minimax.model.is_empty());
+        assert!(config.assistant.minimax.base_url.is_empty());
+        assert!(config.assistant.claude.model.is_empty());
+        assert!(config.assistant.gemini.model.is_empty());
+        assert!(config.assistant.gemini.base_url.is_empty());
+    }
+
+    #[test]
+    fn assistant_provider_in_toml() {
+        let toml_str = r#"
+[assistant]
+provider = "openai"
+
+[assistant.openai]
+model = "gpt-4o-mini"
+"#;
+        let config: JarvisConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.assistant.provider, AiProvider::OpenAi);
+        assert_eq!(config.assistant.openai.model, "gpt-4o-mini");
+        // Sibling defaults preserved.
+        assert!(config.assistant.minimax.model.is_empty());
+        assert_eq!(config.theme.name, "jarvis-dark");
     }
 
     #[test]

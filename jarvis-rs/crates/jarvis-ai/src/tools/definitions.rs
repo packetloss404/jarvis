@@ -138,3 +138,67 @@ pub fn to_claude_tool(tool: &ToolDefinition) -> serde_json::Value {
         "input_schema": tool.parameters,
     })
 }
+
+/// Convert a tool definition to the OpenAI Chat Completions function format.
+///
+/// OpenAI nests the tool under `{type:"function", function:{...}}` and uses
+/// `parameters` (a JSON Schema object) where Claude uses `input_schema`.
+pub fn to_openai_tool(tool: &ToolDefinition) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        },
+    })
+}
+
+/// Convert a tool definition to the Gemini `functionDeclarations[]` entry format.
+///
+/// Gemini groups declarations under `tools:[{functionDeclarations:[...]}]`. Each
+/// declaration carries `name`, `description`, and `parameters` (a JSON Schema
+/// object — the SAME shape Jarvis stores), so this is a near-passthrough.
+pub fn to_gemini_tool(tool: &ToolDefinition) -> serde_json::Value {
+    serde_json::json!({
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": tool.parameters,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_only_tools_exclude_dangerous_tools() {
+        let names: Vec<String> = read_only_tools().into_iter().map(|t| t.name).collect();
+        assert!(!names.contains(&"run_command".to_string()));
+        assert!(!names.contains(&"write_file".to_string()));
+        assert!(names.contains(&"read_file".to_string()));
+        assert!(names.contains(&"list_directory".to_string()));
+    }
+
+    #[test]
+    fn to_openai_tool_nests_under_function() {
+        let tool = &read_only_tools()[0];
+        let v = to_openai_tool(tool);
+        assert_eq!(v["type"], "function");
+        assert_eq!(v["function"]["name"], tool.name);
+        assert_eq!(v["function"]["description"], tool.description);
+        assert_eq!(v["function"]["parameters"], tool.parameters);
+    }
+
+    #[test]
+    fn to_gemini_tool_is_flat_declaration() {
+        let tool = &read_only_tools()[0];
+        let v = to_gemini_tool(tool);
+        assert_eq!(v["name"], tool.name);
+        assert_eq!(v["description"], tool.description);
+        assert_eq!(v["parameters"], tool.parameters);
+        // Gemini does not wrap in {type:"function", function:{...}}.
+        assert!(v.get("type").is_none());
+        assert!(v.get("function").is_none());
+    }
+}

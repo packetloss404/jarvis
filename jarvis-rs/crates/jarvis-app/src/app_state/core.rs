@@ -88,6 +88,9 @@ pub struct JarvisApp {
     pub(super) assistant_open: bool,
     pub(super) assistant_rx: Option<std::sync::mpsc::Receiver<AssistantEvent>>,
     pub(super) assistant_tx: Option<std::sync::mpsc::Sender<String>>,
+    /// Channel for runtime AI provider switches (UI switcher -> async task).
+    pub(super) assistant_provider_tx:
+        Option<std::sync::mpsc::Sender<jarvis_config::schema::AiProvider>>,
 
     // Mobile relay bridge
     pub(super) mobile_broadcaster: Option<Arc<super::ws_server::MobileBroadcaster>>,
@@ -172,6 +175,7 @@ impl JarvisApp {
             assistant_open: false,
             assistant_rx: None,
             assistant_tx: None,
+            assistant_provider_tx: None,
             mobile_broadcaster: None,
             mobile_cmd_rx: None,
             relay_event_rx: None,

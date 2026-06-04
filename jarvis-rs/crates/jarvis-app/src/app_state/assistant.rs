@@ -67,9 +67,17 @@ impl JarvisApp {
 
         let (user_tx, user_rx) = std::sync::mpsc::channel::<String>();
         let (event_tx, event_rx) = std::sync::mpsc::channel::<AssistantEvent>();
+        let (provider_tx, provider_rx) =
+            std::sync::mpsc::channel::<jarvis_config::schema::AiProvider>();
 
         self.assistant_tx = Some(user_tx);
         self.assistant_rx = Some(event_rx);
+        self.assistant_provider_tx = Some(provider_tx);
+
+        // Snapshot the assistant config (provider selection + per-provider
+        // overrides) for the async task. API keys are NOT here — they come from
+        // env vars inside the factory.
+        let assistant_config = self.config.assistant.clone();
 
         if self.tokio_runtime.is_none() {
             match tokio::runtime::Builder::new_multi_thread()
@@ -87,8 +95,23 @@ impl JarvisApp {
 
         let rt = self.tokio_runtime.as_ref().unwrap();
         rt.spawn(async move {
-            assistant_task(user_rx, event_tx).await;
+            assistant_task(user_rx, event_tx, provider_rx, assistant_config).await;
         });
+    }
+
+    /// Switch the active AI provider at runtime (from the UI switcher).
+    ///
+    /// Persists the selection to config and forwards it to the async task,
+    /// which rebuilds the client for subsequent turns. Starts the assistant
+    /// runtime first if it isn't running yet.
+    pub(super) fn set_ai_provider(&mut self, provider: jarvis_config::schema::AiProvider) {
+        self.config.assistant.provider = provider;
+        self.ensure_assistant_runtime();
+        if let Some(ref tx) = self.assistant_provider_tx {
+            if let Err(e) = tx.send(provider) {
+                tracing::warn!(error = %e, "Failed to send provider switch");
+            }
+        }
     }
 
     /// Poll for assistant events from the async task (non-blocking).
@@ -100,6 +123,12 @@ impl JarvisApp {
                         self.send_assistant_ipc(
                             "assistant_config",
                             &serde_json::json!({ "model_name": model_name }),
+                        );
+                    }
+                    AssistantEvent::ProviderChanged { ref provider } => {
+                        self.send_assistant_ipc(
+                            "assistant_provider",
+                            &serde_json::json!({ "provider": provider }),
                         );
                     }
                     AssistantEvent::StreamChunk(ref chunk) => {

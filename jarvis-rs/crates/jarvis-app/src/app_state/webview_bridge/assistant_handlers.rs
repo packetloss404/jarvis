@@ -4,6 +4,7 @@
 //! `open_panel` (request to open a new panel type).
 
 use jarvis_common::types::PaneKind;
+use jarvis_config::schema::AiProvider;
 use jarvis_tiling::tree::Direction;
 use jarvis_webview::IpcPayload;
 
@@ -65,6 +66,38 @@ impl JarvisApp {
         }
     }
 
+    /// Handle `set_ai_provider` — the user picked a provider in the panel header.
+    ///
+    /// Validates the provider name against the allowlist, then switches the
+    /// active provider (persisted to config + rebuilt client for next turns).
+    /// Unknown names are rejected. API keys are never involved here — they come
+    /// from environment variables inside the client factory.
+    pub(in crate::app_state) fn handle_set_ai_provider(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+    ) {
+        let name = match payload {
+            IpcPayload::Json(obj) => obj.get("provider").and_then(|v| v.as_str()),
+            _ => None,
+        };
+
+        let provider = match name.and_then(parse_ai_provider) {
+            Some(p) => p,
+            None => {
+                tracing::warn!(
+                    pane_id,
+                    provider = ?name,
+                    "set_ai_provider: unknown or missing provider"
+                );
+                return;
+            }
+        };
+
+        tracing::info!(pane_id, provider = ?provider, "Switching AI provider");
+        self.set_ai_provider(provider);
+    }
+
     /// Handle `assistant_ready` — the assistant webview has loaded and registered IPC handlers.
     ///
     /// Starts the async Claude AI runtime so it can send back config and accept messages.
@@ -121,6 +154,20 @@ fn is_panel_allowed(name: &str) -> bool {
     ALLOWED_PANELS.contains(&name)
 }
 
+/// Parse an AI provider name from the UI switcher into an `AiProvider`.
+///
+/// Only the known providers are accepted; anything else returns `None` and the
+/// switch is rejected.
+fn parse_ai_provider(name: &str) -> Option<AiProvider> {
+    match name {
+        "claude" => Some(AiProvider::Claude),
+        "openai" => Some(AiProvider::OpenAi),
+        "minimax" => Some(AiProvider::MiniMax),
+        "gemini" => Some(AiProvider::Gemini),
+        _ => None,
+    }
+}
+
 /// Map a panel name string to `PaneKind`.
 fn panel_kind_from_name(name: &str) -> PaneKind {
     match name {
@@ -173,6 +220,22 @@ mod tests {
         assert!(is_panel_allowed("chat"));
         assert!(is_panel_allowed("settings"));
         assert!(is_panel_allowed("presence"));
+    }
+
+    #[test]
+    fn ai_provider_parsing_valid() {
+        assert_eq!(parse_ai_provider("claude"), Some(AiProvider::Claude));
+        assert_eq!(parse_ai_provider("openai"), Some(AiProvider::OpenAi));
+        assert_eq!(parse_ai_provider("minimax"), Some(AiProvider::MiniMax));
+        assert_eq!(parse_ai_provider("gemini"), Some(AiProvider::Gemini));
+    }
+
+    #[test]
+    fn ai_provider_parsing_rejects_unknown() {
+        assert_eq!(parse_ai_provider(""), None);
+        assert_eq!(parse_ai_provider("Claude"), None); // case-sensitive
+        assert_eq!(parse_ai_provider("Gemini"), None); // case-sensitive
+        assert_eq!(parse_ai_provider("openai; rm -rf /"), None);
     }
 
     #[test]

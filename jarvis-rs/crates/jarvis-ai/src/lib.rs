@@ -8,6 +8,8 @@
 //! - Skill-based routing between providers
 
 pub mod claude;
+pub mod gemini;
+pub mod openai;
 pub mod router;
 pub mod session;
 pub mod streaming;
@@ -18,6 +20,8 @@ pub mod whisper;
 use async_trait::async_trait;
 
 pub use claude::{ClaudeClient, ClaudeConfig};
+pub use gemini::{GeminiClient, GeminiConfig};
+pub use openai::{OpenAiClient, OpenAiConfig};
 pub use router::{Provider, Skill, SkillRouter};
 pub use session::{Session, ToolEvent, ToolEventCallback, ToolExecutor, ToolOutcome};
 pub use token_tracker::TokenTracker;

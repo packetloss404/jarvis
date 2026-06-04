@@ -106,6 +106,30 @@ name = "jarvis-dark"
 # input_device = "default"
 # sample_rate = 24000
 
+[assistant]
+# Which AI provider the assistant uses: "claude", "openai", "minimax", or "gemini".
+# (API keys come from environment variables ONLY and are never stored here:
+#   claude  -> ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN
+#   openai  -> OPENAI_API_KEY
+#   minimax -> MINIMAX_API_KEY
+#   gemini  -> GEMINI_API_KEY / GOOGLE_API_KEY)
+# provider = "claude"
+
+[assistant.claude]
+# model = ""             # empty = client default
+
+[assistant.openai]
+# model = ""             # empty = client default (e.g. "gpt-4o")
+# base_url = ""          # empty = https://api.openai.com/v1
+
+[assistant.minimax]
+# model = ""             # empty = client default (e.g. "MiniMax-M2")
+# base_url = ""          # empty = https://api.minimax.io/v1
+
+[assistant.gemini]
+# model = ""             # empty = client default (e.g. "gemini-2.0-flash")
+# base_url = ""          # empty = https://generativelanguage.googleapis.com/v1beta
+
 [keybinds]
 # push_to_talk = "Option+Period"
 # open_assistant = "Cmd+G"
