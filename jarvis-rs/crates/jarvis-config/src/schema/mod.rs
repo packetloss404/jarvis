@@ -289,8 +289,7 @@ model = "gpt-4o-mini"
     fn default_config_has_correct_presence() {
         let config = JarvisConfig::default();
         assert!(config.presence.enabled);
-        assert!(config.presence.server_url.is_empty());
-        assert_eq!(config.presence.heartbeat_interval, 30);
+        assert_eq!(config.presence.room_id, "jarvis-presence-global");
     }
 
     #[test]

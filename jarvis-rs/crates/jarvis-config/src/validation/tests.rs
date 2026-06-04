@@ -130,6 +130,23 @@ fn catches_check_interval_too_small() {
 }
 
 #[test]
+fn catches_empty_presence_room_id_when_enabled() {
+    let mut config = JarvisConfig::default();
+    config.presence.enabled = true;
+    config.presence.room_id = "  ".into();
+    let err = validate(&config).unwrap_err().to_string();
+    assert!(err.contains("presence.room_id"));
+}
+
+#[test]
+fn empty_presence_room_id_ok_when_disabled() {
+    let mut config = JarvisConfig::default();
+    config.presence.enabled = false;
+    config.presence.room_id = String::new();
+    assert!(validate(&config).is_ok());
+}
+
+#[test]
 fn catches_keybind_duplicates() {
     let mut config = JarvisConfig::default();
     config.keybinds.push_to_talk = "Cmd+G".into();

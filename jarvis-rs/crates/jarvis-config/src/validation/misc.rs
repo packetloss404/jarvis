@@ -93,13 +93,11 @@ pub(crate) fn validate_livechat(errors: &mut Vec<String>, config: &JarvisConfig)
 
 /// Validate presence constraints.
 pub(crate) fn validate_presence(errors: &mut Vec<String>, config: &JarvisConfig) {
-    validate_range(
-        errors,
-        "presence.heartbeat_interval",
-        config.presence.heartbeat_interval,
-        10,
-        300,
-    );
+    // Presence rides the relay Room transport. When enabled, it needs a
+    // non-empty room id to join.
+    if config.presence.enabled && config.presence.room_id.trim().is_empty() {
+        errors.push("presence.room_id must not be empty when presence is enabled".to_string());
+    }
 }
 
 /// Validate updates constraints.

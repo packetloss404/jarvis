@@ -167,8 +167,8 @@ name = "jarvis-dark"
 
 [presence]
 # enabled = true
-# server_url = ""
-# heartbeat_interval = 30
+# Presence rides the relay Room transport; it reuses [relay].url.
+# room_id = "jarvis-presence-global"
 
 [performance]
 # preset = "high"        # low, medium, high, ultra

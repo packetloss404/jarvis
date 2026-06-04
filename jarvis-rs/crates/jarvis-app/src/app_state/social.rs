@@ -87,8 +87,8 @@ impl JarvisApp {
             return;
         }
 
-        if self.config.presence.server_url.is_empty() {
-            tracing::debug!("Presence skipped: no server_url configured");
+        if self.config.relay.url.is_empty() {
+            tracing::debug!("Presence skipped: no relay.url configured");
             return;
         }
 
@@ -98,9 +98,8 @@ impl JarvisApp {
         let identity = Identity::generate(&hostname);
 
         let presence_config = PresenceConfig {
-            project_ref: self.config.presence.server_url.clone(),
-            api_key: String::new(),
-            heartbeat_interval: self.config.presence.heartbeat_interval as u64,
+            relay_url: self.config.relay.url.clone(),
+            room_id: self.config.presence.room_id.clone(),
             ..Default::default()
         };
 

@@ -6,17 +6,21 @@ use crate::protocol::OnlineUser;
 // Configuration
 // ---------------------------------------------------------------------------
 
+/// Default global presence room id.
+pub const DEFAULT_PRESENCE_ROOM_ID: &str = "jarvis-presence-global";
+
 /// Configuration for the presence client.
+///
+/// Presence now rides the project's own relay Room transport (see
+/// [`crate::room`]); the former Supabase `project_ref` / `api_key` fields are
+/// gone. If [`relay_url`](Self::relay_url) is empty the presence client
+/// no-ops gracefully (as it did with no Supabase config).
 #[derive(Debug, Clone)]
 pub struct PresenceConfig {
-    /// Supabase project reference (e.g., "ojmqzagktzkualzgpcbq").
-    pub project_ref: String,
-    /// Supabase anon key (publishable).
-    pub api_key: String,
-    /// Optional JWT for authenticated connections.
-    pub access_token: Option<String>,
-    /// Heartbeat interval in seconds.
-    pub heartbeat_interval: u64,
+    /// WebSocket URL of the relay server. Empty disables presence.
+    pub relay_url: String,
+    /// The global presence room session id every desktop joins.
+    pub room_id: String,
     /// Reconnect delay (base) in seconds.
     pub reconnect_delay: u64,
     /// Maximum reconnect delay in seconds.
@@ -26,10 +30,8 @@ pub struct PresenceConfig {
 impl Default for PresenceConfig {
     fn default() -> Self {
         Self {
-            project_ref: String::new(),
-            api_key: String::new(),
-            access_token: None,
-            heartbeat_interval: 25,
+            relay_url: String::new(),
+            room_id: DEFAULT_PRESENCE_ROOM_ID.to_string(),
             reconnect_delay: 1,
             max_reconnect_delay: 30,
         }
