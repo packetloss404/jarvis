@@ -15,10 +15,9 @@ Jarvis is a shared desktop environment where multiple AI assistants, retro arcad
 | **Build the app most people should run** | [`jarvis-rs/`](jarvis-rs/) — cross-platform Rust desktop (Windows, macOS, Linux). |
 | **Understand the folder layout** | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | **Contribute code or run tests** | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| **Run the old macOS Python + Metal prototype** | [`legacy/`](legacy/) + [`scripts/start.sh`](scripts/start.sh) |
 | **Work on the mobile companion** | [`jarvis-mobile/`](jarvis-mobile/) |
 
-**Developed app:** the **`jarvis-rs`** workspace (wgpu + embedded WebViews) is where active feature work belongs. The tree under **`legacy/`** is **maintenance-only** macOS stack (Python + Swift/Metal).
+**Developed app:** the **`jarvis-rs`** workspace (wgpu + embedded WebViews) is where all feature work belongs. The original macOS Python + Swift/Metal prototype has been removed from the working tree; it is preserved at the **`legacy-archive`** git tag for historical reference.
 
 ---
 
@@ -52,75 +51,20 @@ Further detail: **[docs/manual/README.md](docs/manual/README.md)** (full technic
 jarvis/
   jarvis-rs/           # PRIMARY: Rust desktop app (develop here)
     testdata/          # Shared wire-protocol JSON fixtures (relay ↔ desktop tests)
-  legacy/              # Legacy macOS stack: Python + Swift/Metal (maintenance only)
-    main.py            # Legacy entrypoint
-    metal-app/         # Swift/Metal frontend
-    jarvis/            # Python package (config, commands, …)
-    tests/             # Python tests for legacy (pytest; see repo pytest.ini)
-    skills/, voice/, connectors/, presence/
-    requirements.txt   # Legacy Python deps
-    requirements.lock  # Pinned lockfile (pip-tools)
   jarvis-mobile/       # React Native companion (thin client)
-  scripts/             # login, start, setup, packaging helpers (mostly legacy flow)
-  docs/                # Website + published manual (and plugins doc); built HTML is gitignored
+  docs/                # Website + published manual; built HTML is gitignored
   dev/                 # Development docs only (pathforward analysis, etc.)
     pathforward/       # Strategic / model-sourced codebase write-ups
     _archive/          # Dated internal plans (kept for history; not the live manual)
   relay/               # Deployment helpers (separate from app crates)
-  resources/           # Packaging / DMG resources (legacy macOS release)
+  resources/           # Built-in theme assets (resources/themes/, loaded by jarvis-rs)
 ```
+
+> The original macOS Python + Swift/Metal prototype (formerly `legacy/`, with its
+> `scripts/` and packaging assets) has been removed from the working tree. It is
+> preserved in history at the **`legacy-archive`** git tag.
 
 See **[ARCHITECTURE.md](ARCHITECTURE.md)** for intent, boundaries, and “where does this feature live?”
-
----
-
-## Legacy macOS stack — `legacy/` (maintenance)
-
-The original **Python orchestration + Swift/Metal UI** lives entirely under **`legacy/`**. It is **macOS-only** and **not** where new product features should land.
-
-### Prerequisites
-
-- macOS 13+
-- Python 3.10+
-- Swift / Xcode (for `legacy/metal-app`)
-- Claude Max (for Claude Code / Agent SDK) if you use those skills
-- Optional: Google Gemini API key for voice routing
-
-### Run
-
-From the **repository root**:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r legacy/requirements.txt
-# Reproducible: pip install -r legacy/requirements.lock
-
-./scripts/start.sh
-```
-
-This installs dependencies, builds `legacy/metal-app` when needed, and runs **`python legacy/main.py`**.
-
-### Environment
-
-Put **`.env` at the repository root** (one level above `legacy/`). [`legacy/config.py`](legacy/config.py) loads `../.env` first.
-
-```env
-CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token
-GOOGLE_API_KEY=your-gemini-api-key   # optional
-```
-
-OAuth refresh:
-
-- macOS: `./scripts/login.sh`
-- Windows (shared token file): `./scripts/login.ps1`
-
-### Legacy controls (Metal UI)
-
-- **Left Control** (hold) — push-to-talk  
-- **Option + Period** — push-to-talk  
-- **Cmd + G** — toggle hotkey overlay  
-- **Escape** — quit  
 
 ---
 
@@ -128,18 +72,12 @@ OAuth refresh:
 
 | Doc | Purpose |
 |-----|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Repo map, primary vs legacy, mobile |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Builds, tests, dependency lock, PR hints |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Repo map, primary app, mobile |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Builds, tests, PR hints |
 | [docs/manual/README.md](docs/manual/README.md) | Full Jarvis technical manual (lives under **`docs/`** with the site) |
-| [docs/plugins/plugins.md](docs/plugins/plugins.md) | Plugin system (Rust app) |
+| [dev/_archive/plugins/plugins.md](dev/_archive/plugins/plugins.md) | Plugin system (Rust app; archived notes) |
 | [dev/pathforward/finalfindings.md](dev/pathforward/finalfindings.md) | Strategic codebase analysis (under **`dev/`**; see also **`dev/_archive/`** for older plans) |
 | [CHANGELOG.md](CHANGELOG.md) | High-level history from git (themes over time) |
-
----
-
-## Skills (legacy voice routing)
-
-On the **legacy** stack, voice can be routed through Gemini into skills (code assistant, domains, papers, firewall, VibeToText). The **Rust** app has its own assistant and panel architecture; see the manual for current behavior.
 
 ---
 
