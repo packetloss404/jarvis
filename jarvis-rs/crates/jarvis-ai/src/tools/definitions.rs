@@ -112,6 +112,24 @@ pub fn builtin_tools() -> Vec<ToolDefinition> {
     ]
 }
 
+/// The read-only subset of the built-in tools, safe to expose to an assistant
+/// that must have ZERO command-execution / write capability.
+///
+/// Excludes `run_command` and `write_file` entirely, so the model cannot even
+/// request them.
+pub fn read_only_tools() -> Vec<ToolDefinition> {
+    const READ_ONLY: &[&str] = &[
+        "read_file",
+        "search_files",
+        "search_content",
+        "list_directory",
+    ];
+    builtin_tools()
+        .into_iter()
+        .filter(|t| READ_ONLY.contains(&t.name.as_str()))
+        .collect()
+}
+
 /// Convert a tool definition to the Claude API format.
 pub fn to_claude_tool(tool: &ToolDefinition) -> serde_json::Value {
     serde_json::json!({

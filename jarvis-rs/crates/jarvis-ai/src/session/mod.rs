@@ -8,4 +8,4 @@ mod manager;
 mod types;
 
 pub use manager::Session;
-pub use types::ToolExecutor;
+pub use types::{ToolEvent, ToolEventCallback, ToolExecutor, ToolOutcome};

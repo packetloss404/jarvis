@@ -174,6 +174,43 @@ body {
   font-size: 12px;
 }
 
+/* Tool activity (read-only filesystem tools) */
+.tool-activity {
+  align-self: flex-start;
+  max-width: 90%;
+  margin: 2px 0;
+  font-family: var(--font-family);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.tool-activity summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(0, 212, 255, 0.04);
+  border: var(--border-width) solid var(--color-border);
+  user-select: none;
+}
+
+.tool-activity summary::-webkit-details-marker { display: none; }
+
+.tool-activity .tool-name { color: var(--color-text); }
+
+.tool-activity.error summary {
+  background: rgba(255, 68, 68, 0.06);
+  border-color: rgba(255, 68, 68, 0.18);
+  color: var(--color-error);
+}
+
+.tool-activity .tool-body {
+  padding: 6px 8px 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-muted);
+}
+
 /* Welcome */
 #welcome {
   text-align: center;
@@ -593,6 +630,61 @@ function registerIpcHandlers() {
     }
     streamingText += (payload.text || '');
     streamingEl.textContent = streamingText;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  // --- Tool activity (read-only filesystem tools) ---
+  function describeToolCall(name, input) {
+    input = input || {};
+    var arg = input.path || input.pattern || input.directory || '';
+    return name + '(' + (arg ? String(arg) : '') + ')';
+  }
+
+  // Maps to the most recent pending tool element by name (for result fill-in).
+  var pendingTool = null;
+
+  ipcBridge.on('tool_call', function(payload) {
+    hideTyping();
+    if (welcomeEl && welcomeEl.parentNode) welcomeEl.remove();
+    // A tool round interrupts streaming; close out any in-progress bubble so
+    // the next text chunk starts fresh after the tool result.
+    streamingEl = null;
+    streamingText = '';
+
+    var details = document.createElement('details');
+    details.className = 'tool-activity';
+    var summary = document.createElement('summary');
+    summary.innerHTML = '🔧 <span class="tool-name">'
+      + escapeHtml(describeToolCall(payload.name, payload.input)) + '</span>';
+    details.appendChild(summary);
+    var body = document.createElement('div');
+    body.className = 'tool-body';
+    body.textContent = '…running';
+    details.appendChild(body);
+    messagesEl.appendChild(details);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    pendingTool = { name: payload.name, el: details, body: body };
+  });
+
+  ipcBridge.on('tool_result', function(payload) {
+    var target = pendingTool;
+    if (!target || (payload.name && target.name !== payload.name)) {
+      // Fallback: create a standalone result line.
+      var details = document.createElement('details');
+      details.className = 'tool-activity';
+      var summary = document.createElement('summary');
+      summary.innerHTML = '🔧 <span class="tool-name">'
+        + escapeHtml(payload.name || 'tool') + '</span>';
+      details.appendChild(summary);
+      var body = document.createElement('div');
+      body.className = 'tool-body';
+      details.appendChild(body);
+      messagesEl.appendChild(details);
+      target = { el: details, body: body };
+    }
+    if (payload.is_error) target.el.classList.add('error');
+    target.body.textContent = payload.summary || '(no output)';
+    pendingTool = null;
     messagesEl.scrollTop = messagesEl.scrollHeight;
   });
 

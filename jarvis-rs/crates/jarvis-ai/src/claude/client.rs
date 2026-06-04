@@ -1,7 +1,7 @@
 //! Claude API client struct, request building, and response parsing.
 
 use crate::tools::to_claude_tool;
-use crate::{AiError, AiResponse, Message, Role, TokenUsage, ToolCall, ToolDefinition};
+use crate::{AiError, AiResponse, ContentBlock, Message, Role, TokenUsage, ToolCall, ToolDefinition};
 
 use super::config::ClaudeConfig;
 
@@ -71,9 +71,45 @@ impl ClaudeClient {
                 Role::Assistant => "assistant",
                 Role::System => continue, // system is separate in Claude API
             };
+
+            // When a message carries structured blocks, emit a content-block
+            // ARRAY (tool_use on assistant turns, tool_result on user turns).
+            // Otherwise emit the plain-text content string (back-compat).
+            let content = if msg.blocks.is_empty() {
+                serde_json::json!(msg.content)
+            } else {
+                let blocks: Vec<serde_json::Value> = msg
+                    .blocks
+                    .iter()
+                    .map(|block| match block {
+                        ContentBlock::Text { text } => serde_json::json!({
+                            "type": "text",
+                            "text": text,
+                        }),
+                        ContentBlock::ToolUse { id, name, input } => serde_json::json!({
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": input,
+                        }),
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                        } => serde_json::json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": content,
+                            "is_error": is_error,
+                        }),
+                    })
+                    .collect();
+                serde_json::json!(blocks)
+            };
+
             msgs.push(serde_json::json!({
                 "role": role,
-                "content": msg.content,
+                "content": content,
             }));
         }
 
@@ -147,5 +183,119 @@ impl ClaudeClient {
             tool_calls,
             usage,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::claude::config::AuthMethod;
+
+    fn client() -> ClaudeClient {
+        ClaudeClient::new(ClaudeConfig::new("test-token", AuthMethod::ApiKey))
+    }
+
+    #[test]
+    fn plain_text_message_serializes_as_string() {
+        let c = client();
+        let msgs = vec![Message::text(Role::User, "hello there")];
+        let body = c.build_request_body(&msgs, &[], false);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content, &serde_json::json!("hello there"));
+        assert_eq!(body["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn tool_use_turn_serializes_as_block_array() {
+        let c = client();
+        let msgs = vec![Message::blocks(
+            Role::Assistant,
+            vec![
+                ContentBlock::Text {
+                    text: "let me check".into(),
+                },
+                ContentBlock::ToolUse {
+                    id: "toolu_1".into(),
+                    name: "read_file".into(),
+                    input: serde_json::json!({ "path": "a.txt" }),
+                },
+            ],
+        )];
+        let body = c.build_request_body(&msgs, &[], false);
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_array(), "tool turn must be an array");
+        let arr = content.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[1]["type"], "tool_use");
+        assert_eq!(arr[1]["id"], "toolu_1");
+        assert_eq!(arr[1]["name"], "read_file");
+        assert_eq!(arr[1]["input"]["path"], "a.txt");
+    }
+
+    #[test]
+    fn tool_result_keyed_by_tool_use_id() {
+        let c = client();
+        let msgs = vec![Message::blocks(
+            Role::User,
+            vec![ContentBlock::ToolResult {
+                tool_use_id: "toolu_1".into(),
+                content: "file contents".into(),
+                is_error: false,
+            }],
+        )];
+        let body = c.build_request_body(&msgs, &[], false);
+        let block = &body["messages"][0]["content"][0];
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(block["type"], "tool_result");
+        assert_eq!(block["tool_use_id"], "toolu_1");
+        assert_eq!(block["content"], "file contents");
+        assert_eq!(block["is_error"], false);
+    }
+
+    #[test]
+    fn tool_result_error_flag_propagates() {
+        let c = client();
+        let msgs = vec![Message::blocks(
+            Role::User,
+            vec![ContentBlock::ToolResult {
+                tool_use_id: "toolu_x".into(),
+                content: "Access denied".into(),
+                is_error: true,
+            }],
+        )];
+        let body = c.build_request_body(&msgs, &[], false);
+        assert_eq!(body["messages"][0]["content"][0]["is_error"], true);
+    }
+
+    #[test]
+    fn full_tool_roundtrip_serialization() {
+        let c = client();
+        let msgs = vec![
+            Message::text(Role::User, "read a.txt"),
+            Message::blocks(
+                Role::Assistant,
+                vec![ContentBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "read_file".into(),
+                    input: serde_json::json!({ "path": "a.txt" }),
+                }],
+            ),
+            Message::blocks(
+                Role::User,
+                vec![ContentBlock::ToolResult {
+                    tool_use_id: "t1".into(),
+                    content: "hello".into(),
+                    is_error: false,
+                }],
+            ),
+        ];
+        let body = c.build_request_body(&msgs, &[], false);
+        let m = body["messages"].as_array().unwrap();
+        assert_eq!(m.len(), 3);
+        assert_eq!(m[0]["content"], serde_json::json!("read a.txt"));
+        assert_eq!(m[1]["content"][0]["type"], "tool_use");
+        assert_eq!(m[2]["content"][0]["type"], "tool_result");
+        // tool_use_id on the result must match the tool_use id.
+        assert_eq!(m[1]["content"][0]["id"], m[2]["content"][0]["tool_use_id"]);
     }
 }

@@ -19,8 +19,9 @@ use async_trait::async_trait;
 
 pub use claude::{ClaudeClient, ClaudeConfig};
 pub use router::{Provider, Skill, SkillRouter};
-pub use session::Session;
+pub use session::{Session, ToolEvent, ToolEventCallback, ToolExecutor, ToolOutcome};
 pub use token_tracker::TokenTracker;
+pub use tools::{read_only_tools, ReadOnlyToolExecutor};
 pub use whisper::{WhisperClient, WhisperConfig};
 
 #[async_trait]
@@ -39,10 +40,65 @@ pub trait AiClient: Send + Sync {
     ) -> Result<AiResponse, AiError>;
 }
 
+/// A single conversation message.
+///
+/// Most messages are plain text (`content`), but a message may also carry
+/// structured content blocks (`blocks`) to represent Claude `tool_use` and
+/// `tool_result` turns. When `blocks` is non-empty, request serialization
+/// emits a content-block array; otherwise it emits the plain `content` string
+/// (back-compat with the original text-only model).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Message {
     pub role: Role,
     pub content: String,
+    /// Optional structured content blocks (tool_use / tool_result). When empty,
+    /// the message is treated as a plain-text message carrying `content`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<ContentBlock>,
+}
+
+impl Message {
+    /// Construct a plain-text message (back-compat constructor).
+    pub fn text(role: Role, content: impl Into<String>) -> Self {
+        Self {
+            role,
+            content: content.into(),
+            blocks: Vec::new(),
+        }
+    }
+
+    /// Construct a message carrying structured content blocks.
+    pub fn blocks(role: Role, blocks: Vec<ContentBlock>) -> Self {
+        Self {
+            role,
+            content: String::new(),
+            blocks,
+        }
+    }
+}
+
+/// A structured content block within a message.
+///
+/// Mirrors the subset of Claude's content-block model that Jarvis uses:
+/// assistant `tool_use` blocks and user `tool_result` blocks (plus plain text).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentBlock {
+    /// Plain text block.
+    Text { text: String },
+    /// A tool invocation requested by the assistant.
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    /// The result of executing a tool, sent back as a user turn.
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        #[serde(default)]
+        is_error: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

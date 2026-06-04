@@ -1,13 +1,12 @@
 //! Session struct and conversation management.
 
 use std::sync::atomic::AtomicBool;
-
-use tracing::debug;
+use std::sync::Arc;
 
 use crate::token_tracker::TokenTracker;
-use crate::{Message, Role, ToolCall, ToolDefinition};
+use crate::{Message, Role, ToolDefinition};
 
-use super::types::ToolExecutor;
+use super::types::{ToolEventCallback, ToolExecutor};
 
 /// A conversation session with message history and tool execution.
 pub struct Session {
@@ -17,8 +16,10 @@ pub struct Session {
     pub(super) system_prompt: Option<String>,
     /// Available tool definitions.
     pub(super) tools: Vec<ToolDefinition>,
-    /// Tool executor callback.
-    pub(super) tool_executor: Option<ToolExecutor>,
+    /// Tool executor callback (shared so it can run on a blocking thread).
+    pub(super) tool_executor: Option<Arc<ToolExecutor>>,
+    /// Optional callback surfacing tool activity to the app layer.
+    pub(super) tool_event_callback: Option<Arc<ToolEventCallback>>,
     /// Token usage tracker.
     pub(super) tracker: TokenTracker,
     /// Maximum tool-call loop iterations to prevent infinite loops.
@@ -26,7 +27,7 @@ pub struct Session {
     /// Provider name for token tracking.
     pub(super) provider: String,
     /// Whether the session is currently processing a request.
-    pub(super) busy: AtomicBool,
+    pub(super) busy: Arc<AtomicBool>,
 }
 
 impl Session {
@@ -36,10 +37,11 @@ impl Session {
             system_prompt: None,
             tools: Vec::new(),
             tool_executor: None,
+            tool_event_callback: None,
             tracker: TokenTracker::new(),
             max_tool_rounds: 10,
             provider: provider.into(),
-            busy: AtomicBool::new(false),
+            busy: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -54,7 +56,14 @@ impl Session {
     }
 
     pub fn with_tool_executor(mut self, executor: ToolExecutor) -> Self {
-        self.tool_executor = Some(executor);
+        self.tool_executor = Some(Arc::new(executor));
+        self
+    }
+
+    /// Register a callback that is invoked as tool calls/results occur, so the
+    /// app layer can render tool activity inline.
+    pub fn with_tool_event_callback(mut self, callback: ToolEventCallback) -> Self {
+        self.tool_event_callback = Some(Arc::new(callback));
         self
     }
 
@@ -63,18 +72,10 @@ impl Session {
         self
     }
 
-    pub(crate) fn execute_tool(&self, executor: &ToolExecutor, tool_call: &ToolCall) -> String {
-        debug!(tool = %tool_call.name, "Executing tool");
-        executor(&tool_call.name, &tool_call.arguments)
-    }
-
     pub(crate) fn build_messages(&self) -> Vec<Message> {
         let mut msgs = Vec::new();
         if let Some(ref system) = self.system_prompt {
-            msgs.push(Message {
-                role: Role::System,
-                content: system.clone(),
-            });
+            msgs.push(Message::text(Role::System, system.clone()));
         }
         msgs.extend(self.messages.clone());
         msgs

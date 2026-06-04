@@ -2634,7 +2634,9 @@ dependencies = [
  "async-trait",
  "dirs",
  "futures-util",
+ "glob",
  "jarvis-common",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
@@ -2643,6 +2645,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

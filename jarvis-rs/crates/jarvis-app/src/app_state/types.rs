@@ -10,6 +10,17 @@ pub(super) enum AssistantEvent {
     Initialized { model_name: String },
     /// A streaming text chunk arrived.
     StreamChunk(String),
+    /// The assistant requested a (read-only) tool call.
+    ToolCall {
+        name: String,
+        input: serde_json::Value,
+    },
+    /// A tool call finished with the given short summary.
+    ToolResult {
+        name: String,
+        summary: String,
+        is_error: bool,
+    },
     /// The full response is complete.
     Done,
     /// An error occurred.

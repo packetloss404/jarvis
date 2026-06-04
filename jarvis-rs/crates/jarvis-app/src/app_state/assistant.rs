@@ -111,6 +111,26 @@ impl JarvisApp {
                             &serde_json::json!({ "text": chunk }),
                         );
                     }
+                    AssistantEvent::ToolCall { ref name, ref input } => {
+                        self.send_assistant_ipc(
+                            "tool_call",
+                            &serde_json::json!({ "name": name, "input": input }),
+                        );
+                    }
+                    AssistantEvent::ToolResult {
+                        ref name,
+                        ref summary,
+                        is_error,
+                    } => {
+                        self.send_assistant_ipc(
+                            "tool_result",
+                            &serde_json::json!({
+                                "name": name,
+                                "summary": summary,
+                                "is_error": is_error,
+                            }),
+                        );
+                    }
                     AssistantEvent::Done => {
                         // Capture the accumulated text before finishing
                         let full_text = self
