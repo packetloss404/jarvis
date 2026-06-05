@@ -27,6 +27,8 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "settings_get_config",
     "assistant_input",
     "assistant_ready",
+    "assistant_tool_approve",
+    "assistant_tool_deny",
     "set_ai_provider",
     "open_panel",
     "panel_close",
@@ -162,6 +164,12 @@ impl JarvisApp {
             }
             "assistant_ready" => {
                 self.handle_assistant_ready(pane_id);
+            }
+            "assistant_tool_approve" => {
+                self.handle_assistant_tool_approve(pane_id, &msg.payload);
+            }
+            "assistant_tool_deny" => {
+                self.handle_assistant_tool_deny(pane_id, &msg.payload);
             }
             "set_ai_provider" => {
                 self.handle_set_ai_provider(pane_id, &msg.payload);
@@ -439,6 +447,8 @@ mod tests {
         assert!(is_ipc_kind_allowed("settings_get_config"));
         assert!(is_ipc_kind_allowed("panel_focus"));
         assert!(is_ipc_kind_allowed("assistant_input"));
+        assert!(is_ipc_kind_allowed("assistant_tool_approve"));
+        assert!(is_ipc_kind_allowed("assistant_tool_deny"));
         assert!(is_ipc_kind_allowed("set_ai_provider"));
         assert!(is_ipc_kind_allowed("open_panel"));
         assert!(is_ipc_kind_allowed("panel_close"));

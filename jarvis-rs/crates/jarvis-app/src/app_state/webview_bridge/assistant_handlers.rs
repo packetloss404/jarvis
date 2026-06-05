@@ -98,6 +98,65 @@ impl JarvisApp {
         self.set_ai_provider(provider);
     }
 
+    /// Handle `assistant_tool_approve` — the human approved a pending mutating/
+    /// exec tool call in the panel.
+    ///
+    /// Looks up the pending approval by `id` and resolves its oneshot with
+    /// `Approve`, unblocking the async tool loop so the tool may execute. An
+    /// unknown / already-resolved id is ignored (the gate may have timed out and
+    /// failed closed already).
+    pub(in crate::app_state) fn handle_assistant_tool_approve(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+    ) {
+        self.resolve_tool_approval(pane_id, payload, jarvis_ai::ApprovalDecision::Approve);
+    }
+
+    /// Handle `assistant_tool_deny` — the human denied a pending mutating/exec
+    /// tool call. Resolves the matching oneshot with `Deny` (fail closed).
+    pub(in crate::app_state) fn handle_assistant_tool_deny(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+    ) {
+        self.resolve_tool_approval(pane_id, payload, jarvis_ai::ApprovalDecision::Deny);
+    }
+
+    /// Shared resolution path for approve/deny: extract the request `id`, pop the
+    /// pending responder, and send the decision. Dropping the responder (no
+    /// entry) is harmless — the gate already failed closed on its own timeout.
+    fn resolve_tool_approval(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+        decision: jarvis_ai::ApprovalDecision,
+    ) {
+        let id = match payload {
+            IpcPayload::Json(obj) => obj.get("id").and_then(|v| v.as_str()),
+            _ => None,
+        };
+        let id = match id {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => {
+                tracing::warn!(pane_id, "tool approval response missing 'id'");
+                return;
+            }
+        };
+        match self.assistant_pending_approvals.remove(&id) {
+            Some(responder) => {
+                // If the receiver was already dropped (async side timed out),
+                // this send returns Err and the decision is simply discarded —
+                // the gate has already failed closed. Safe either way.
+                let _ = responder.send(decision);
+                tracing::info!(pane_id, %id, ?decision, "Tool approval resolved");
+            }
+            None => {
+                tracing::debug!(pane_id, %id, "No pending approval for id (timed out or unknown)");
+            }
+        }
+    }
+
     /// Handle `assistant_ready` — the assistant webview has loaded and registered IPC handlers.
     ///
     /// Starts the async Claude AI runtime so it can send back config and accept messages.

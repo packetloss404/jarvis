@@ -91,6 +91,14 @@ pub struct JarvisApp {
     /// Channel for runtime AI provider switches (UI switcher -> async task).
     pub(super) assistant_provider_tx:
         Option<std::sync::mpsc::Sender<jarvis_config::schema::AiProvider>>,
+    /// Pending tool-approval requests awaiting a human decision, keyed by the
+    /// approval request id. The value is the oneshot SENDER back to the async
+    /// tool loop; resolving it (Approve/Deny) unblocks the gate. Entries are
+    /// inserted when a `ToolApprovalRequest` event arrives and removed when the
+    /// panel answers via `assistant_tool_approve` / `assistant_tool_deny` (or
+    /// dropped on shutdown, which fails the gate closed).
+    pub(super) assistant_pending_approvals:
+        HashMap<String, tokio::sync::oneshot::Sender<jarvis_ai::ApprovalDecision>>,
 
     // Mobile relay bridge
     pub(super) mobile_broadcaster: Option<Arc<super::ws_server::MobileBroadcaster>>,
@@ -210,6 +218,7 @@ impl JarvisApp {
             assistant_rx: None,
             assistant_tx: None,
             assistant_provider_tx: None,
+            assistant_pending_approvals: HashMap::new(),
             mobile_broadcaster: None,
             mobile_cmd_rx: None,
             relay_event_rx: None,

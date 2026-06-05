@@ -236,6 +236,145 @@ body {
   color: var(--color-text-muted);
 }
 
+/* ================================================================ */
+/* TOOL APPROVAL GATE (mutating/exec tools: write_file, run_command) */
+/* ================================================================ */
+
+.tool-approval {
+  align-self: stretch;
+  max-width: 100%;
+  margin: 6px 0;
+  border: var(--border-width) solid var(--color-warning, #e6b800);
+  border-left: 3px solid var(--color-warning, #e6b800);
+  border-radius: 6px;
+  background: rgba(230, 184, 0, 0.06);
+  overflow: hidden;
+  animation: msg-in 0.15s ease-out;
+}
+
+.tool-approval.resolved-approve {
+  border-color: var(--color-success);
+  border-left-color: var(--color-success);
+  background: rgba(0, 200, 120, 0.05);
+}
+
+.tool-approval.resolved-deny,
+.tool-approval.resolved-timeout {
+  border-color: var(--color-error);
+  border-left-color: var(--color-error);
+  background: rgba(255, 68, 68, 0.05);
+}
+
+.tool-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-warning, #e6b800);
+  letter-spacing: 0.02em;
+}
+
+.tool-approval.resolved-approve .tool-approval-header { color: var(--color-success); }
+.tool-approval.resolved-deny .tool-approval-header,
+.tool-approval.resolved-timeout .tool-approval-header { color: var(--color-error); }
+
+.tool-approval-header .tool-approval-icon { font-size: 13px; }
+.tool-approval-header .tool-approval-tool {
+  font-family: var(--font-family);
+  color: var(--color-text);
+}
+
+.tool-approval-summary {
+  margin: 4px 12px 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 4px;
+  font-family: var(--font-family);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.tool-approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.tool-approval-actions .ta-spacer { flex: 1; }
+
+.tool-approval-actions button {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color var(--transition-speed) ease,
+              border-color var(--transition-speed) ease,
+              background var(--transition-speed) ease;
+  border: var(--border-width) solid var(--color-border);
+  background: transparent;
+}
+
+.tool-approval-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Deny = safe default: emphasized, focusable, receives initial focus. */
+.ta-deny {
+  color: var(--color-text);
+  border-color: var(--color-border-focused) !important;
+}
+.ta-deny:hover:not(:disabled),
+.ta-deny:focus:not(:disabled) {
+  color: var(--color-error);
+  border-color: var(--color-error) !important;
+  background: rgba(255, 68, 68, 0.08);
+}
+.ta-deny:focus-visible {
+  outline: 2px solid var(--color-error);
+  outline-offset: 1px;
+}
+
+/* Approve = deliberate, de-emphasized so it is not the easy default. */
+.ta-approve {
+  color: var(--color-text-muted);
+}
+.ta-approve:hover:not(:disabled),
+.ta-approve:focus:not(:disabled) {
+  color: var(--color-success);
+  border-color: var(--color-success) !important;
+  background: rgba(0, 200, 120, 0.08);
+}
+
+.tool-approval-status {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: var(--font-family);
+}
+.tool-approval.resolved-approve .tool-approval-status { color: var(--color-success); }
+.tool-approval.resolved-deny .tool-approval-status,
+.tool-approval.resolved-timeout .tool-approval-status { color: var(--color-error); }
+
+.tool-approval-pending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 10px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: var(--font-family);
+}
+
 /* Welcome */
 #welcome {
   text-align: center;
@@ -544,6 +683,10 @@ function addMessage(role, text) {
 
 function clearMessages() {
   messagesEl.innerHTML = '';
+  // Tear down any pending approval cards + their timers so a stale timeout
+  // can't fire against DOM that no longer exists. Defined later in the IPC
+  // scope; guard in case it isn't wired yet.
+  if (typeof resetApprovalCards === 'function') resetApprovalCards();
 }
 
 function showTyping() {
@@ -655,6 +798,23 @@ function updateCmdHint() {
 var streamingEl = null;
 var streamingText = '';
 
+// Approval cards keyed by request id (module scope so clearMessages() can tear
+// them down on a new turn / panel clear). The tool_result IPC event carries the
+// tool-call id, so results correlate to cards by id (no FIFO queue).
+var approvalCards = {};
+
+// Cancel every pending approval card's timer and forget them. Called when the
+// panel is cleared so a stale 115s timeout can't fire against removed DOM.
+function resetApprovalCards() {
+  for (var k in approvalCards) {
+    if (Object.prototype.hasOwnProperty.call(approvalCards, k)) {
+      var c = approvalCards[k];
+      if (c && typeof c.cancelTimer === 'function') c.cancelTimer();
+    }
+  }
+  approvalCards = {};
+}
+
 function registerIpcHandlers() {
   var ipcBridge = window.jarvis && window.jarvis.ipc;
   if (!ipcBridge || !ipcBridge.on) {
@@ -686,6 +846,8 @@ function registerIpcHandlers() {
 
   // Maps to the most recent pending tool element by name (for result fill-in).
   var pendingTool = null;
+
+  // `approvalCards` (id -> card) lives at module scope; results correlate by id.
 
   ipcBridge.on('tool_call', function(payload) {
     hideTyping();
@@ -729,7 +891,177 @@ function registerIpcHandlers() {
     if (payload.is_error) target.el.classList.add('error');
     target.body.textContent = payload.summary || '(no output)';
     pendingTool = null;
+
+    // Correlate to the approval card by id (mutating tools only have a card).
+    // Read-only and denied results simply have no matching card → no-op.
+    if (payload.id && approvalCards[payload.id]) {
+      var card = approvalCards[payload.id];
+      if (card && card.setExecuted) card.setExecuted(payload.is_error);
+    }
+
     messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  // --- Tool approval gate (mutating/exec tools: write_file, run_command) ---
+  //
+  // The Rust tool loop BLOCKS on an explicit human decision before running any
+  // mutating/exec tool. It emits `tool_approval_request` with { id, tool,
+  // summary } and we MUST reply with `assistant_tool_approve` /
+  // `assistant_tool_deny` carrying { id }. If we never reply, the Rust side
+  // times out after 120s and fails closed (deny) — so here Deny is the safe,
+  // easy default (it gets focus; Approve requires a deliberate click), and we
+  // mirror that timeout client-side as a visible "timed out" state.
+  //
+  // SECURITY: `tool` and `summary` are model-controlled text. They are ALWAYS
+  // rendered via textContent — never innerHTML — so embedded markup cannot
+  // execute or alter the page. Nothing is ever auto-approved.
+  //
+  // The UI timeout is deliberately SHORTER than the Rust 120s gate so the panel
+  // can never show "approved · running" for a request the backend has already
+  // timed-out-denied. Whichever side fires, the outcome is the same: deny.
+  var APPROVAL_TIMEOUT_MS = 115000; // < Rust APPROVAL_TIMEOUT (120s)
+
+  ipcBridge.on('tool_approval_request', function(payload) {
+    if (!payload || !payload.id) return;
+    hideTyping();
+    if (welcomeEl && welcomeEl.parentNode) welcomeEl.remove();
+    // A pending approval interrupts streaming; close any in-progress bubble.
+    streamingEl = null;
+    streamingText = '';
+
+    var id = String(payload.id);
+    var toolName = payload.tool || 'tool';
+
+    var box = document.createElement('div');
+    box.className = 'tool-approval';
+
+    // Header: prominent "approval required" + the exact tool name.
+    var header = document.createElement('div');
+    header.className = 'tool-approval-header';
+    var icon = document.createElement('span');
+    icon.className = 'tool-approval-icon';
+    icon.textContent = '⚠'; // warning sign
+    var htext = document.createElement('span');
+    // textContent throughout — model controls toolName.
+    htext.textContent = (toolName === 'run_command')
+      ? 'Approval required — run command'
+      : (toolName === 'write_file')
+        ? 'Approval required — write file'
+        : 'Approval required';
+    var hToolBadge = document.createElement('span');
+    hToolBadge.className = 'tool-approval-tool';
+    hToolBadge.textContent = toolName;
+    header.appendChild(icon);
+    header.appendChild(htext);
+    box.appendChild(header);
+
+    // Summary block: the EXACT command / path + content preview the model sent.
+    // Rendered with textContent so model markup is inert.
+    var summary = document.createElement('div');
+    summary.className = 'tool-approval-summary';
+    summary.textContent = (payload.summary && String(payload.summary).length)
+      ? String(payload.summary)
+      : (toolName + ' (no details provided)');
+    box.appendChild(summary);
+
+    // Actions: Deny (safe default, focused) + Approve (deliberate) + status.
+    var actions = document.createElement('div');
+    actions.className = 'tool-approval-actions';
+
+    var denyBtn = document.createElement('button');
+    denyBtn.className = 'ta-deny';
+    denyBtn.type = 'button';
+    denyBtn.textContent = 'Deny';
+
+    var approveBtn = document.createElement('button');
+    approveBtn.className = 'ta-approve';
+    approveBtn.type = 'button';
+    approveBtn.textContent = 'Approve';
+
+    var spacer = document.createElement('span');
+    spacer.className = 'ta-spacer';
+
+    var status = document.createElement('span');
+    status.className = 'tool-approval-status';
+    status.textContent = '';
+
+    actions.appendChild(denyBtn);
+    actions.appendChild(approveBtn);
+    actions.appendChild(spacer);
+    actions.appendChild(status);
+    box.appendChild(actions);
+
+    messagesEl.appendChild(box);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    var settled = false;
+    var timeoutHandle = null;
+
+    function clearTimer() {
+      if (timeoutHandle !== null) { clearTimeout(timeoutHandle); timeoutHandle = null; }
+    }
+
+    var card = {
+      id: id,
+      box: box,
+      // Called when the approved tool's result arrives.
+      setExecuted: function(isError) {
+        clearTimer();
+        status.textContent = isError ? 'approved · failed' : 'approved · done';
+      },
+      // Cancel any pending timer (used when the panel is cleared / a new turn
+      // starts) so a stale timeout can't fire against a removed card.
+      cancelTimer: clearTimer
+    };
+    approvalCards[id] = card;
+
+    function disableButtons() {
+      denyBtn.disabled = true;
+      approveBtn.disabled = true;
+    }
+
+    // Reply once; fail-closed semantics live in Rust, this is just the UI.
+    function decide(kind) {
+      if (settled) return;
+      settled = true;
+      clearTimer();
+      disableButtons();
+      sendIpc(kind, { id: id });
+      if (kind === 'assistant_tool_approve') {
+        box.classList.add('resolved-approve');
+        status.textContent = 'approved · running…';
+        // Card stays in `approvalCards[id]`; the tool_result handler correlates
+        // by id and calls setExecuted().
+      } else {
+        box.classList.add('resolved-deny');
+        status.textContent = 'denied';
+        delete approvalCards[id];
+      }
+    }
+
+    // Local timeout (115s, just under the Rust 120s gate) mirrors the fail-closed
+    // deny. If we reach it we do NOT send approve; we surface the timed-out state
+    // and the Rust side denies independently.
+    timeoutHandle = setTimeout(function() {
+      if (settled) return;
+      settled = true;
+      disableButtons();
+      box.classList.add('resolved-timeout');
+      status.textContent = 'timed out — denied';
+      delete approvalCards[id];
+    }, APPROVAL_TIMEOUT_MS);
+
+    denyBtn.addEventListener('click', function() { decide('assistant_tool_deny'); });
+    approveBtn.addEventListener('click', function() { decide('assistant_tool_approve'); });
+
+    // Keyboard: Escape denies; Enter/Space on a focused button activate it
+    // natively. Deny is the default focus so an accidental Enter denies.
+    box.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { e.preventDefault(); decide('assistant_tool_deny'); }
+    });
+
+    // Make Deny the easy/safe default by focusing it.
+    denyBtn.focus();
   });
 
   ipcBridge.on('assistant_output', function(payload) {

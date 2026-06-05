@@ -96,6 +96,42 @@ impl Default for ClaudeProviderConfig {
     }
 }
 
+/// Tool-permission mode for the assistant.
+///
+/// `ReadOnly` (the DEFAULT) exposes only the read-only filesystem tools
+/// (`read_file`, `search_files`, `search_content`, `list_directory`) — exactly
+/// the A1 behavior; the model cannot even request `write_file` / `run_command`.
+///
+/// `ReadWrite` additionally exposes the mutating/exec tools (`write_file`,
+/// `run_command`). This is OPT-IN, and even when enabled every mutating/exec
+/// call still blocks on explicit human approval (see
+/// [`AssistantConfig::require_approval`]) — there is no silent auto-approve in
+/// the default posture.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum AssistantToolsMode {
+    /// Read-only filesystem tools only (default; A1 behavior).
+    #[default]
+    ReadOnly,
+    /// Read-only tools plus write_file + run_command (approval-gated).
+    ReadWrite,
+}
+
+impl AssistantToolsMode {
+    /// Whether write/exec tools are enabled in this mode.
+    pub fn allows_write_exec(self) -> bool {
+        matches!(self, AssistantToolsMode::ReadWrite)
+    }
+}
+
+/// Default for [`AssistantConfig::require_approval`]: approval is ALWAYS
+/// required unless the user explicitly turns it off in config. This keeps the
+/// safe posture (no silent auto-approve) the default.
+fn default_require_approval() -> bool {
+    true
+}
+
 /// AI assistant configuration: provider selector plus per-provider overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -106,6 +142,24 @@ pub struct AssistantConfig {
     pub openai: OpenAiProviderConfig,
     pub minimax: MiniMaxProviderConfig,
     pub gemini: GeminiProviderConfig,
+    /// Tool-permission mode. DEFAULT is [`AssistantToolsMode::ReadOnly`] — the
+    /// A1 read-only behavior. Set to `read_write` to opt into approval-gated
+    /// write_file + run_command.
+    pub tools_mode: AssistantToolsMode,
+    /// Whether mutating/exec tool calls require explicit human approval.
+    /// DEFAULT is `true`. This should stay `true`; it exists as an escape hatch,
+    /// not a convenience. When `tools_mode` is `read_only` it is moot (no
+    /// mutating tools are exposed at all).
+    #[serde(default = "default_require_approval")]
+    pub require_approval: bool,
+}
+
+impl AssistantConfig {
+    /// Whether write/exec tools should be exposed to the model. True only when
+    /// the mode opts in. Approval is enforced separately.
+    pub fn allow_write_exec(&self) -> bool {
+        self.tools_mode.allows_write_exec()
+    }
 }
 
 impl Default for AssistantConfig {
@@ -116,6 +170,8 @@ impl Default for AssistantConfig {
             openai: OpenAiProviderConfig::default(),
             minimax: MiniMaxProviderConfig::default(),
             gemini: GeminiProviderConfig::default(),
+            tools_mode: AssistantToolsMode::default(),
+            require_approval: default_require_approval(),
         }
     }
 }
@@ -131,6 +187,62 @@ mod tests {
         assert!(c.openai.model.is_empty());
         assert!(c.openai.base_url.is_empty());
         assert!(c.minimax.model.is_empty());
+    }
+
+    #[test]
+    fn default_tools_mode_is_read_only() {
+        let c = AssistantConfig::default();
+        // Safety: the default posture must stay read-only with approval required.
+        assert_eq!(c.tools_mode, AssistantToolsMode::ReadOnly);
+        assert!(!c.allow_write_exec(), "default must NOT allow write/exec");
+        assert!(c.require_approval, "approval must default to required");
+    }
+
+    #[test]
+    fn tools_mode_serializes_snake_case() {
+        let c = AssistantConfig {
+            tools_mode: AssistantToolsMode::ReadWrite,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"read_write\""), "got: {json}");
+        assert!(c.allow_write_exec());
+    }
+
+    #[test]
+    fn tools_mode_and_approval_from_toml() {
+        let toml_str = r#"
+[assistant]
+provider = "claude"
+tools_mode = "read_write"
+require_approval = true
+"#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            assistant: AssistantConfig,
+        }
+        let w: Wrapper = toml::from_str(toml_str).unwrap();
+        assert_eq!(w.assistant.tools_mode, AssistantToolsMode::ReadWrite);
+        assert!(w.assistant.allow_write_exec());
+        assert!(w.assistant.require_approval);
+    }
+
+    #[test]
+    fn omitting_tools_fields_keeps_safe_defaults() {
+        // A config that sets only the provider must still be read-only +
+        // approval-required (fields default safely when absent).
+        let toml_str = r#"
+[assistant]
+provider = "openai"
+"#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            assistant: AssistantConfig,
+        }
+        let w: Wrapper = toml::from_str(toml_str).unwrap();
+        assert_eq!(w.assistant.tools_mode, AssistantToolsMode::ReadOnly);
+        assert!(!w.assistant.allow_write_exec());
+        assert!(w.assistant.require_approval);
     }
 
     #[test]

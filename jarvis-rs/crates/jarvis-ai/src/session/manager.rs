@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::token_tracker::TokenTracker;
 use crate::{Message, Role, ToolDefinition};
 
-use super::types::{ToolEventCallback, ToolExecutor};
+use super::types::{ApprovalGate, ToolEventCallback, ToolExecutor};
 
 /// A conversation session with message history and tool execution.
 pub struct Session {
@@ -20,6 +20,11 @@ pub struct Session {
     pub(super) tool_executor: Option<Arc<ToolExecutor>>,
     /// Optional callback surfacing tool activity to the app layer.
     pub(super) tool_event_callback: Option<Arc<ToolEventCallback>>,
+    /// Optional human-approval gate for mutating/exec tools. When unset, any
+    /// tool that [`tool_requires_approval`](super::types::tool_requires_approval)
+    /// reports `true` is FAILED CLOSED (denied) rather than silently run — so a
+    /// missing gate can never auto-approve a dangerous tool.
+    pub(super) approval_gate: Option<Arc<ApprovalGate>>,
     /// Token usage tracker.
     pub(super) tracker: TokenTracker,
     /// Maximum tool-call loop iterations to prevent infinite loops.
@@ -38,6 +43,7 @@ impl Session {
             tools: Vec::new(),
             tool_executor: None,
             tool_event_callback: None,
+            approval_gate: None,
             tracker: TokenTracker::new(),
             max_tool_rounds: 10,
             provider: provider.into(),
@@ -64,6 +70,21 @@ impl Session {
     /// app layer can render tool activity inline.
     pub fn with_tool_event_callback(mut self, callback: ToolEventCallback) -> Self {
         self.tool_event_callback = Some(Arc::new(callback));
+        self
+    }
+
+    /// Install the human-approval gate for mutating/exec tools.
+    ///
+    /// Every tool call whose name is in
+    /// [`APPROVAL_REQUIRED_TOOLS`](super::types::APPROVAL_REQUIRED_TOOLS) is
+    /// routed through this gate and blocks on the human's decision (under
+    /// [`APPROVAL_TIMEOUT`](super::types::APPROVAL_TIMEOUT)) BEFORE the executor
+    /// is invoked. On deny / timeout / dropped channel the call fails closed and
+    /// the model is told it was rejected — nothing executes.
+    ///
+    /// Read-only tools never pass through the gate.
+    pub fn with_approval_gate(mut self, gate: ApprovalGate) -> Self {
+        self.approval_gate = Some(Arc::new(gate));
         self
     }
 

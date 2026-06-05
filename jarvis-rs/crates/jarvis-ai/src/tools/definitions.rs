@@ -7,17 +7,21 @@ pub fn builtin_tools() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "run_command".to_string(),
-            description: "Execute a shell command and return its output.".to_string(),
+            description: "Run a single allowlisted program with literal arguments. \
+                          There is NO shell: pipes (|), redirects (>, <), command \
+                          chaining (; and &&), glob(*), and substitution ($(...), \
+                          backticks) are NOT interpreted — they are passed through as \
+                          literal characters. The program runs in the workspace root. \
+                          Returns combined stdout/stderr with the exit code."
+                .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The shell command to execute"
-                    },
-                    "working_directory": {
-                        "type": "string",
-                        "description": "Working directory for the command (optional)"
+                        "description": "A single program invocation with literal arguments \
+                                        (e.g. 'cargo build' or 'git status'). No shell \
+                                        operators are interpreted."
                     }
                 },
                 "required": ["command"]

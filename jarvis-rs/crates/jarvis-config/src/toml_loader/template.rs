@@ -114,6 +114,14 @@ name = "jarvis-dark"
 #   minimax -> MINIMAX_API_KEY
 #   gemini  -> GEMINI_API_KEY / GOOGLE_API_KEY)
 # provider = "claude"
+#
+# Tool permissions. DEFAULT is read-only: the assistant can only read/search/
+# list files inside the workspace. It CANNOT write files or run commands.
+#   tools_mode = "read_only"    # "read_only" (default) | "read_write"
+# Setting "read_write" opts into write_file + run_command. Even then, every
+# such call BLOCKS on explicit human approval in the panel before it runs;
+# on deny or timeout it fails closed (nothing executes).
+#   require_approval = true     # keep true — disables the approval prompt if false
 
 [assistant.claude]
 # model = ""             # empty = client default

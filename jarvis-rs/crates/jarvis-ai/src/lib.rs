@@ -23,9 +23,14 @@ pub use claude::{ClaudeClient, ClaudeConfig};
 pub use gemini::{GeminiClient, GeminiConfig};
 pub use openai::{OpenAiClient, OpenAiConfig};
 pub use router::{Provider, Skill, SkillRouter};
-pub use session::{Session, ToolEvent, ToolEventCallback, ToolExecutor, ToolOutcome};
+pub use session::{
+    ApprovalDecision, ApprovalGate, ApprovalReceiver, ApprovalRequest, Session, ToolEvent,
+    ToolEventCallback, ToolExecutor, ToolOutcome, APPROVAL_REQUIRED_TOOLS, APPROVAL_TIMEOUT,
+};
 pub use token_tracker::TokenTracker;
-pub use tools::{read_only_tools, ReadOnlyToolExecutor};
+pub use tools::{
+    builtin_tools, read_only_tools, ReadOnlyToolExecutor, WriteExecToolExecutor, WRITE_EXEC_TOOLS,
+};
 pub use whisper::{WhisperClient, WhisperConfig};
 
 #[async_trait]

@@ -114,8 +114,29 @@ impl JarvisApp {
         }
     }
 
+    /// Prune pending tool-approval senders whose async-side receiver has been
+    /// dropped — i.e. the gate already resolved on its own (the 120s timeout
+    /// fired, the Session ended, or the task died). For those entries the sender
+    /// can never deliver a decision to anyone, so holding them only leaks memory.
+    ///
+    /// SAFETY: `oneshot::Sender::is_closed()` is true ONLY when the receiver was
+    /// dropped, so this never discards a still-awaiting request — it cannot turn
+    /// a would-be approve into a deny. The async side already failed closed for
+    /// every pruned entry; this is pure cleanup, not a decision path.
+    fn prune_stale_approvals(&mut self) {
+        self.assistant_pending_approvals
+            .retain(|_id, responder| !responder.is_closed());
+    }
+
     /// Poll for assistant events from the async task (non-blocking).
     pub(super) fn poll_assistant(&mut self) {
+        // Opportunistically drop senders whose receivers timed out / went away so
+        // the pending-approvals map can't accumulate orphaned entries over a long
+        // session. Cheap: one pass over a normally-tiny map per poll tick.
+        if !self.assistant_pending_approvals.is_empty() {
+            self.prune_stale_approvals();
+        }
+
         if let Some(ref rx) = self.assistant_rx {
             while let Ok(event) = rx.try_recv() {
                 match event {
@@ -147,6 +168,7 @@ impl JarvisApp {
                         );
                     }
                     AssistantEvent::ToolResult {
+                        ref id,
                         ref name,
                         ref summary,
                         is_error,
@@ -154,9 +176,26 @@ impl JarvisApp {
                         self.send_assistant_ipc(
                             "tool_result",
                             &serde_json::json!({
+                                "id": id,
                                 "name": name,
                                 "summary": summary,
                                 "is_error": is_error,
+                            }),
+                        );
+                    }
+                    AssistantEvent::ToolApprovalRequest { request, responder } => {
+                        // Stash the responder so the panel's approve/deny IPC can
+                        // resolve it; forward the request to the panel for display.
+                        // If a stale entry exists for this id, dropping it fails
+                        // that prior gate closed (deny) — safe by construction.
+                        self.assistant_pending_approvals
+                            .insert(request.id.clone(), responder);
+                        self.send_assistant_ipc(
+                            "tool_approval_request",
+                            &serde_json::json!({
+                                "id": request.id,
+                                "tool": request.tool,
+                                "summary": request.summary,
                             }),
                         );
                     }
