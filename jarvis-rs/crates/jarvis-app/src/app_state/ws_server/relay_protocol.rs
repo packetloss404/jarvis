@@ -54,29 +54,13 @@ pub enum RelayResponse {
     #[serde(rename = "peer_disconnected")]
     PeerDisconnected,
 
-    /// Room transport: our `room_hello` was accepted; the room is live.
-    #[serde(rename = "room_ready")]
-    RoomReady { session_id: String, member_id: String },
-
-    /// Room transport: another member joined the room.
-    #[serde(rename = "member_joined")]
-    MemberJoined { member_id: String },
-
-    /// Room transport: a member left the room.
-    #[serde(rename = "member_left")]
-    MemberLeft { member_id: String },
-
-    /// Room transport: current member count fan-out.
-    #[serde(rename = "member_count")]
-    MemberCount { count: u32 },
-
     #[serde(rename = "error")]
     Error { message: String },
 }
 
 /// Envelope for messages forwarded through the relay.
-/// For now, messages are sent as plain JSON (no E2E encryption yet).
-/// Phase 3 will add key_exchange and encrypted variants.
+/// Carries either an `encrypted` (E2E ciphertext via [`RelayEnvelope::Encrypted`]),
+/// `key_exchange`, or `plaintext` (pre-encryption setup) variant.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum RelayEnvelope {

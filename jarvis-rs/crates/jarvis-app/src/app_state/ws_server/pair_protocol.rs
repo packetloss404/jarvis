@@ -230,8 +230,11 @@ pub(crate) const PAIR_SIG_DOMAIN: &str = "jarvis-pair-sig-v1";
 /// dropped. The `Join` frame additionally carries the pubkey at the application
 /// layer (see [`PairFrame::Join`]) so the host can pin it explicitly on join.
 ///
-/// HOST AUTHORITY: the host's `member_id`/`pubkey` is pinned first-host-wins
-/// from the first verified `SessionMeta`. Host-only frames
+/// HOST AUTHORITY: the host's `pubkey` is pinned from the invite (the navigator
+/// parses it out of the invite code and pins it before any frame is processed —
+/// see `pair_handlers::handle_pair_join`); the host's `member_id` is then learned
+/// from the first host-only frame that verifies against that pinned pubkey.
+/// Host-only frames
 /// (`pty_output`/`resize`/`driver_changed`/`snapshot`/`session_meta`,
 /// see [`PairFrame::is_host_only`]) are accepted ONLY when the verified signer
 /// equals the pinned host; `term_input` is accepted ONLY when the verified
@@ -367,26 +370,6 @@ pub enum FrameRejectReason {
     /// Frame from a member_id that has not announced an identity (no `Join`
     /// pin yet) while `require_signed_join` is set.
     UnknownMember,
-}
-
-/// A signing capability: produces a base64 ECDSA-P256 signature over a message.
-///
-/// Implemented over [`jarvis_platform::CryptoService`] on the MAIN thread (the
-/// only owner of the private identity key). The pair worker never holds the
-/// secret key; outbound frames are signed on the main thread before they are
-/// handed to the worker (or via a `Send`-able boxed signer if a later refactor
-/// moves signing into the worker). The trait keeps that seam swappable.
-pub trait PairSigner {
-    /// The signer's identity public key (SPKI DER, base64).
-    fn identity_pubkey(&self) -> String;
-    /// Sign `msg`, returning a base64 IEEE-P1363 signature.
-    fn sign_bytes(&self, msg: &[u8]) -> Result<String, String>;
-}
-
-/// A verification capability: checks a base64 ECDSA-P256 signature.
-pub trait PairVerifier {
-    /// Verify `sig_b64` over `msg` against the SPKI-base64 `pubkey_b64`.
-    fn verify_bytes(&self, msg: &[u8], sig_b64: &str, pubkey_b64: &str) -> bool;
 }
 
 /// A single participant entry carried in [`PairFrame::SessionMeta`].

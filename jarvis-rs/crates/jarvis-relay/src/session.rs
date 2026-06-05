@@ -63,6 +63,10 @@ pub enum Session {
     Room(RoomSession),
 }
 
+/// Maximum number of members allowed in a single Room session. Joins beyond
+/// this are rejected to bound per-room fan-out cost and memory.
+pub const MAX_ROOM_MEMBERS: usize = 32;
+
 pub struct BroadcastRegistration {
     pub host_connected: bool,
 }
@@ -188,7 +192,8 @@ impl SessionStore {
 
     /// Register a room member's sender. If a member with the same `member_id`
     /// already exists, its `tx` is replaced (reconnect); otherwise a new member
-    /// is appended. The session must already exist (see `ensure_session`).
+    /// is appended (rejected once the room is at [`MAX_ROOM_MEMBERS`]). The
+    /// session must already exist (see `ensure_session`).
     pub async fn register_room(
         &self,
         session_id: &str,
@@ -203,8 +208,13 @@ impl SessionStore {
         };
 
         if let Some(existing) = session.members.iter_mut().find(|m| m.member_id == member_id) {
+            // Same member_id reconnecting -> replace the channel (does not count
+            // against the cap since the member already occupies a slot).
             existing.tx = tx;
         } else {
+            if session.members.len() >= MAX_ROOM_MEMBERS {
+                return Err("room at capacity");
+            }
             session.members.push(RoomMember { member_id, tx });
         }
 
@@ -250,11 +260,31 @@ impl SessionStore {
         }
     }
 
-    /// Remove a member from a room. If the room is now empty, the session is
-    /// removed and `true` is returned.
-    pub async fn unregister_member(&self, session_id: &str, member_id: &str) -> bool {
+    /// Remove a member from a room, but ONLY if the stored channel still belongs
+    /// to `tx` (the caller's own connection). This guards against a stale
+    /// cleanup from a dropped connection evicting a freshly-reconnected member
+    /// that reused the same `member_id`: on reconnect `register_room` replaces
+    /// the stored `tx`, so the old connection's `tx` no longer matches and its
+    /// late cleanup becomes a no-op.
+    ///
+    /// If the room is now empty, the session is removed and `true` is returned.
+    pub async fn unregister_member(
+        &self,
+        session_id: &str,
+        member_id: &str,
+        tx: &mpsc::Sender<String>,
+    ) -> bool {
         let mut map = self.sessions.write().await;
         if let Some(Session::Room(session)) = map.get_mut(session_id) {
+            // Only evict the member if the stored channel is the SAME channel we
+            // registered (i.e. it was not replaced by a reconnect).
+            let owns_slot = session
+                .members
+                .iter()
+                .any(|m| m.member_id == member_id && m.tx.same_channel(tx));
+            if !owns_slot {
+                return false;
+            }
             session.members.retain(|m| m.member_id != member_id);
             if session.members.is_empty() {
                 map.remove(session_id);
@@ -459,17 +489,82 @@ mod room_tests {
 
         let (a_tx, _a_rx) = chan();
         let (b_tx, _b_rx) = chan();
-        store.register_room("s", "a".into(), a_tx).await.unwrap();
-        store.register_room("s", "b".into(), b_tx).await.unwrap();
+        store
+            .register_room("s", "a".into(), a_tx.clone())
+            .await
+            .unwrap();
+        store
+            .register_room("s", "b".into(), b_tx.clone())
+            .await
+            .unwrap();
 
         // Removing one member keeps the session alive.
-        assert!(!store.unregister_member("s", "a").await);
+        assert!(!store.unregister_member("s", "a", &a_tx).await);
         assert!(store.exists("s").await);
         assert_eq!(store.room_member_count("s").await, 1);
 
         // Removing the last member drops the session and returns true.
-        assert!(store.unregister_member("s", "b").await);
+        assert!(store.unregister_member("s", "b", &b_tx).await);
         assert!(!store.exists("s").await);
+    }
+
+    #[tokio::test]
+    async fn unregister_member_after_reconnect_is_noop() {
+        // A stale cleanup from the OLD connection must not evict a member that
+        // reconnected with the same member_id (its slot now holds a new tx).
+        let store = SessionStore::new();
+        store.ensure_session("s", SessionKind::Room).await.unwrap();
+
+        let (old_tx, _old_rx) = chan();
+        store
+            .register_room("s", "a".into(), old_tx.clone())
+            .await
+            .unwrap();
+
+        // Member "a" reconnects with a fresh channel (replaces the stored tx).
+        let (new_tx, _new_rx) = chan();
+        store
+            .register_room("s", "a".into(), new_tx.clone())
+            .await
+            .unwrap();
+        assert_eq!(store.room_member_count("s").await, 1);
+
+        // The OLD connection's late cleanup must NOT evict the reconnected member.
+        assert!(!store.unregister_member("s", "a", &old_tx).await);
+        assert_eq!(store.room_member_count("s").await, 1);
+        assert!(store.exists("s").await);
+
+        // The current (new) connection's cleanup DOES evict and drops the room.
+        assert!(store.unregister_member("s", "a", &new_tx).await);
+        assert!(!store.exists("s").await);
+    }
+
+    #[tokio::test]
+    async fn register_room_rejects_beyond_member_cap() {
+        let store = SessionStore::new();
+        store.ensure_session("s", SessionKind::Room).await.unwrap();
+
+        // Fill the room to the cap.
+        for i in 0..MAX_ROOM_MEMBERS {
+            let (tx, _rx) = chan();
+            store
+                .register_room("s", format!("m{i}"), tx)
+                .await
+                .unwrap();
+        }
+        assert_eq!(store.room_member_count("s").await, MAX_ROOM_MEMBERS);
+
+        // One more NEW member is rejected.
+        let (tx, _rx) = chan();
+        assert_eq!(
+            store.register_room("s", "overflow".into(), tx).await,
+            Err("room at capacity")
+        );
+
+        // But an existing member reconnecting is still allowed (replaces tx).
+        let (tx, _rx) = chan();
+        assert!(store.register_room("s", "m0".into(), tx).await.is_ok());
+        assert_eq!(store.room_member_count("s").await, MAX_ROOM_MEMBERS);
     }
 
     #[tokio::test]

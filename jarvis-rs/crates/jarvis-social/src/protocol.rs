@@ -102,7 +102,7 @@ pub struct ChatMessagePayload {
     pub reply_to: Option<String>,
 }
 
-/// Payload tracked in Supabase Presence for each user.
+/// Presence payload tracked in the relay Room for each user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresencePayload {
     pub user_id: String,

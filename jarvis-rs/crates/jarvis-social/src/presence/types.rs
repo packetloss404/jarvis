@@ -11,10 +11,9 @@ pub const DEFAULT_PRESENCE_ROOM_ID: &str = "jarvis-presence-global";
 
 /// Configuration for the presence client.
 ///
-/// Presence now rides the project's own relay Room transport (see
-/// [`crate::room`]); the former Supabase `project_ref` / `api_key` fields are
-/// gone. If [`relay_url`](Self::relay_url) is empty the presence client
-/// no-ops gracefully (as it did with no Supabase config).
+/// Presence rides the project's own relay Room transport (see [`crate::room`]).
+/// If [`relay_url`](Self::relay_url) is empty the presence client no-ops
+/// gracefully.
 #[derive(Debug, Clone)]
 pub struct PresenceConfig {
     /// WebSocket URL of the relay server. Empty disables presence.

@@ -21,38 +21,8 @@ use jarvis_social::{PairConfig, PairEvent, PairManager};
 
 use super::core::JarvisApp;
 use crate::app_state::ws_server::pair_protocol::{
-    FrameRejectReason, FrameVerifyResult, PairFrame, PairSigner, PairVerifier, SignedPairFrame,
-    MAX_TERM_INPUT_BYTES,
+    FrameRejectReason, FrameVerifyResult, PairFrame, SignedPairFrame, MAX_TERM_INPUT_BYTES,
 };
-
-/// Adapter implementing the [`PairSigner`]/[`PairVerifier`] seams over the
-/// per-app ECDSA identity in [`jarvis_platform::CryptoService`]. Wrapping the
-/// service (rather than calling it directly) keeps the signing capability
-/// swappable and is the type a future worker-side signer would hold.
-///
-/// NOTE: `CryptoService` is NOT `Send`/cloneable and lives on the main thread,
-/// so the adapter is used on the main thread today. If a later refactor moves
-/// signing into the worker, this becomes the boxed `dyn PairSigner` passed in.
-pub(in crate::app_state) struct CryptoServiceSigner<'a> {
-    pub crypto: &'a jarvis_platform::CryptoService,
-}
-
-impl PairSigner for CryptoServiceSigner<'_> {
-    fn identity_pubkey(&self) -> String {
-        self.crypto.pubkey_base64.clone()
-    }
-    fn sign_bytes(&self, msg: &[u8]) -> Result<String, String> {
-        self.crypto.sign(&base64_of(msg)).map_err(|e| e.to_string())
-    }
-}
-
-impl PairVerifier for CryptoServiceSigner<'_> {
-    fn verify_bytes(&self, msg: &[u8], sig_b64: &str, pubkey_b64: &str) -> bool {
-        self.crypto
-            .verify(&base64_of(msg), sig_b64, pubkey_b64)
-            .unwrap_or(false)
-    }
-}
 use crate::app_state::ws_server::pair_room_client::{
     run_pair_room_client, PairRoomClientConfig, PairRoomCommand, PairRoomEvent,
 };

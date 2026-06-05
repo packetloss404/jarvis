@@ -3,8 +3,8 @@
 //! Joins one global presence Room (`member_id` = the desktop's stable user id)
 //! and maps presence semantics onto opaque Room frames ([`PresenceFrame`]).
 //! The public surface (`start` / `update_activity` / `send_invite` /
-//! `send_poke` / `send_chat` / `online_users` / `disconnect`) is unchanged
-//! from the old Supabase-backed client, so the app layer needs no changes.
+//! `send_poke` / `send_chat` / `online_users` / `disconnect`) is stable, so the
+//! app layer needs no changes.
 
 use std::collections::HashMap;
 use std::sync::Arc;

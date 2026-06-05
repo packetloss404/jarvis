@@ -5,12 +5,10 @@
 //! - Tool calling (function use)
 //! - Session management with automatic tool-call loops
 //! - Token usage tracking
-//! - Skill-based routing between providers
 
 pub mod claude;
 pub mod gemini;
 pub mod openai;
-pub mod router;
 pub mod session;
 pub mod streaming;
 pub mod token_tracker;
@@ -22,7 +20,6 @@ use async_trait::async_trait;
 pub use claude::{ClaudeClient, ClaudeConfig};
 pub use gemini::{GeminiClient, GeminiConfig};
 pub use openai::{OpenAiClient, OpenAiConfig};
-pub use router::{Provider, Skill, SkillRouter};
 pub use session::{
     ApprovalDecision, ApprovalGate, ApprovalReceiver, ApprovalRequest, Session, ToolEvent,
     ToolEventCallback, ToolExecutor, ToolOutcome, APPROVAL_REQUIRED_TOOLS, APPROVAL_TIMEOUT,

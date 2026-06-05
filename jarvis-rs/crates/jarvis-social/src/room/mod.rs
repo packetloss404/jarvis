@@ -2,7 +2,7 @@
 //!
 //! A thin WebSocket client that speaks the relay's symmetric **Room** protocol
 //! (`room_hello` → `room_ready` + `member_joined`* + `member_count`, then opaque
-//! text fan-out). This replaces the old Supabase/Phoenix `realtime` transport.
+//! text fan-out).
 //!
 //! The client is intentionally generic: it knows nothing about presence
 //! semantics. It surfaces relay control frames (`member_joined`/`member_left`/

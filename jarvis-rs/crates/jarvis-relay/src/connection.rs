@@ -37,6 +37,21 @@ pub async fn handle_connection(
         return;
     }
 
+    // Validate the room member_id like the session_id: non-empty, bounded
+    // length, and a conservative charset. Only Room hellos carry one.
+    if let Some(mid) = member_id.as_deref() {
+        if !is_valid_member_id(mid, limiter.max_session_id_len()) {
+            let _ = send_response(
+                &mut sink,
+                &RelayResponse::Error {
+                    message: "invalid member ID".into(),
+                },
+            )
+            .await;
+            return;
+        }
+    }
+
     // Bridge sessions follow the existing desktop/mobile flow.
     match role.session_kind() {
         SessionKind::Bridge => match role {
@@ -130,6 +145,9 @@ pub async fn handle_connection(
 
     // 2. Create our receive channel and register.
     let (tx, mut rx) = mpsc::channel::<String>(256);
+    // Keep a clone of our own sender so room cleanup can prove the stored slot
+    // still belongs to THIS connection (see `unregister_member`).
+    let my_tx = tx.clone();
     let peer_tx = match role.session_kind() {
         SessionKind::Bridge => match store.register_bridge(&session_id, role, tx).await {
             Ok(peer) => peer,
@@ -201,7 +219,11 @@ pub async fn handle_connection(
     if send_response(&mut sink, &ready).await.is_err() {
         if role == Role::Member {
             store
-                .unregister_member(&session_id, member_id.as_deref().unwrap_or_default())
+                .unregister_member(
+                    &session_id,
+                    member_id.as_deref().unwrap_or_default(),
+                    &my_tx,
+                )
                 .await;
         } else {
             store.unregister(&session_id, role).await;
@@ -350,7 +372,7 @@ pub async fn handle_connection(
         }
         SessionKind::Room => {
             let me = member_id.as_deref().unwrap_or_default();
-            store.unregister_member(&session_id, me).await;
+            store.unregister_member(&session_id, me, &my_tx).await;
 
             // Fan out the departure + an updated count to whoever is left.
             let left = serde_json::to_string(&RelayResponse::MemberLeft {
@@ -367,6 +389,18 @@ pub async fn handle_connection(
             }
         }
     }
+}
+
+/// Validate a room `member_id`: non-empty, at most `max_len` bytes, and made up
+/// only of a conservative charset (alphanumeric plus `-`, `_`, `.`). This mirrors
+/// the bound applied to `session_id` and rejects control characters / oversized
+/// ids before they enter the room roster.
+fn is_valid_member_id(member_id: &str, max_len: usize) -> bool {
+    !member_id.is_empty()
+        && member_id.len() <= max_len
+        && member_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 fn is_relay_keepalive_ping(text: &str) -> bool {
@@ -454,5 +488,31 @@ async fn notify_viewer_count(store: &SessionStore, session_id: &str) {
 
     for peer in store.broadcast_targets(session_id).await {
         let _ = peer.send(json.clone()).await;
+    }
+}
+
+#[cfg(test)]
+mod member_id_tests {
+    use super::is_valid_member_id;
+
+    #[test]
+    fn accepts_reasonable_ids() {
+        assert!(is_valid_member_id("abc123", 64));
+        assert!(is_valid_member_id("host-1_a.b", 64));
+        assert!(is_valid_member_id("A", 64));
+    }
+
+    #[test]
+    fn rejects_empty_or_oversized() {
+        assert!(!is_valid_member_id("", 64));
+        assert!(!is_valid_member_id(&"a".repeat(65), 64));
+    }
+
+    #[test]
+    fn rejects_bad_charset() {
+        assert!(!is_valid_member_id("has space", 64));
+        assert!(!is_valid_member_id("new\nline", 64));
+        assert!(!is_valid_member_id("emoji😀", 64));
+        assert!(!is_valid_member_id("semi;colon", 64));
     }
 }

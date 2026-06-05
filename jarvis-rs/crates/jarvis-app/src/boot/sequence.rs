@@ -34,6 +34,10 @@ impl BootSequence {
     }
 
     /// Skip the splash screen immediately.
+    ///
+    /// Part of the boot API surface for when splash timing is wired into the
+    /// winit loop (see [`Self::update`]); only exercised by tests today.
+    #[allow(dead_code)]
     pub fn skip(&mut self) {
         if self.phase == BootPhase::Splash {
             self.skip_requested = true;
@@ -65,11 +69,13 @@ impl BootSequence {
     }
 
     /// Whether the boot sequence is complete.
+    #[allow(dead_code)]
     pub fn is_ready(&self) -> bool {
         self.phase == BootPhase::Ready
     }
 
     /// Progress through the splash screen (0.0 to 1.0).
+    #[allow(dead_code)]
     pub fn progress(&self) -> f64 {
         if self.phase != BootPhase::Splash || self.splash_duration <= 0.0 {
             return 1.0;
@@ -78,6 +84,7 @@ impl BootSequence {
     }
 
     /// Time elapsed since boot started.
+    #[allow(dead_code)]
     pub fn elapsed_secs(&self) -> f64 {
         self.start_time.elapsed().as_secs_f64()
     }

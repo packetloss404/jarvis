@@ -6,9 +6,6 @@ pub struct Identity {
     pub user_id: String,
     pub display_name: String,
     pub name_set: bool,
-    /// Optional Supabase Auth JWT for authenticated connections.
-    #[serde(skip)]
-    pub access_token: Option<String>,
 }
 
 impl std::fmt::Debug for Identity {
@@ -17,7 +14,6 @@ impl std::fmt::Debug for Identity {
             .field("user_id", &self.user_id)
             .field("display_name", &self.display_name)
             .field("name_set", &self.name_set)
-            .field("access_token", &"[REDACTED]")
             .finish()
     }
 }
@@ -28,17 +24,6 @@ impl Identity {
             user_id: Uuid::new_v4().to_string(),
             display_name: hostname.to_string(),
             name_set: false,
-            access_token: None,
-        }
-    }
-
-    /// Create an identity from a Supabase Auth session.
-    pub fn from_supabase_auth(user_id: String, display_name: String, access_token: String) -> Self {
-        Self {
-            user_id,
-            display_name,
-            name_set: true,
-            access_token: Some(access_token),
         }
     }
 

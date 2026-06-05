@@ -268,7 +268,19 @@ impl CryptoService {
             let mut f = opts.open(path).map_err(|e| pe(&e))?;
             f.write_all(json.as_bytes()).map_err(|e| pe(&e))?;
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            std::fs::write(path, &json).map_err(|e| pe(&e))?;
+            // Restrict the identity key file to the current user. Windows has no
+            // single-call mode-bit API like Unix, so use `icacls` to disable
+            // inheritance and grant ONLY the current user full control. This is
+            // best-effort: an ACL failure is logged but does not fail identity
+            // persistence (the key is still written), and it mirrors the intent
+            // of the Unix `0o600`.
+            restrict_windows_acl(path);
+        }
+
+        #[cfg(not(any(unix, windows)))]
         {
             std::fs::write(path, &json).map_err(|e| pe(&e))?;
         }
@@ -324,6 +336,52 @@ fn compute_fingerprint(pubkey_spki_b64: &str) -> Result<String, PlatformError> {
 /// Shorthand to convert any Display error into PlatformError::CryptoError.
 fn pe(e: &dyn std::fmt::Display) -> PlatformError {
     PlatformError::CryptoError(e.to_string())
+}
+
+/// Lock down a file's ACL on Windows so only the current user can read it.
+///
+/// There is no portable single-call equivalent of Unix `chmod 0o600` on Windows,
+/// and pulling in the `windows`/`windows-acl` crates would be heavy for one call,
+/// so this shells out to the built-in `icacls` to:
+///   1. `/inheritance:r` — strip inherited ACEs (e.g. Users group read),
+///   2. `/grant:r "%USERNAME%":F` — grant ONLY the current user full control.
+///
+/// Best-effort: any failure (icacls missing, non-NTFS volume, etc.) is logged at
+/// `warn` and does NOT fail identity persistence — the key file is still written.
+#[cfg(windows)]
+fn restrict_windows_acl(path: &Path) {
+    let Some(path_str) = path.to_str() else {
+        tracing::warn!("identity key path is not valid UTF-8; skipping ACL restriction");
+        return;
+    };
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    if user.is_empty() {
+        tracing::warn!("USERNAME unset; cannot restrict identity key ACL");
+        return;
+    }
+    let grant = format!("{user}:F");
+    match std::process::Command::new("icacls")
+        .args([path_str, "/inheritance:r", "/grant:r", &grant])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            tracing::debug!(path = %path_str, "Restricted identity key ACL to current user");
+        }
+        Ok(out) => {
+            tracing::warn!(
+                path = %path_str,
+                stderr = %String::from_utf8_lossy(&out.stderr),
+                "icacls failed to restrict identity key ACL (key still written)"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %path_str,
+                error = %e,
+                "could not run icacls to restrict identity key ACL (key still written)"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
