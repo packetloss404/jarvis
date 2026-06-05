@@ -530,13 +530,19 @@ mod tests {
     }
 
     #[test]
-    fn chat_html_has_supabase_sri() {
+    fn chat_html_has_no_supabase() {
         let cp = ContentProvider::new(assets_dir());
         let (_, data) = cp.resolve("panels/chat/index.html").unwrap();
         let html = String::from_utf8_lossy(&data);
+        // Chat was migrated off Supabase onto the relay Room — guard against the
+        // supabase-js CDN dependency (and its old SRI-pinned script) creeping back.
         assert!(
-            html.contains("integrity="),
-            "Supabase CDN script must have SRI integrity hash"
+            !html.contains("supabase-js") && !html.contains("createClient("),
+            "chat.html must not load supabase-js (migrated to the relay Room)"
+        );
+        assert!(
+            html.contains("RoomConnection") || html.contains("room_hello"),
+            "chat.html must use the relay Room transport"
         );
     }
 

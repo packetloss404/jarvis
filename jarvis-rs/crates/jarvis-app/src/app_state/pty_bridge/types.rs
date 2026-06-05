@@ -38,10 +38,27 @@ pub struct PtyHandle {
     pub(super) output_rx: mpsc::Receiver<Vec<u8>>,
     /// Child process handle (for wait / kill).
     pub(super) child: Box<dyn Child + Send + Sync>,
-    /// Master PTY handle (for resize).
-    pub(super) master: Box<dyn MasterPty + Send>,
+    /// Master PTY handle (for resize). `Option` so `Drop` can move it out.
+    pub(super) master: Option<Box<dyn MasterPty + Send>>,
     /// Current terminal size.
     pub(super) size: PtySize,
+}
+
+impl Drop for PtyHandle {
+    fn drop(&mut self) {
+        // Best-effort kill so the pty can wind down.
+        let _ = self.child.kill();
+        // On Windows, dropping the `MasterPty` closes the pseudoconsole
+        // (`ClosePseudoConsole`), which can BLOCK until pending output drains and
+        // the background reader thread unblocks from its `read()`. Doing that
+        // synchronously hangs the caller — the UI thread when a pane closes, or a
+        // unit test on teardown (the cause of the hanging `pty_write_and_read_echo`
+        // on Windows). Offload the close to a detached thread so PTY teardown is
+        // always non-blocking; the abandoned thread is reaped on process exit.
+        if let Some(master) = self.master.take() {
+            std::thread::spawn(move || drop(master));
+        }
+    }
 }
 
 // =============================================================================
