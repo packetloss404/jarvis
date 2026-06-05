@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide covers everything you need to install, build, and run Jarvis from source. Jarvis has two codebases: the newer **Rust application** (`jarvis-rs/`) which is cross-platform, and the **legacy Python/Swift application** (project root) which is macOS-only.
+This guide covers everything you need to install, build, and run Jarvis from source. The active codebase is the cross-platform **Rust application** (`jarvis-rs/`). The original macOS-only Python/Swift prototype has been removed from the working tree and is preserved at the **`legacy-archive`** git tag; see [The Archived Python/Swift Prototype](#the-archived-pythonswift-prototype) below.
 
 ---
 
@@ -8,7 +8,7 @@ This guide covers everything you need to install, build, and run Jarvis from sou
 
 - [Prerequisites](#prerequisites)
 - [Building the Rust Application](#building-the-rust-application)
-- [Building the Legacy Python/Swift Application](#building-the-legacy-pythonswift-application)
+- [The Archived Python/Swift Prototype](#the-archived-pythonswift-prototype)
 - [Required Assets and Directory Structure](#required-assets-and-directory-structure)
 - [Configuration File Locations](#configuration-file-locations)
 - [First Run Experience](#first-run-experience)
@@ -96,7 +96,9 @@ A GPU driver supporting Vulkan is required at runtime for wgpu.
 
 No additional library installation is needed on Windows.
 
-### Legacy Python/Swift Application (macOS only)
+### Archived Python/Swift Prototype (macOS only)
+
+These prerequisites apply only if you check out the `legacy-archive` tag to run the original prototype (see [The Archived Python/Swift Prototype](#the-archived-pythonswift-prototype)):
 
 - **macOS 13+** (Ventura or later)
 - **Python 3.10+**
@@ -163,63 +165,21 @@ The relay binary is output at `target/release/jarvis-relay`.
 
 ---
 
-## Building the Legacy Python/Swift Application
+## The Archived Python/Swift Prototype
 
-The legacy application uses a Python backend with a Swift/Metal frontend. It only runs on macOS.
+The original Jarvis prototype used a Python backend with a Swift/Metal frontend and ran only on macOS. It has been **removed from the working tree** and is preserved in history at the **`legacy-archive`** git tag. No part of it is needed to build or run the current Rust application.
 
-### Quick Start
-
-```bash
-cd jarvis
-./scripts/start.sh
-```
-
-The `scripts/start.sh` script:
-
-1. Creates a Python virtual environment (`.venv/`) if it does not exist
-2. Installs/updates Python dependencies from `legacy/requirements.txt`
-3. Builds the Metal app (`legacy/metal-app/.build/debug/JarvisBootup`) if needed
-4. Runs `python legacy/main.py`
-
-### Manual Setup
+To inspect or run the original prototype, check out the tag in a separate worktree:
 
 ```bash
-cd jarvis
+# Inspect it in place (detached HEAD)
+git checkout legacy-archive
 
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install Python dependencies
-pip install -r legacy/requirements.txt
-
-# Build the Swift Metal app
-cd legacy/metal-app
-swift build
-cd ../..
-
-# Run
-python legacy/main.py
+# ...or check it out into a separate worktree without disturbing your branch
+git worktree add ../jarvis-legacy legacy-archive
 ```
 
-### Python Dependencies
-
-The main `legacy/requirements.txt` includes:
-
-| Package | Purpose |
-|---------|---------|
-| `websockets` | WebSocket communication |
-| `sounddevice` | Audio capture (push-to-talk) |
-| `numpy` | Audio processing |
-| `google-genai` | Gemini voice routing and skills |
-| `httpx` | Async HTTP client |
-| `python-dotenv` | `.env` file loading |
-| `rich` | Terminal output formatting |
-| `aiohttp` | Async HTTP server |
-| `pywhispercpp` | Local Whisper transcription |
-| `pydantic` | Configuration validation |
-| `pyyaml` | YAML config parsing |
-| `cryptography` | Crypto operations |
+At that tag, the prototype lived under `legacy/` (Python entry point `legacy/main.py`, Swift frontend `legacy/metal-app/`, dependencies in `legacy/requirements.txt`) with helper scripts under `scripts/`. Refer to the tag's own README and scripts for its setup steps; those files are not part of the current tree and are not maintained.
 
 ---
 
@@ -379,23 +339,11 @@ Copy `.env.example` to `.env` and fill in what you need. All values are optional
 | `SHELL` | (Unix) Shell to spawn in terminal panels. | `/bin/sh` |
 | `COMSPEC` | (Windows) Command processor to spawn in terminal panels. | `cmd.exe` |
 
-### Claude OAuth Token Setup (Legacy Python App)
+### Claude OAuth Token Setup (Archived Prototype)
 
-The legacy Python app uses the Claude Agent SDK and authenticates via an OAuth token. Run the login script to set this up:
+> The login helper scripts described here belonged to the archived Python prototype and are no longer in the working tree; they are preserved at the `legacy-archive` git tag. The current Rust app reads `CLAUDE_CODE_OAUTH_TOKEN` from the environment / `.env` if set, but most setups rely on Claude CLI auth (`claude auth login`) instead.
 
-```bash
-./scripts/login.sh
-```
-
-This script:
-
-1. Runs `claude auth login` to open the browser-based OAuth flow
-2. Extracts the access token from the macOS Keychain (`Claude Code-credentials`)
-3. Writes the token to `.env` as `CLAUDE_CODE_OAUTH_TOKEN`
-
-The token expires periodically; re-run `./scripts/login.sh` when authentication fails.
-
-On Windows, use `./scripts/login.ps1` instead (credentials are read from `%USERPROFILE%\.claude\.credentials.json`).
+At the `legacy-archive` tag, the Python app used the Claude Agent SDK and authenticated via an OAuth token, set up by running `./scripts/login.sh` (or `./scripts/login.ps1` on Windows). That script ran `claude auth login`, extracted the access token from the OS credential store, and wrote it to `.env` as `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ---
 
@@ -428,7 +376,7 @@ jarvis --config /path/to/custom-config.toml
 jarvis --log-level debug
 
 # Execute a specific command instead of the default shell
-jarvis -e "python3 legacy/main.py"
+jarvis -e "htop"
 ```
 
 ---

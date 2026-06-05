@@ -2,7 +2,7 @@
 
 All notable changes to this repository are described here. Entries are grouped by time and theme, distilled from the full git history (161 commits from initial import through 2026-03-25). Section text was assembled from parallel summaries of commit ranges; merge commits and noisy “update” commits are folded into the themes below.
 
-The **actively developed** application is the Rust workspace under `jarvis-rs/`. Older Python + Swift/Metal code now lives under `legacy/` (see `README.md` and `ARCHITECTURE.md`); history below includes work on both stacks where commits touched them.
+The **actively developed** application is the Rust workspace under `jarvis-rs/`. Older Python + Swift/Metal code is archived at the `legacy-archive` git tag (removed from the working tree; see `README.md` and `ARCHITECTURE.md`); history below includes work on both stacks where commits touched them.
 
 Between 24 February and 1 March 2026, a large share of the work summarized in the dated sections below reached the default branch through GitHub pull request merges, as a short consecutive run of numbered PRs through roughly the eleventh. Those entries condense feature and fix themes from that integration window; merge commits and individual commits both appear in `git log` for detail.
 
