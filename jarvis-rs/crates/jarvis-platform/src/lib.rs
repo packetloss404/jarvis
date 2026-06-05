@@ -10,7 +10,7 @@ pub mod paths;
 pub mod winit_keys;
 
 pub use clipboard::Clipboard;
-pub use crypto::CryptoService;
+pub use crypto::{CryptoService, PairFrameSigner};
 pub use input::{KeyCombo, KeybindRegistry};
 pub use input_processor::{InputMode, InputProcessor, InputResult};
 pub use keymap::{KeyBind, Modifier};

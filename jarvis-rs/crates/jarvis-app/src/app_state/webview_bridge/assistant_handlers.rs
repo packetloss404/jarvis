@@ -4,6 +4,7 @@
 //! `open_panel` (request to open a new panel type).
 
 use jarvis_common::types::PaneKind;
+use jarvis_config::schema::AiProvider;
 use jarvis_tiling::tree::Direction;
 use jarvis_webview::IpcPayload;
 
@@ -18,19 +19,6 @@ const MAX_INPUT_LEN: usize = 4096;
 
 /// Allowed panel names for the `open_panel` IPC command.
 const ALLOWED_PANELS: &[&str] = &["terminal", "assistant", "chat", "settings", "presence"];
-
-/// Allowed game names for the `launch_game` IPC command.
-const ALLOWED_GAMES: &[&str] = &[
-    "tetris",
-    "asteroids",
-    "minesweeper",
-    "pinball",
-    "doodlejump",
-    "draw",
-    "subway",
-    "videoplayer",
-    "emulator",
-];
 
 // =============================================================================
 // IPC HANDLERS
@@ -78,68 +66,103 @@ impl JarvisApp {
         }
     }
 
+    /// Handle `set_ai_provider` — the user picked a provider in the panel header.
+    ///
+    /// Validates the provider name against the allowlist, then switches the
+    /// active provider (persisted to config + rebuilt client for next turns).
+    /// Unknown names are rejected. API keys are never involved here — they come
+    /// from environment variables inside the client factory.
+    pub(in crate::app_state) fn handle_set_ai_provider(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+    ) {
+        let name = match payload {
+            IpcPayload::Json(obj) => obj.get("provider").and_then(|v| v.as_str()),
+            _ => None,
+        };
+
+        let provider = match name.and_then(parse_ai_provider) {
+            Some(p) => p,
+            None => {
+                tracing::warn!(
+                    pane_id,
+                    provider = ?name,
+                    "set_ai_provider: unknown or missing provider"
+                );
+                return;
+            }
+        };
+
+        tracing::info!(pane_id, provider = ?provider, "Switching AI provider");
+        self.set_ai_provider(provider);
+    }
+
+    /// Handle `assistant_tool_approve` — the human approved a pending mutating/
+    /// exec tool call in the panel.
+    ///
+    /// Looks up the pending approval by `id` and resolves its oneshot with
+    /// `Approve`, unblocking the async tool loop so the tool may execute. An
+    /// unknown / already-resolved id is ignored (the gate may have timed out and
+    /// failed closed already).
+    pub(in crate::app_state) fn handle_assistant_tool_approve(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+    ) {
+        self.resolve_tool_approval(pane_id, payload, jarvis_ai::ApprovalDecision::Approve);
+    }
+
+    /// Handle `assistant_tool_deny` — the human denied a pending mutating/exec
+    /// tool call. Resolves the matching oneshot with `Deny` (fail closed).
+    pub(in crate::app_state) fn handle_assistant_tool_deny(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+    ) {
+        self.resolve_tool_approval(pane_id, payload, jarvis_ai::ApprovalDecision::Deny);
+    }
+
+    /// Shared resolution path for approve/deny: extract the request `id`, pop the
+    /// pending responder, and send the decision. Dropping the responder (no
+    /// entry) is harmless — the gate already failed closed on its own timeout.
+    fn resolve_tool_approval(
+        &mut self,
+        pane_id: u32,
+        payload: &IpcPayload,
+        decision: jarvis_ai::ApprovalDecision,
+    ) {
+        let id = match payload {
+            IpcPayload::Json(obj) => obj.get("id").and_then(|v| v.as_str()),
+            _ => None,
+        };
+        let id = match id {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => {
+                tracing::warn!(pane_id, "tool approval response missing 'id'");
+                return;
+            }
+        };
+        match self.assistant_pending_approvals.remove(&id) {
+            Some(responder) => {
+                // If the receiver was already dropped (async side timed out),
+                // this send returns Err and the decision is simply discarded —
+                // the gate has already failed closed. Safe either way.
+                let _ = responder.send(decision);
+                tracing::info!(pane_id, %id, ?decision, "Tool approval resolved");
+            }
+            None => {
+                tracing::debug!(pane_id, %id, "No pending approval for id (timed out or unknown)");
+            }
+        }
+    }
+
     /// Handle `assistant_ready` — the assistant webview has loaded and registered IPC handlers.
     ///
     /// Starts the async Claude AI runtime so it can send back config and accept messages.
     pub(in crate::app_state) fn handle_assistant_ready(&mut self, pane_id: u32) {
         tracing::debug!(pane_id, "Assistant panel ready");
         self.ensure_assistant_runtime();
-    }
-
-    /// Handle `launch_game` — launch a fullscreen game in the requesting panel.
-    ///
-    /// The payload must contain `{ "game": "tetris" | "asteroids" | ... }`.
-    pub(in crate::app_state) fn handle_launch_game(&mut self, pane_id: u32, payload: &IpcPayload) {
-        let game_name = match payload {
-            IpcPayload::Json(obj) => obj.get("game").and_then(|v| v.as_str()),
-            _ => None,
-        };
-
-        let game_name = match game_name {
-            Some(name) if ALLOWED_GAMES.contains(&name) => name,
-            Some(name) => {
-                tracing::warn!(pane_id, game = %name, "launch_game: unknown game name");
-                return;
-            }
-            None => {
-                tracing::warn!(pane_id, "launch_game: missing game name");
-                return;
-            }
-        };
-
-        let url = format!("jarvis://localhost/games/{}.html", game_name);
-
-        // Emulator needs an opaque webview — WebGL canvases are invisible in
-        // transparent WKWebViews because the alpha channel makes them see-through.
-        if game_name == "emulator" {
-            let original_url = self
-                .webviews
-                .as_ref()
-                .and_then(|r| r.get(pane_id))
-                .map(|h| h.current_url().to_string())
-                .unwrap_or_default();
-
-            // Destroy the existing transparent webview and recreate as opaque.
-            if let Some(ref mut registry) = self.webviews {
-                registry.destroy(pane_id);
-            }
-            self.create_webview_for_pane_opaque(pane_id, &url);
-            self.game_active.insert(pane_id, original_url);
-            tracing::info!(pane_id, game = %game_name, "Emulator launched (opaque WebView)");
-            return;
-        }
-
-        if let Some(ref mut registry) = self.webviews {
-            if let Some(handle) = registry.get_mut(pane_id) {
-                let original_url = handle.current_url().to_string();
-                if let Err(e) = handle.load_url(&url) {
-                    tracing::warn!(pane_id, error = %e, "Failed to launch game");
-                } else {
-                    tracing::info!(pane_id, game = %game_name, "Game launched");
-                    self.game_active.insert(pane_id, original_url);
-                }
-            }
-        }
     }
 
     /// Handle `open_panel` — open a new tiling pane with the requested panel.
@@ -188,6 +211,20 @@ impl JarvisApp {
 /// Check whether a panel name is in the allowlist.
 fn is_panel_allowed(name: &str) -> bool {
     ALLOWED_PANELS.contains(&name)
+}
+
+/// Parse an AI provider name from the UI switcher into an `AiProvider`.
+///
+/// Only the known providers are accepted; anything else returns `None` and the
+/// switch is rejected.
+fn parse_ai_provider(name: &str) -> Option<AiProvider> {
+    match name {
+        "claude" => Some(AiProvider::Claude),
+        "openai" => Some(AiProvider::OpenAi),
+        "minimax" => Some(AiProvider::MiniMax),
+        "gemini" => Some(AiProvider::Gemini),
+        _ => None,
+    }
 }
 
 /// Map a panel name string to `PaneKind`.
@@ -242,6 +279,22 @@ mod tests {
         assert!(is_panel_allowed("chat"));
         assert!(is_panel_allowed("settings"));
         assert!(is_panel_allowed("presence"));
+    }
+
+    #[test]
+    fn ai_provider_parsing_valid() {
+        assert_eq!(parse_ai_provider("claude"), Some(AiProvider::Claude));
+        assert_eq!(parse_ai_provider("openai"), Some(AiProvider::OpenAi));
+        assert_eq!(parse_ai_provider("minimax"), Some(AiProvider::MiniMax));
+        assert_eq!(parse_ai_provider("gemini"), Some(AiProvider::Gemini));
+    }
+
+    #[test]
+    fn ai_provider_parsing_rejects_unknown() {
+        assert_eq!(parse_ai_provider(""), None);
+        assert_eq!(parse_ai_provider("Claude"), None); // case-sensitive
+        assert_eq!(parse_ai_provider("Gemini"), None); // case-sensitive
+        assert_eq!(parse_ai_provider("openai; rm -rf /"), None);
     }
 
     #[test]

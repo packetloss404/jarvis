@@ -28,6 +28,7 @@ impl Action {
             Action::OpenURLPrompt => "Open URL",
             Action::OpenAssistant => "Open Assistant",
             Action::OpenChat => "Open Chat",
+            Action::OpenPair => "Open Pair Programming",
             Action::PushToTalk => "Push to Talk",
             Action::ReleasePushToTalk => "Release Push to Talk",
             Action::ScrollUp(_) => "Scroll Up",
@@ -42,47 +43,8 @@ impl Action {
             Action::SearchNext => "Find Next",
             Action::SearchPrev => "Find Previous",
             Action::ClearTerminal => "Clear Terminal",
-            Action::LaunchGame(ref name) => match name.as_str() {
-                "tetris" => "Play Tetris",
-                "asteroids" => "Play Asteroids",
-                "minesweeper" => "Play Minesweeper",
-                "pinball" => "Play Pinball",
-                "doodlejump" => "Play Doodle Jump",
-                "draw" => "Open Draw",
-                "subway" => "Play Subway Surfers",
-                "videoplayer" => "Open Video Player",
-                "emulator" => "Launch Emulator",
-                _ => "Launch Game",
-            },
-            Action::OpenURL(ref url) => {
-                if url.contains("kartbros") {
-                    "Play KartBros"
-                } else if url.contains("basketbros") {
-                    "Play Basket Bros"
-                } else if url.contains("footballbros") {
-                    "Play Football Bros"
-                } else if url.contains("soccerbros") {
-                    "Play Soccer Bros"
-                } else if url.contains("wrestlebros") {
-                    "Play Wrestle Bros"
-                } else if url.contains("baseballbros") {
-                    "Play Baseball Bros"
-                } else if url.contains("lichess") {
-                    "Play Lichess"
-                } else if url.contains("monkeytype") {
-                    "Open Monkeytype"
-                } else if url.contains("excalidraw") {
-                    "Open Excalidraw"
-                } else if url.contains("desmos") {
-                    "Open Desmos"
-                } else if url.contains("news.ycombinator") {
-                    "Open Hacker News"
-                } else if url.contains("spotify") {
-                    "Open Spotify"
-                } else {
-                    "Open Website"
-                }
-            }
+            // Bookmarks carry their own label via config; this is the generic fallback.
+            Action::OpenURL(_) => "Open Website",
             Action::PairMobile => "Pair Mobile Device",
             Action::RevokeMobilePairing => "Revoke Mobile Pairing",
             Action::ReloadConfig => "Reload Config",
@@ -109,6 +71,7 @@ impl Action {
             Action::OpenSettings
             | Action::OpenAssistant
             | Action::OpenChat
+            | Action::OpenPair
             | Action::OpenURLPrompt
             | Action::OpenCommandPalette
             | Action::CloseOverlay => "Apps",
@@ -126,22 +89,8 @@ impl Action {
             | Action::ScrollToBottom
             | Action::ClearTerminal => "Terminal",
 
-            Action::LaunchGame(_) => "Games",
-
-            Action::OpenURL(ref url) => {
-                if url.contains("kartbros")
-                    || url.contains("basketbros")
-                    || url.contains("footballbros")
-                    || url.contains("soccerbros")
-                    || url.contains("wrestlebros")
-                    || url.contains("baseballbros")
-                    || url.contains("lichess")
-                {
-                    "Games"
-                } else {
-                    "Web"
-                }
-            }
+            // Bookmarks carry their own category via config; this is the fallback.
+            Action::OpenURL(_) => "Web",
 
             Action::PairMobile | Action::RevokeMobilePairing | Action::ReloadConfig => "System",
 
@@ -160,6 +109,7 @@ impl Action {
             Action::ToggleBlankPane,
             Action::OpenSettings,
             Action::OpenChat,
+            Action::OpenPair,
             Action::OpenURLPrompt,
             Action::Copy,
             Action::Paste,
@@ -167,26 +117,6 @@ impl Action {
             Action::ScrollToTop,
             Action::ScrollToBottom,
             Action::ClearTerminal,
-            Action::LaunchGame("tetris".into()),
-            Action::LaunchGame("asteroids".into()),
-            Action::LaunchGame("minesweeper".into()),
-            Action::LaunchGame("pinball".into()),
-            Action::LaunchGame("doodlejump".into()),
-            Action::LaunchGame("draw".into()),
-            Action::LaunchGame("subway".into()),
-            Action::LaunchGame("emulator".into()),
-            Action::OpenURL("https://kartbros.io".into()),
-            Action::OpenURL("https://basketbros.io".into()),
-            Action::OpenURL("https://footballbros.io".into()),
-            Action::OpenURL("https://soccerbros.gg".into()),
-            Action::OpenURL("https://wrestlebros.io".into()),
-            Action::OpenURL("https://baseballbros.io".into()),
-            Action::OpenURL("https://lichess.org".into()),
-            Action::OpenURL("https://monkeytype.com".into()),
-            Action::OpenURL("https://excalidraw.com".into()),
-            Action::OpenURL("https://www.desmos.com/calculator".into()),
-            Action::OpenURL("https://news.ycombinator.com".into()),
-            Action::OpenURL("https://open.spotify.com".into()),
             Action::PairMobile,
             Action::RevokeMobilePairing,
             Action::ReloadConfig,

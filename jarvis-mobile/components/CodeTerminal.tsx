@@ -118,7 +118,7 @@ export default function CodeTerminal() {
         <View style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
           <Text style={{ fontFamily: paneMono, fontSize: scaledFont(9), color: theme.colors.tabInactive }}>
             Connecting to relay… If this hangs, check the relay URL, desktop Jarvis, and network. Chat issues are
-            separate (Supabase) — see [help].
+            separate (chat Room) — see [help].
           </Text>
         </View>
       ) : null}

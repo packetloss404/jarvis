@@ -3,11 +3,12 @@
 //! All structs use `serde(default)` so partial configs work correctly.
 //! Missing fields are filled with sensible defaults matching the Python schema.
 
+mod assistant;
 mod auto_open;
 mod background;
+mod collab;
 mod effects;
 mod font;
-mod games;
 mod keybind_config;
 mod layout;
 mod livechat;
@@ -26,11 +27,12 @@ mod visualizer;
 mod voice;
 mod window;
 
+pub use assistant::*;
 pub use auto_open::*;
 pub use background::*;
+pub use collab::*;
 pub use effects::*;
 pub use font::*;
-pub use games::*;
 pub use keybind_config::*;
 pub use layout::*;
 pub use livechat::*;
@@ -75,9 +77,9 @@ pub struct JarvisConfig {
     pub visualizer: VisualizerConfig,
     pub startup: StartupConfig,
     pub voice: VoiceConfig,
+    pub assistant: AssistantConfig,
     pub keybinds: KeybindConfig,
     pub panels: PanelsConfig,
-    pub games: GamesConfig,
     pub livechat: LivechatConfig,
     pub presence: PresenceConfig,
     pub performance: PerformanceConfig,
@@ -88,6 +90,7 @@ pub struct JarvisConfig {
     pub status_bar: StatusBarConfig,
     pub relay: RelayConfig,
     pub plugins: PluginsConfig,
+    pub collab: CollabConfig,
 }
 
 // =============================================================================
@@ -222,6 +225,38 @@ mod tests {
     }
 
     #[test]
+    fn default_config_has_correct_assistant() {
+        let config = JarvisConfig::default();
+        // Provider defaults to Claude; per-provider overrides are empty so the
+        // client defaults (and env-only API keys) apply.
+        assert_eq!(config.assistant.provider, AiProvider::Claude);
+        assert!(config.assistant.openai.model.is_empty());
+        assert!(config.assistant.openai.base_url.is_empty());
+        assert!(config.assistant.minimax.model.is_empty());
+        assert!(config.assistant.minimax.base_url.is_empty());
+        assert!(config.assistant.claude.model.is_empty());
+        assert!(config.assistant.gemini.model.is_empty());
+        assert!(config.assistant.gemini.base_url.is_empty());
+    }
+
+    #[test]
+    fn assistant_provider_in_toml() {
+        let toml_str = r#"
+[assistant]
+provider = "openai"
+
+[assistant.openai]
+model = "gpt-4o-mini"
+"#;
+        let config: JarvisConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.assistant.provider, AiProvider::OpenAi);
+        assert_eq!(config.assistant.openai.model, "gpt-4o-mini");
+        // Sibling defaults preserved.
+        assert!(config.assistant.minimax.model.is_empty());
+        assert_eq!(config.theme.name, "jarvis-dark");
+    }
+
+    #[test]
     fn default_config_has_correct_keybinds() {
         let config = JarvisConfig::default();
         assert_eq!(config.keybinds.push_to_talk, "Option+Period");
@@ -244,15 +279,6 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_correct_games() {
-        let config = JarvisConfig::default();
-        assert!(config.games.enabled.wordle);
-        assert!(config.games.enabled.tetris);
-        assert!(config.games.fullscreen.escape_to_exit);
-        assert!(config.games.custom_paths.is_empty());
-    }
-
-    #[test]
     fn default_config_has_correct_livechat() {
         let config = JarvisConfig::default();
         assert!(config.livechat.enabled);
@@ -266,8 +292,16 @@ mod tests {
     fn default_config_has_correct_presence() {
         let config = JarvisConfig::default();
         assert!(config.presence.enabled);
-        assert!(config.presence.server_url.is_empty());
-        assert_eq!(config.presence.heartbeat_interval, 30);
+        assert_eq!(config.presence.room_id, "jarvis-presence-global");
+    }
+
+    #[test]
+    fn default_config_has_correct_collab() {
+        let config = JarvisConfig::default();
+        assert!(!config.collab.enabled);
+        assert_eq!(config.collab.max_participants, 4);
+        assert!(config.collab.allow_takeover);
+        assert!(config.collab.require_signed_join);
     }
 
     #[test]
@@ -441,20 +475,18 @@ solid_color = "#1a1a1a"
     }
 
     #[test]
-    fn custom_games_in_toml() {
-        let toml_str = r#"
-[games.enabled]
-wordle = false
-
-[[games.custom_paths]]
-name = "my-game"
-path = "/path/to/game"
-"#;
-        let config: JarvisConfig = toml::from_str(toml_str).unwrap();
-        assert!(!config.games.enabled.wordle);
-        assert!(config.games.enabled.tetris); // default preserved
-        assert_eq!(config.games.custom_paths.len(), 1);
-        assert_eq!(config.games.custom_paths[0].name, "my-game");
+    fn default_config_seeds_bookmarks() {
+        let config = JarvisConfig::default();
+        assert_eq!(config.plugins.bookmarks.len(), 6);
+        let lichess = config
+            .plugins
+            .bookmarks
+            .iter()
+            .find(|b| b.name == "Lichess")
+            .expect("Lichess bookmark seeded");
+        assert_eq!(lichess.url, "https://lichess.org");
+        assert_eq!(lichess.category, "Games");
+        assert!(config.plugins.local.is_empty());
     }
 
     // =========================================================================

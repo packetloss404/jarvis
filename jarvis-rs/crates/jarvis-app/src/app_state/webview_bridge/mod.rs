@@ -12,6 +12,7 @@ mod file_handlers;
 mod ipc_dispatch;
 mod music_handlers;
 mod lifecycle;
+mod pair_handlers;
 mod presence_handlers;
 mod pty_handlers;
 mod pty_polling;

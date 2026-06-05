@@ -154,9 +154,9 @@ impl ContentProvider {
 
     /// Discover plugins embedded at compile time in `assets/panels/plugins/`.
     ///
-    /// Returns `(id, name, category, entry)` for each embedded plugin that has
-    /// a valid `plugin.toml` manifest.
-    pub fn discover_embedded_plugins() -> Vec<(String, String, String, String)> {
+    /// Returns an [`EmbeddedPlugin`] for each embedded plugin that has a valid
+    /// `plugin.toml` manifest.
+    pub fn discover_embedded_plugins() -> Vec<EmbeddedPlugin> {
         let mut plugins = Vec::new();
 
         let plugins_dir = match EMBEDDED_PANELS.get_dir("plugins") {
@@ -186,6 +186,7 @@ impl ContentProvider {
                 name: String,
                 category: String,
                 entry: String,
+                opaque: bool,
             }
 
             impl Default for Manifest {
@@ -194,6 +195,7 @@ impl ContentProvider {
                         name: String::new(),
                         category: "Plugins".into(),
                         entry: "index.html".into(),
+                        opaque: false,
                     }
                 }
             }
@@ -204,12 +206,34 @@ impl ContentProvider {
                 } else {
                     m.name
                 };
-                plugins.push((id, name, m.category, m.entry));
+                plugins.push(EmbeddedPlugin {
+                    id,
+                    name,
+                    category: m.category,
+                    entry: m.entry,
+                    opaque: m.opaque,
+                });
             }
         }
 
         plugins
     }
+}
+
+/// A first-party plugin embedded at compile time, parsed from its
+/// `plugin.toml` manifest.
+#[derive(Debug, Clone)]
+pub struct EmbeddedPlugin {
+    /// Folder name (used as the plugin ID in URLs).
+    pub id: String,
+    /// Display name in the palette.
+    pub name: String,
+    /// Palette category grouping.
+    pub category: String,
+    /// Entry HTML file (e.g. "index.html").
+    pub entry: String,
+    /// Whether the webview must be opaque (e.g. WebGL games).
+    pub opaque: bool,
 }
 
 /// Guess MIME type from file extension.
@@ -327,15 +351,14 @@ mod tests {
     fn resolve_all_game_panels() {
         let cp = ContentProvider::new(assets_dir());
         let games = [
-            "panels/games/asteroids.html",
-            "panels/games/tetris.html",
-            "panels/games/minesweeper.html",
-            "panels/games/pinball.html",
-            "panels/games/doodlejump.html",
-            "panels/games/subway.html",
-            "panels/games/draw.html",
-            "panels/games/videoplayer.html",
-            "panels/games/emulator.html",
+            "panels/plugins/asteroids/index.html",
+            "panels/plugins/tetris/index.html",
+            "panels/plugins/minesweeper/index.html",
+            "panels/plugins/pinball/index.html",
+            "panels/plugins/doodlejump/index.html",
+            "panels/plugins/subway/index.html",
+            "panels/plugins/draw/index.html",
+            "panels/plugins/emulator/index.html",
         ];
         for game in &games {
             let result = cp.resolve(game);
@@ -346,15 +369,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_pinball_assets() {
-        let cp = ContentProvider::new(assets_dir());
-        let css = cp.resolve("panels/games/pinball.css");
-        assert!(css.is_some(), "pinball.css should resolve");
-        assert_eq!(css.unwrap().0.as_ref(), "text/css");
-
-        let js = cp.resolve("panels/games/pinball.js");
-        assert!(js.is_some(), "pinball.js should resolve");
-        assert_eq!(js.unwrap().0.as_ref(), "application/javascript");
+    fn discover_embedded_games_have_manifests() {
+        let plugins = ContentProvider::discover_embedded_plugins();
+        // The emulator plugin must be discovered and flagged opaque (WebGL).
+        let emulator = plugins
+            .iter()
+            .find(|p| p.id == "emulator")
+            .expect("emulator plugin should be discovered");
+        assert_eq!(emulator.category, "Games");
+        assert!(emulator.opaque, "emulator must be opaque for WebGL");
+        // A non-opaque game plugin should also be present.
+        let tetris = plugins
+            .iter()
+            .find(|p| p.id == "tetris")
+            .expect("tetris plugin should be discovered");
+        assert!(!tetris.opaque);
     }
 
     // -----------------------------------------------------------------
@@ -501,13 +530,19 @@ mod tests {
     }
 
     #[test]
-    fn chat_html_has_supabase_sri() {
+    fn chat_html_has_no_supabase() {
         let cp = ContentProvider::new(assets_dir());
         let (_, data) = cp.resolve("panels/chat/index.html").unwrap();
         let html = String::from_utf8_lossy(&data);
+        // Chat was migrated off Supabase onto the relay Room — guard against the
+        // supabase-js CDN dependency (and its old SRI-pinned script) creeping back.
         assert!(
-            html.contains("integrity="),
-            "Supabase CDN script must have SRI integrity hash"
+            !html.contains("supabase-js") && !html.contains("createClient("),
+            "chat.html must not load supabase-js (migrated to the relay Room)"
+        );
+        assert!(
+            html.contains("RoomConnection") || html.contains("room_hello"),
+            "chat.html must use the relay Room transport"
         );
     }
 
@@ -624,17 +659,14 @@ mod tests {
         let all_files = [
             "panels/assistant/index.html",
             "panels/chat/index.html",
-            "panels/games/asteroids.html",
-            "panels/games/tetris.html",
-            "panels/games/minesweeper.html",
-            "panels/games/pinball.html",
-            "panels/games/pinball.css",
-            "panels/games/pinball.js",
-            "panels/games/doodlejump.html",
-            "panels/games/subway.html",
-            "panels/games/draw.html",
-            "panels/games/videoplayer.html",
-            "panels/games/emulator.html",
+            "panels/plugins/asteroids/index.html",
+            "panels/plugins/tetris/index.html",
+            "panels/plugins/minesweeper/index.html",
+            "panels/plugins/pinball/index.html",
+            "panels/plugins/doodlejump/index.html",
+            "panels/plugins/subway/index.html",
+            "panels/plugins/draw/index.html",
+            "panels/plugins/emulator/index.html",
             "panels/terminal/index.html",
             "panels/presence/index.html",
             "panels/settings/index.html",

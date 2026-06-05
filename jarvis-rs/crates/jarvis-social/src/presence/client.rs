@@ -1,4 +1,10 @@
-//! Presence client that maintains a connection to Supabase Realtime.
+//! Presence client backed by the project's relay Room transport.
+//!
+//! Joins one global presence Room (`member_id` = the desktop's stable user id)
+//! and maps presence semantics onto opaque Room frames ([`PresenceFrame`]).
+//! The public surface (`start` / `update_activity` / `send_invite` /
+//! `send_poke` / `send_chat` / `online_users` / `disconnect`) is unchanged
+//! from the old Supabase-backed client, so the app layer needs no changes.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,34 +13,29 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::identity::Identity;
 use crate::protocol::{
-    events, ActivityUpdatePayload, ChatMessagePayload, GameInvitePayload, OnlineUser, PokePayload,
-    UserStatus,
+    ActivityUpdatePayload, ChatMessagePayload, GameInvitePayload, OnlineUser, PokePayload,
+    PresenceFrame, UserStatus,
 };
-use crate::realtime::{
-    BroadcastConfig, ChannelConfig, PresenceConfig as RtPresenceConfig, RealtimeClient,
-    RealtimeConfig,
-};
+use crate::room::{RoomClient, RoomConfig};
 
 use super::event_translator::event_translator;
-use super::helpers::chrono_now;
 use super::types::{PresenceConfig, PresenceEvent};
-
-/// The Supabase Realtime channel name used for all social events.
-const CHANNEL_NAME: &str = "jarvis-presence";
 
 // ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
 
-/// Presence client that maintains a connection to Supabase Realtime.
+/// Presence client that maintains a connection to the relay presence Room.
 pub struct PresenceClient {
     config: PresenceConfig,
     identity: Identity,
-    /// Current list of online users.
+    /// Current list of online users (keyed by user id).
     online_users: Arc<RwLock<HashMap<String, OnlineUser>>>,
-    /// Handle to the realtime client.
-    realtime: Option<RealtimeClient>,
-    /// Whether we're currently connected.
+    /// Our last-announced activity, re-broadcast when a new member joins.
+    self_activity: Arc<RwLock<(UserStatus, Option<String>)>>,
+    /// Handle to the relay Room transport.
+    room: Option<RoomClient>,
+    /// Whether we're currently connected (registered in the room).
     connected: Arc<RwLock<bool>>,
 }
 
@@ -44,8 +45,22 @@ impl PresenceClient {
             config,
             identity,
             online_users: Arc::new(RwLock::new(HashMap::new())),
-            realtime: None,
+            self_activity: Arc::new(RwLock::new((UserStatus::Online, None))),
+            room: None,
             connected: Arc::new(RwLock::new(false)),
+        }
+    }
+
+    /// Our own roster entry as a presence frame, reflecting current activity.
+    async fn self_presence_frame(&self) -> PresenceFrame {
+        let (status, activity) = self.self_activity.read().await.clone();
+        PresenceFrame::Presence {
+            user: OnlineUser {
+                user_id: self.identity.user_id.clone(),
+                display_name: self.identity.display_name.clone(),
+                status,
+                activity,
+            },
         }
     }
 
@@ -54,144 +69,115 @@ impl PresenceClient {
     pub fn start(&mut self) -> mpsc::Receiver<PresenceEvent> {
         let (event_tx, event_rx) = mpsc::channel(256);
 
-        // Build the RealtimeConfig from our PresenceConfig.
-        let rt_config = RealtimeConfig {
-            project_ref: self.config.project_ref.clone(),
-            api_key: self.config.api_key.clone(),
-            access_token: self.config.access_token.clone(),
-            heartbeat_interval_secs: self.config.heartbeat_interval,
+        let room_config = RoomConfig {
+            relay_url: self.config.relay_url.clone(),
+            session_id: self.config.room_id.clone(),
+            member_id: self.identity.user_id.clone(),
             reconnect_delay_secs: self.config.reconnect_delay,
             max_reconnect_delay_secs: self.config.max_reconnect_delay,
         };
 
-        let (client, rt_event_rx) = RealtimeClient::connect(rt_config);
+        let (room, room_event_rx) = RoomClient::connect(room_config);
 
-        // Join the presence channel.
-        let channel_config = ChannelConfig {
-            broadcast: BroadcastConfig {
-                self_send: false,
-                ack: true,
-            },
-            presence: RtPresenceConfig {
-                key: self.identity.user_id.clone(),
-            },
-        };
-
-        let join_client = client.clone_sender();
-        let identity = self.identity.clone();
         let online_users = Arc::clone(&self.online_users);
         let connected = Arc::clone(&self.connected);
+        let self_activity = Arc::clone(&self.self_activity);
+        let identity = self.identity.clone();
 
-        // Spawn the event translator task.
+        // The translator needs to send our own presence frame on join /
+        // member_joined; give it a sender into the room.
+        let announce_tx = room.frame_sender();
+
         tokio::spawn(async move {
-            // Join the channel once connected.
-            join_client.join_channel(CHANNEL_NAME, channel_config).await;
-
-            // Track our presence.
-            let presence_payload = serde_json::json!({
-                "user_id": identity.user_id,
-                "display_name": identity.display_name,
-                "status": "online",
-                "activity": null,
-                "online_at": chrono_now()
-            });
-            join_client
-                .presence_track(CHANNEL_NAME, presence_payload)
-                .await;
-
-            // Translate RealtimeEvents into PresenceEvents.
             event_translator(
-                rt_event_rx,
+                room_event_rx,
                 event_tx,
                 online_users,
                 connected,
-                &identity.user_id,
+                self_activity,
+                identity,
+                announce_tx,
             )
             .await;
         });
 
-        self.realtime = Some(client);
+        self.room = Some(room);
         event_rx
     }
 
     /// Update activity status.
     pub async fn update_activity(&self, status: UserStatus, activity: Option<String>) {
-        if let Some(rt) = &self.realtime {
-            // Broadcast the activity update.
-            let payload = ActivityUpdatePayload {
+        *self.self_activity.write().await = (status, activity.clone());
+
+        // Reflect our own status locally so the UI updates immediately.
+        if let Some(u) = self
+            .online_users
+            .write()
+            .await
+            .get_mut(&self.identity.user_id)
+        {
+            u.status = status;
+            u.activity = activity.clone();
+        }
+
+        if let Some(room) = &self.room {
+            let frame = PresenceFrame::ActivityUpdate(ActivityUpdatePayload {
                 user_id: self.identity.user_id.clone(),
                 display_name: self.identity.display_name.clone(),
                 status,
-                activity: activity.clone(),
-            };
-            if let Ok(value) = serde_json::to_value(&payload) {
-                rt.broadcast(CHANNEL_NAME, events::ACTIVITY_UPDATE, value)
-                    .await;
-            }
-
-            // Also update our presence state so new joiners see correct status.
-            let presence_payload = serde_json::json!({
-                "user_id": self.identity.user_id,
-                "display_name": self.identity.display_name,
-                "status": status,
-                "activity": activity,
-                "online_at": chrono_now()
+                activity,
             });
-            rt.presence_track(CHANNEL_NAME, presence_payload).await;
+            send_frame(room, &frame).await;
+            // Also send a `presence` frame so the canonical roster entry stays
+            // in sync for members that only track presence frames.
+            send_frame(room, &self.self_presence_frame().await).await;
         }
     }
 
     /// Send a game invite.
     pub async fn send_invite(&self, game: &str, code: Option<String>) {
-        if let Some(rt) = &self.realtime {
-            let payload = GameInvitePayload {
+        if let Some(room) = &self.room {
+            let frame = PresenceFrame::GameInvite(GameInvitePayload {
                 user_id: self.identity.user_id.clone(),
                 display_name: self.identity.display_name.clone(),
                 game: game.to_string(),
                 code,
-            };
-            if let Ok(value) = serde_json::to_value(&payload) {
-                rt.broadcast(CHANNEL_NAME, events::GAME_INVITE, value).await;
-            }
+            });
+            send_frame(room, &frame).await;
         }
     }
 
     /// Poke a user.
     pub async fn send_poke(&self, target_user_id: &str) {
-        if let Some(rt) = &self.realtime {
-            let payload = PokePayload {
+        if let Some(room) = &self.room {
+            let frame = PresenceFrame::Poke(PokePayload {
                 user_id: self.identity.user_id.clone(),
                 display_name: self.identity.display_name.clone(),
                 target_user_id: target_user_id.to_string(),
-            };
-            if let Ok(value) = serde_json::to_value(&payload) {
-                rt.broadcast(CHANNEL_NAME, events::POKE, value).await;
-            }
+            });
+            send_frame(room, &frame).await;
         }
     }
 
     /// Send a chat message to a channel.
     pub async fn send_chat(&self, channel: &str, content: &str, reply_to: Option<String>) {
-        if let Some(rt) = &self.realtime {
-            let payload = ChatMessagePayload {
+        if let Some(room) = &self.room {
+            let frame = PresenceFrame::ChatMessage(ChatMessagePayload {
                 user_id: self.identity.user_id.clone(),
                 display_name: self.identity.display_name.clone(),
                 channel: channel.to_string(),
                 content: content.to_string(),
-                timestamp: chrono_now(),
+                timestamp: super::helpers::chrono_now(),
                 reply_to,
-            };
-            if let Ok(value) = serde_json::to_value(&payload) {
-                rt.broadcast(CHANNEL_NAME, events::CHAT_MESSAGE, value)
-                    .await;
-            }
+            });
+            send_frame(room, &frame).await;
         }
     }
 
     /// Disconnect from the presence server.
     pub async fn disconnect(&self) {
-        if let Some(rt) = &self.realtime {
-            rt.disconnect().await;
+        if let Some(room) = &self.room {
+            room.disconnect().await;
         }
     }
 
@@ -208,5 +194,12 @@ impl PresenceClient {
     /// Get our identity.
     pub fn identity(&self) -> &Identity {
         &self.identity
+    }
+}
+
+/// Serialize and queue a presence frame for broadcast to the room.
+async fn send_frame(room: &RoomClient, frame: &PresenceFrame) {
+    if let Ok(json) = serde_json::to_string(frame) {
+        room.send(json).await;
     }
 }

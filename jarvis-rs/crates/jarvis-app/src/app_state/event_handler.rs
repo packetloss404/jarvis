@@ -47,6 +47,7 @@ impl ApplicationHandler for JarvisApp {
 
         self.start_presence();
         self.start_relay_client();
+        self.start_pair();
         self.update_window_title();
         self.request_redraw();
     }

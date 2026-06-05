@@ -27,12 +27,14 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "settings_get_config",
     "assistant_input",
     "assistant_ready",
+    "assistant_tool_approve",
+    "assistant_tool_deny",
+    "set_ai_provider",
     "open_panel",
     "panel_close",
     "panel_toggle",
     "open_settings",
     "status_bar_init",
-    "launch_game",
     "ping",
     "boot_complete",
     "chat_stream_control",
@@ -53,6 +55,14 @@ const ALLOWED_IPC_KINDS: &[&str] = &[
     "music_scan",
     "music_search",
     "music_set_dir",
+    "pair_start",
+    "pair_join",
+    "pair_leave",
+    "pair_input",
+    "pair_request_control",
+    "pair_set_driver",
+    "pair_cursor",
+    "pair_status",
 ];
 
 /// Check whether an IPC message kind is in the allowlist.
@@ -155,6 +165,15 @@ impl JarvisApp {
             "assistant_ready" => {
                 self.handle_assistant_ready(pane_id);
             }
+            "assistant_tool_approve" => {
+                self.handle_assistant_tool_approve(pane_id, &msg.payload);
+            }
+            "assistant_tool_deny" => {
+                self.handle_assistant_tool_deny(pane_id, &msg.payload);
+            }
+            "set_ai_provider" => {
+                self.handle_set_ai_provider(pane_id, &msg.payload);
+            }
             "open_panel" => {
                 self.handle_open_panel(pane_id, &msg.payload);
             }
@@ -166,9 +185,6 @@ impl JarvisApp {
             }
             "open_settings" => {
                 self.handle_open_settings(pane_id);
-            }
-            "launch_game" => {
-                self.handle_launch_game(pane_id, &msg.payload);
             }
             "status_bar_init" => {
                 self.handle_status_bar_init(pane_id);
@@ -204,6 +220,30 @@ impl JarvisApp {
             }
             "music_set_dir" => {
                 self.handle_music_set_dir(pane_id, &msg.payload);
+            }
+            "pair_start" => {
+                self.handle_pair_start(pane_id, &msg.payload);
+            }
+            "pair_join" => {
+                self.handle_pair_join(pane_id, &msg.payload);
+            }
+            "pair_leave" => {
+                self.handle_pair_leave(pane_id, &msg.payload);
+            }
+            "pair_input" => {
+                self.handle_pair_input(pane_id, &msg.payload);
+            }
+            "pair_request_control" => {
+                self.handle_pair_request_control(pane_id, &msg.payload);
+            }
+            "pair_set_driver" => {
+                self.handle_pair_set_driver(pane_id, &msg.payload);
+            }
+            "pair_cursor" => {
+                self.handle_pair_cursor(pane_id, &msg.payload);
+            }
+            "pair_status" => {
+                self.handle_pair_status(pane_id, &msg.payload);
             }
             "clipboard_copy" => {
                 if let IpcPayload::Json(ref v) = msg.payload {
@@ -407,6 +447,9 @@ mod tests {
         assert!(is_ipc_kind_allowed("settings_get_config"));
         assert!(is_ipc_kind_allowed("panel_focus"));
         assert!(is_ipc_kind_allowed("assistant_input"));
+        assert!(is_ipc_kind_allowed("assistant_tool_approve"));
+        assert!(is_ipc_kind_allowed("assistant_tool_deny"));
+        assert!(is_ipc_kind_allowed("set_ai_provider"));
         assert!(is_ipc_kind_allowed("open_panel"));
         assert!(is_ipc_kind_allowed("panel_close"));
         assert!(is_ipc_kind_allowed("panel_toggle"));
@@ -422,6 +465,14 @@ mod tests {
         assert!(is_ipc_kind_allowed("music_scan"));
         assert!(is_ipc_kind_allowed("music_search"));
         assert!(is_ipc_kind_allowed("music_set_dir"));
+        assert!(is_ipc_kind_allowed("pair_start"));
+        assert!(is_ipc_kind_allowed("pair_join"));
+        assert!(is_ipc_kind_allowed("pair_leave"));
+        assert!(is_ipc_kind_allowed("pair_input"));
+        assert!(is_ipc_kind_allowed("pair_request_control"));
+        assert!(is_ipc_kind_allowed("pair_set_driver"));
+        assert!(is_ipc_kind_allowed("pair_cursor"));
+        assert!(is_ipc_kind_allowed("pair_status"));
     }
 
     #[test]

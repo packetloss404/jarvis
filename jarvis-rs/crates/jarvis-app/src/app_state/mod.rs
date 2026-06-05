@@ -12,6 +12,7 @@ mod event_handler;
 mod init;
 mod menu;
 mod music_library;
+mod pair;
 mod palette;
 mod polling;
 pub(super) mod pty_bridge;

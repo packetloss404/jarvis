@@ -1,12 +1,60 @@
 //! AiClient trait implementation for GeminiClient (send_message + streaming).
 
 use async_trait::async_trait;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::streaming::{parse_sse_stream, SseEvent};
 use crate::{AiClient, AiError, AiResponse, Message, TokenUsage, ToolCall, ToolDefinition};
 
-use super::client::GeminiClient;
+use super::client::{parse_function_call, GeminiClient};
+
+/// Accumulator for streamed Gemini response parts.
+///
+/// `streamGenerateContent?alt=sse` emits a sequence of `GenerateContentResponse`
+/// chunks, each carrying a slice of `candidates[0].content.parts`. Text parts
+/// are concatenated; `functionCall` parts arrive whole (not fragmented like
+/// OpenAI), so each is turned into a `ToolCall` with a synthesized stable id
+/// (`call_<n>`) using a running index across the whole stream. `usageMetadata`
+/// (when present, typically on the final chunk) updates the token counts.
+#[derive(Default)]
+struct StreamAccumulator {
+    content: String,
+    tool_calls: Vec<ToolCall>,
+    usage: TokenUsage,
+}
+
+impl StreamAccumulator {
+    /// Ingest one parsed SSE chunk, pushing any newly emitted text via `on_chunk`.
+    fn ingest(&mut self, data: &serde_json::Value, on_chunk: &(dyn Fn(String) + Send + Sync)) {
+        if let Some(candidates) = data["candidates"].as_array() {
+            for candidate in candidates {
+                if let Some(parts) = candidate["content"]["parts"].as_array() {
+                    for part in parts {
+                        if let Some(text) = part["text"].as_str() {
+                            if !text.is_empty() {
+                                self.content.push_str(text);
+                                on_chunk(text.to_string());
+                            }
+                        }
+                        if let Some(fc) = part.get("functionCall") {
+                            let idx = self.tool_calls.len();
+                            self.tool_calls.push(parse_function_call(fc, idx));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(meta) = data.get("usageMetadata") {
+            self.usage.input_tokens = meta["promptTokenCount"]
+                .as_u64()
+                .unwrap_or(self.usage.input_tokens);
+            self.usage.output_tokens = meta["candidatesTokenCount"]
+                .as_u64()
+                .unwrap_or(self.usage.output_tokens);
+        }
+    }
+}
 
 #[async_trait]
 impl AiClient for GeminiClient {
@@ -23,8 +71,8 @@ impl AiClient for GeminiClient {
         let response = self
             .http
             .post(&url)
+            .headers(self.auth_headers())
             .header("content-type", "application/json")
-            .header("x-goog-api-key", &self.config.api_key)
             .json(&body)
             .send()
             .await
@@ -36,6 +84,7 @@ impl AiClient for GeminiClient {
         }
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
+            let text = text.chars().take(200).collect::<String>();
             return Err(AiError::ApiError(format!("HTTP {status}: {text}")));
         }
 
@@ -54,6 +103,7 @@ impl AiClient for GeminiClient {
         on_chunk: Box<dyn Fn(String) + Send + Sync>,
     ) -> Result<AiResponse, AiError> {
         let body = self.build_request_body(messages, tools);
+        // SSE framing: one JSON object per `data:` event.
         let url = format!("{}?alt=sse", self.api_url(true));
 
         debug!(model = %self.config.model, "Gemini API streaming request");
@@ -61,8 +111,8 @@ impl AiClient for GeminiClient {
         let response = self
             .http
             .post(&url)
+            .headers(self.auth_headers())
             .header("content-type", "application/json")
-            .header("x-goog-api-key", &self.config.api_key)
             .json(&body)
             .send()
             .await
@@ -74,57 +124,140 @@ impl AiClient for GeminiClient {
         }
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
+            let text = text.chars().take(200).collect::<String>();
             return Err(AiError::ApiError(format!("HTTP {status}: {text}")));
         }
 
-        let mut full_content = String::new();
-        let mut tool_calls = Vec::new();
-        let mut usage = TokenUsage::default();
+        let mut acc = StreamAccumulator::default();
 
         parse_sse_stream(response, |event: SseEvent| {
-            let mut chunk = String::new();
-
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&event.data) {
-                // Extract text from candidates
-                if let Some(candidates) = data["candidates"].as_array() {
-                    for candidate in candidates {
-                        if let Some(parts) = candidate["content"]["parts"].as_array() {
-                            for part in parts {
-                                if let Some(t) = part["text"].as_str() {
-                                    if !t.is_empty() {
-                                        chunk.push_str(t);
-                                        full_content.push_str(t);
-                                    }
-                                }
-                                if let Some(fc) = part.get("functionCall") {
-                                    tool_calls.push(ToolCall {
-                                        id: uuid::Uuid::new_v4().to_string(),
-                                        name: fc["name"].as_str().unwrap_or("").to_string(),
-                                        arguments: fc["args"].clone(),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Extract usage
-                if let Some(meta) = data.get("usageMetadata") {
-                    usage.input_tokens = meta["promptTokenCount"].as_u64().unwrap_or(0);
-                    usage.output_tokens = meta["candidatesTokenCount"].as_u64().unwrap_or(0);
-                }
+            let data = event.data.trim();
+            if data.is_empty() {
+                return;
             }
-
-            if !chunk.is_empty() {
-                on_chunk(chunk);
-            }
+            let json: serde_json::Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => return,
+            };
+            acc.ingest(&json, on_chunk.as_ref());
         })
         .await?;
 
+        if acc.usage.input_tokens == 0 && acc.usage.output_tokens == 0 {
+            warn!("No usage data received in Gemini streaming response");
+        }
+
         Ok(AiResponse {
-            content: full_content,
-            tool_calls,
-            usage,
+            content: acc.content,
+            tool_calls: acc.tool_calls,
+            usage: acc.usage,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A no-op `on_chunk` for tests that only check final accumulation.
+    fn noop() -> Box<dyn Fn(String) + Send + Sync> {
+        Box::new(|_| {})
+    }
+
+    #[test]
+    fn accumulates_streamed_text_chunks() {
+        let mut acc = StreamAccumulator::default();
+        let cb = noop();
+        acc.ingest(
+            &serde_json::json!({
+                "candidates": [{ "content": { "parts": [{ "text": "Hel" }] } }]
+            }),
+            cb.as_ref(),
+        );
+        acc.ingest(
+            &serde_json::json!({
+                "candidates": [{ "content": { "parts": [{ "text": "lo" }] } }]
+            }),
+            cb.as_ref(),
+        );
+        assert_eq!(acc.content, "Hello");
+        assert!(acc.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn on_chunk_receives_each_text_part() {
+        let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let c2 = collected.clone();
+        let cb: Box<dyn Fn(String) + Send + Sync> =
+            Box::new(move |s| c2.lock().unwrap().push(s));
+        let mut acc = StreamAccumulator::default();
+        acc.ingest(
+            &serde_json::json!({
+                "candidates": [{ "content": { "parts": [{ "text": "a" }, { "text": "b" }] } }]
+            }),
+            cb.as_ref(),
+        );
+        assert_eq!(*collected.lock().unwrap(), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn accumulates_streamed_function_calls_with_synthesized_ids() {
+        let mut acc = StreamAccumulator::default();
+        let cb = noop();
+        acc.ingest(
+            &serde_json::json!({
+                "candidates": [{ "content": { "parts": [
+                    { "functionCall": { "name": "read_file", "args": { "path": "a.txt" } } }
+                ] } }]
+            }),
+            cb.as_ref(),
+        );
+        acc.ingest(
+            &serde_json::json!({
+                "candidates": [{ "content": { "parts": [
+                    { "functionCall": { "name": "list_directory", "args": { "path": "." } } }
+                ] } }]
+            }),
+            cb.as_ref(),
+        );
+        assert_eq!(acc.tool_calls.len(), 2);
+        assert_eq!(acc.tool_calls[0].id, "call_0");
+        assert_eq!(acc.tool_calls[0].name, "read_file");
+        assert_eq!(acc.tool_calls[0].arguments["path"], "a.txt");
+        assert_eq!(acc.tool_calls[1].id, "call_1");
+        assert_eq!(acc.tool_calls[1].name, "list_directory");
+    }
+
+    #[test]
+    fn accumulates_usage_metadata() {
+        let mut acc = StreamAccumulator::default();
+        let cb = noop();
+        acc.ingest(
+            &serde_json::json!({
+                "candidates": [{ "content": { "parts": [{ "text": "hi" }] } }],
+                "usageMetadata": { "promptTokenCount": 9, "candidatesTokenCount": 3 }
+            }),
+            cb.as_ref(),
+        );
+        assert_eq!(acc.usage.input_tokens, 9);
+        assert_eq!(acc.usage.output_tokens, 3);
+    }
+
+    #[test]
+    fn mixed_text_and_function_call_in_one_chunk() {
+        let mut acc = StreamAccumulator::default();
+        let cb = noop();
+        acc.ingest(
+            &serde_json::json!({
+                "candidates": [{ "content": { "parts": [
+                    { "text": "let me look" },
+                    { "functionCall": { "name": "read_file", "args": {} } }
+                ] } }]
+            }),
+            cb.as_ref(),
+        );
+        assert_eq!(acc.content, "let me look");
+        assert_eq!(acc.tool_calls.len(), 1);
+        assert_eq!(acc.tool_calls[0].name, "read_file");
     }
 }

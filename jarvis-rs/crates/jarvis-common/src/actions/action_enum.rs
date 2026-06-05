@@ -32,13 +32,11 @@ pub enum Action {
     OpenCommandPalette,
     OpenSettings,
     OpenChat,
+    OpenPair,
     CloseOverlay,
     /// Sentinel: triggers the command palette to enter URL input mode.
     /// Never dispatched to the app — intercepted by the palette key handler.
     OpenURLPrompt,
-
-    // -- Games --
-    LaunchGame(String),
 
     // -- Web --
     OpenURL(String),

@@ -1,0 +1,3 @@
+name = "Minesweeper"
+category = "Games"
+entry = "index.html"

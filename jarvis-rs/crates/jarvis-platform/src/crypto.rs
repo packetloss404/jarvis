@@ -151,6 +151,43 @@ impl CryptoService {
         let sig = Signature::from_slice(&sig_bytes).map_err(|e| pe(&e))?;
         Ok(verifying_key.verify(data.as_bytes(), &sig).is_ok())
     }
+
+    /// Mint a detached, `Send + Sync` signer over this identity's ECDSA key.
+    ///
+    /// `CryptoService` is single-threaded and lives on the app's main thread, but
+    /// the pair-Room worker (a separate tokio runtime) must sign every outbound
+    /// frame at the point it serializes it. This hands the worker a cheap,
+    /// thread-safe clone of just the signing capability (the P-256 `SigningKey`
+    /// is `Clone + Send + Sync`) plus the matching SPKI pubkey — no key store, no
+    /// session state — so it can sign without crossing back to the main thread.
+    pub fn pair_frame_signer(&self) -> PairFrameSigner {
+        PairFrameSigner {
+            signing_key: self.ecdsa_signing_key.clone(),
+            pubkey_base64: self.pubkey_base64.clone(),
+        }
+    }
+}
+
+/// A detached ECDSA-P256 signer carrying just the identity signing key and its
+/// SPKI-base64 public key. `Send + Sync` so it can live in the pair-Room worker
+/// (which has no access to the main-thread [`CryptoService`]). Produced by
+/// [`CryptoService::pair_frame_signer`].
+#[derive(Clone)]
+pub struct PairFrameSigner {
+    signing_key: SigningKey,
+    /// The signer's ECDSA identity public key (SPKI DER, base64) — the exact
+    /// form [`CryptoService::verify`] expects for `pubkey_b64`.
+    pub pubkey_base64: String,
+}
+
+impl PairFrameSigner {
+    /// Sign `msg`, returning a base64 IEEE-P1363 (r||s, 64-byte) signature —
+    /// byte-for-byte identical to [`CryptoService::sign`] over the same bytes,
+    /// so the existing `verify` path validates it unchanged.
+    pub fn sign_bytes(&self, msg: &[u8]) -> String {
+        let sig: Signature = self.signing_key.sign(msg);
+        B64.encode(sig.to_bytes())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +195,13 @@ impl CryptoService {
 // ---------------------------------------------------------------------------
 
 impl CryptoService {
-    fn generate() -> Result<Self, PlatformError> {
+    /// Generate a fresh, non-persisted identity (new ECDSA + ECDH keypairs).
+    ///
+    /// Public so callers can mint an ephemeral identity without touching disk —
+    /// notably tests that need two distinct identities (e.g. pair-frame
+    /// sign/verify). Production code uses [`Self::load_or_generate`] to keep a
+    /// stable on-disk identity.
+    pub fn generate() -> Result<Self, PlatformError> {
         let mut rng = rand::thread_rng();
         let ecdsa_signing_key = SigningKey::random(&mut rng);
         let ecdh_secret_key = SecretKey::random(&mut rng);

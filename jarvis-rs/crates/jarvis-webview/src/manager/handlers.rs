@@ -140,7 +140,7 @@ mod tests {
         ));
         assert!(is_navigation_allowed("jarvis://localhost/chat/index.html"));
         assert!(is_navigation_allowed(
-            "jarvis://localhost/games/tetris.html"
+            "jarvis://localhost/plugins/tetris/index.html"
         ));
     }
 

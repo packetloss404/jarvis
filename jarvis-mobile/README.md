@@ -1,6 +1,6 @@
 # jarvis-mobile
 
-Expo (React Native) client for Jarvis: **relay terminal** (encrypted PTY bridge to desktop), **embedded livechat** (Supabase + Web Crypto in a WebView), and **Claude Code** (claude.ai in a WebView).
+Expo (React Native) client for Jarvis: **relay terminal** (encrypted PTY bridge to desktop), **embedded livechat** (relay Room transport + Web Crypto in a WebView), and **Claude Code** (claude.ai in a WebView).
 
 Parent repo: [github.com/dyoburon/jarvis](https://github.com/dyoburon/jarvis) — see root [README.md](../README.md) and [ARCHITECTURE.md](../ARCHITECTURE.md).
 
@@ -20,13 +20,13 @@ Then open the iOS simulator, Android emulator, or Expo Go / dev client as usual.
 |--------|---------|
 | `npm run lint` | ESLint ([.eslintrc.cjs](.eslintrc.cjs) + `eslint-config-expo`) |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run test` | Jest (`jest-expo`) — pairing/linking, mock relay, fake WebSocket relay handshake, `buildChatHTML` Supabase injection, ECDH alignment with Rust `derive_shared_key` |
+| `npm run test` | Jest (`jest-expo`) — pairing/linking, mock relay, fake WebSocket relay handshake, `buildChatHTML` relay-Room bundle, ECDH alignment with Rust `derive_shared_key` |
 | `npm run sync:chat-html` | Copy `jarvis-rs/assets/panels/chat/index.html` → `vendor/chat-index.from-jarvis-rs.html` for diff/review |
 
 ## Tabs
 
 - **[ code ]** — Paste or scan pairing data, connect to the relay, drive a remote terminal. Session token is stored locally (AsyncStorage).
-- **[ chat ]** — Livechat UI inlined in [lib/jarvis-chat-html.ts](lib/jarvis-chat-html.ts); Supabase URL and anon key are injected at build time from `EXPO_PUBLIC_SUPABASE_*` (defaults match the bundled project if unset). HTTP errors show an offline banner (distinct from relay issues).
+- **[ chat ]** — Livechat UI inlined in [lib/jarvis-chat-html.ts](lib/jarvis-chat-html.ts); connects over the relay Room transport (one WebSocket per channel), with the relay URL injected at build time from `EXPO_PUBLIC_DEFAULT_RELAY_URL` (defaults to the production relay if unset). Connection errors show a banner (distinct from relay terminal issues).
 - **[ claude ]** — `https://claude.ai/code` in a WebView. Google / Microsoft / Apple OAuth navigations are opened with `expo-web-browser` **auth session** + `jarvis://oauth/callback` when possible; use **[browser]** or **[reload]** if sign-in still fails. Cookies are not automatically shared back into the WebView.
 
 ## Deep links
@@ -37,8 +37,7 @@ Scheme: `jarvis` (see [app.json](app.json)). Opening **`jarvis://pair?relay=...&
 
 See [.env.example](.env.example). Public build-time variables (no secrets):
 
-- `EXPO_PUBLIC_DEFAULT_RELAY_URL` — shown as a hint in Settings when set.
-- `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` — override embedded livechat Supabase client (anon key is public by design).
+- `EXPO_PUBLIC_DEFAULT_RELAY_URL` — relay WebSocket endpoint shared by the [code] terminal and the [chat] Room transport; shown as a hint in Settings. Defaults to the production relay (`wss://jarvis-relay-production-3eb6.up.railway.app/ws`) if unset.
 - `EXPO_PUBLIC_RELAY_DEBUG=1` — on the code tab, show the last relay protocol message type (no payloads).
 
 ## Help & UX

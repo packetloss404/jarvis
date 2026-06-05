@@ -15,6 +15,7 @@ impl JarvisApp {
         if now.duration_since(self.last_poll) >= POLL_INTERVAL {
             self.last_poll = now;
             self.poll_presence();
+            self.poll_pair();
             self.poll_assistant();
             self.poll_webview_events();
             self.poll_pty_output();

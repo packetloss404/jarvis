@@ -4,6 +4,8 @@
 mod broadcast;
 mod crypto_bridge;
 mod mobile_polling;
+pub(crate) mod pair_room_client;
+pub(crate) mod pair_protocol;
 mod pairing;
 pub(crate) mod protocol;
 mod relay_client;

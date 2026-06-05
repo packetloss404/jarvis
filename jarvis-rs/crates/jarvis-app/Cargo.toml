@@ -19,7 +19,7 @@ jarvis-config = { workspace = true }
 jarvis-platform = { workspace = true }
 jarvis-renderer = { workspace = true }
 jarvis-tiling = { workspace = true }
-jarvis-social = { workspace = true }
+jarvis-social = { workspace = true, features = ["experimental-collab"] }
 jarvis-webview = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -49,6 +49,10 @@ lofty = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.24"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Workspace screen capture for live streaming (mirrors the macOS core-graphics path).
+xcap = "0.9"
 
 [build-dependencies]
 winres = "0.1"

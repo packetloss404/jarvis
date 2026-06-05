@@ -3,7 +3,7 @@ pub mod chat;
 pub mod identity;
 pub mod presence;
 pub mod protocol;
-pub mod realtime;
+pub mod room;
 
 #[cfg(feature = "experimental-collab")]
 pub mod pair;
@@ -18,9 +18,9 @@ pub use identity::Identity;
 pub use presence::{PresenceClient, PresenceConfig, PresenceEvent};
 pub use protocol::{
     ActivityUpdatePayload, ChatMessagePayload, GameInvitePayload, OnlineUser, PokePayload,
-    PresencePayload, UserStatus,
+    PresenceFrame, PresencePayload, UserStatus,
 };
-pub use realtime::{RealtimeClient, RealtimeConfig};
+pub use room::{RoomClient, RoomConfig, RoomEvent};
 
 #[cfg(feature = "experimental-collab")]
 pub use pair::{PairConfig, PairEvent, PairManager, PairRole, PairSession};

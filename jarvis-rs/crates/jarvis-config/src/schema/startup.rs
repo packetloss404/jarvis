@@ -86,7 +86,7 @@ pub struct GameActionConfig {
 impl Default for GameActionConfig {
     fn default() -> Self {
         Self {
-            name: "wordle".into(),
+            name: "tetris".into(),
         }
     }
 }

@@ -42,6 +42,37 @@ impl RelayCipher {
         })
     }
 
+    /// Encrypt raw plaintext bytes into a RelayEnvelope::Encrypted.
+    ///
+    /// Used by the pair-Room client to carry a JSON-serialized `PairFrame`
+    /// inside the same opaque envelope the mobile bridge uses.
+    pub fn encrypt_bytes(&self, plaintext: &[u8]) -> Result<RelayEnvelope, String> {
+        let mut iv = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut iv);
+        let nonce = Nonce::from_slice(&iv);
+        let ct = self
+            .cipher
+            .encrypt(nonce, plaintext)
+            .map_err(|e| e.to_string())?;
+        Ok(RelayEnvelope::Encrypted {
+            iv: B64.encode(iv),
+            ct: B64.encode(ct),
+        })
+    }
+
+    /// Decrypt a RelayEnvelope::Encrypted (base64 iv/ct) into raw plaintext bytes.
+    pub fn decrypt_bytes(&self, iv_b64: &str, ct_b64: &str) -> Result<Vec<u8>, String> {
+        let iv = B64.decode(iv_b64).map_err(|e| e.to_string())?;
+        let ct = B64.decode(ct_b64).map_err(|e| e.to_string())?;
+        if iv.len() != 12 {
+            return Err("invalid IV length".into());
+        }
+        let nonce = Nonce::from_slice(&iv);
+        self.cipher
+            .decrypt(nonce, ct.as_ref())
+            .map_err(|e| e.to_string())
+    }
+
     /// Decrypt a RelayEnvelope::Encrypted into a ClientMessage.
     pub fn decrypt_client_message(
         &self,

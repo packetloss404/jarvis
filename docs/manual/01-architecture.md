@@ -1,6 +1,6 @@
 # Architecture Overview
 
-This document describes the internal architecture of the Jarvis desktop application, covering the Rust workspace structure, crate responsibilities, dependency graph, application lifecycle, key design patterns, and the relationship to the legacy Python/Swift stack.
+This document describes the internal architecture of the Jarvis desktop application, covering the Rust workspace structure, crate responsibilities, dependency graph, application lifecycle, key design patterns, and the relationship to the archived Python/Swift prototype.
 
 ---
 
@@ -23,27 +23,27 @@ The application supports:
 
 ## 2. Repository Structure
 
-The repository root groups the **primary Rust app**, the **legacy macOS stack**, docs, tests, and tooling:
+The repository root groups the **primary Rust app**, the **mobile companion**, docs, and tooling. The original macOS Python + Swift/Metal prototype has been removed from the working tree; it is preserved in history at the **`legacy-archive`** git tag.
 
 ```
 jarvis/
-  README.md              # Rust-first overview + legacy pointers
+  README.md              # Rust-first overview + archive pointer
   ARCHITECTURE.md        # This chapter's "where things live" summary
   jarvis-rs/             # PRIMARY: Rust workspace (develop here)
     Cargo.toml
     crates/
     assets/panels/       # Canonical bundled web UI
-  legacy/                # Legacy macOS Python + Swift/Metal (maintenance only)
-    main.py
-    metal-app/
-    jarvis/              # Python package
-    skills/, voice/, connectors/, presence/
-    requirements.txt
+    testdata/            # Shared wire-protocol JSON fixtures (relay <-> desktop)
   jarvis-mobile/         # React Native companion (thin client)
-  scripts/               # start/login/setup/package helpers
-  legacy/tests/          # Python tests for legacy stack (pytest; pythonpath = legacy)
-  docs/                  # Manual, plugins, plans
+  dev/                   # Development docs (pathforward analysis, archived plans)
+  relay/                 # Deployment helpers (separate from app crates)
+  resources/             # Built-in theme assets (loaded by jarvis-rs)
+  docs/                  # Website + published manual
 ```
+
+> The original macOS Python + Swift/Metal prototype (formerly `legacy/`, with its
+> `main.py`, `metal-app/`, `requirements.txt`, `scripts/`, and Python tests) is no
+> longer in the working tree. Check it out with `git checkout legacy-archive`.
 
 ---
 
@@ -661,9 +661,11 @@ window.jarvis.ipc.send('keybind', { key, ctrl, alt, shift, meta })
 
 ---
 
-## 8. Legacy Python/Swift Stack vs Rust Rewrite
+## 8. Archived Python/Swift Prototype vs Rust Rewrite
 
-### 8.1 Legacy Stack (Python + Swift)
+The original macOS Python + Swift/Metal prototype is no longer in the working tree. It has been archived and preserved in history at the **`legacy-archive`** git tag; check it out with `git checkout legacy-archive`. The mapping below is kept as historical context for how the current Rust crates trace back to that prototype.
+
+### 8.1 Archived Stack (Python + Swift)
 
 The original Jarvis was built with:
 
@@ -673,13 +675,13 @@ The original Jarvis was built with:
 - **`voice/`** -- Python audio capture (push-to-talk) and Whisper transcription
 - **`connectors/`** -- Python service integrations (Claude proxy, token tracker, SQLite reader, HTTP client)
 
-The legacy stack is macOS-only (depends on Metal and AppKit) and requires Python 3.10+ and Swift 5.9+.
+The archived stack is macOS-only (depends on Metal and AppKit) and requires Python 3.10+ and Swift 5.9+.
 
 ### 8.2 Rust Rewrite
 
-The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform architecture:
+The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform architecture. The original components below live only at the `legacy-archive` tag:
 
-| Legacy Component | Rust Replacement |
+| Archived Component | Rust Replacement |
 |-----------------|------------------|
 | `metal-app/` (Swift/Metal) | `jarvis-renderer` (wgpu -- Vulkan/Metal/DX12) |
 | `main.py` event loop | `jarvis-app` (winit event loop) |
@@ -698,12 +700,10 @@ The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform 
 
 ### 8.3 What Exists Where
 
-- Both stacks currently coexist in the repository
+- The Rust workspace is the only stack in the working tree; it is self-contained in `jarvis-rs/`
 - The Rust binary is `jarvis` (from `jarvis-app`)
-- The legacy Python entry point is `main.py` at the project root
-- The legacy Swift app is in `metal-app/`
-- The Rust workspace is self-contained in `jarvis-rs/`
 - Bundled web assets (HTML/JS/CSS for panels and games) are in `jarvis-rs/assets/`
+- The archived prototype's Python entry point (`main.py`), Swift app (`metal-app/`), and supporting code are no longer in the tree -- they are preserved at the `legacy-archive` git tag (`git checkout legacy-archive` to inspect them)
 
 ---
 

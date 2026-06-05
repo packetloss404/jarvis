@@ -33,10 +33,12 @@ pub struct LocalPlugin {
     pub category: String,
     /// Entry HTML file (default "index.html").
     pub entry: String,
+    /// Whether the plugin's webview must be opaque (e.g. WebGL games).
+    pub opaque: bool,
 }
 
 /// Plugin configuration section.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PluginsConfig {
     /// Bookmark plugins loaded from TOML config.
@@ -44,4 +46,44 @@ pub struct PluginsConfig {
     /// Local plugins discovered from the filesystem (not serialized).
     #[serde(skip)]
     pub local: Vec<LocalPlugin>,
+}
+
+impl Default for PluginsConfig {
+    fn default() -> Self {
+        Self {
+            bookmarks: vec![
+                BookmarkPlugin {
+                    name: "Lichess".into(),
+                    url: "https://lichess.org".into(),
+                    category: "Games".into(),
+                },
+                BookmarkPlugin {
+                    name: "Monkeytype".into(),
+                    url: "https://monkeytype.com".into(),
+                    category: "Web".into(),
+                },
+                BookmarkPlugin {
+                    name: "Excalidraw".into(),
+                    url: "https://excalidraw.com".into(),
+                    category: "Web".into(),
+                },
+                BookmarkPlugin {
+                    name: "Desmos".into(),
+                    url: "https://www.desmos.com/calculator".into(),
+                    category: "Web".into(),
+                },
+                BookmarkPlugin {
+                    name: "Hacker News".into(),
+                    url: "https://news.ycombinator.com".into(),
+                    category: "Web".into(),
+                },
+                BookmarkPlugin {
+                    name: "Spotify".into(),
+                    url: "https://open.spotify.com".into(),
+                    category: "Web".into(),
+                },
+            ],
+            local: vec![],
+        }
+    }
 }

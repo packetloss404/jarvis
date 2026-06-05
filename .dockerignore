@@ -1,0 +1,15 @@
+# Keep the Docker/Railway build context lean — the relay Dockerfile only needs
+# the Rust workspace manifests + jarvis-relay source.
+**/target
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+.git
+*.png
+*.mp3
+screenshot.png
+jarvis-mobile
+docs
+dev
+resources

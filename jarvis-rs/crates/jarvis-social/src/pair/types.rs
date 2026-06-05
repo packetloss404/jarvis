@@ -2,12 +2,15 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /// Role a participant has in a pair session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PairRole {
     /// Can type into the shared terminal.
     Driver,
@@ -16,7 +19,7 @@ pub enum PairRole {
 }
 
 /// A participant in a pair programming session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairParticipant {
     pub user_id: String,
     pub display_name: String,
@@ -28,7 +31,7 @@ pub struct PairParticipant {
 }
 
 /// An active pair programming session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairSession {
     pub session_id: String,
     /// The user hosting the terminal.
@@ -50,7 +53,7 @@ pub struct PairSession {
 // ---------------------------------------------------------------------------
 
 /// Events emitted by the pair programming system.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PairEvent {
     /// A new session was created.
     SessionCreated {

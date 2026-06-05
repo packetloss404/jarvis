@@ -179,7 +179,7 @@ pub fn spawn_pty(cols: u16, rows: u16, cwd: Option<&str>) -> Result<PtyHandle, S
         writer,
         output_rx: rx,
         child,
-        master: pair.master,
+        master: Some(pair.master),
         size,
     })
 }

@@ -59,7 +59,13 @@ async fn main() {
         ..Default::default()
     });
 
-    let addr = format!("0.0.0.0:{}", args.port);
+    // Honor the platform-provided $PORT (Railway, Cloud Run, etc.) over the
+    // --port default, so the same binary deploys anywhere without flags.
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(args.port);
+    let addr = format!("0.0.0.0:{}", port);
     let listener = TcpListener::bind(&addr)
         .await
         .expect("Failed to bind TCP listener");

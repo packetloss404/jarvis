@@ -106,6 +106,38 @@ name = "jarvis-dark"
 # input_device = "default"
 # sample_rate = 24000
 
+[assistant]
+# Which AI provider the assistant uses: "claude", "openai", "minimax", or "gemini".
+# (API keys come from environment variables ONLY and are never stored here:
+#   claude  -> ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN
+#   openai  -> OPENAI_API_KEY
+#   minimax -> MINIMAX_API_KEY
+#   gemini  -> GEMINI_API_KEY / GOOGLE_API_KEY)
+# provider = "claude"
+#
+# Tool permissions. DEFAULT is read-only: the assistant can only read/search/
+# list files inside the workspace. It CANNOT write files or run commands.
+#   tools_mode = "read_only"    # "read_only" (default) | "read_write"
+# Setting "read_write" opts into write_file + run_command. Even then, every
+# such call BLOCKS on explicit human approval in the panel before it runs;
+# on deny or timeout it fails closed (nothing executes).
+#   require_approval = true     # keep true — disables the approval prompt if false
+
+[assistant.claude]
+# model = ""             # empty = client default
+
+[assistant.openai]
+# model = ""             # empty = client default (e.g. "gpt-4o")
+# base_url = ""          # empty = https://api.openai.com/v1
+
+[assistant.minimax]
+# model = ""             # empty = client default (e.g. "MiniMax-M2")
+# base_url = ""          # empty = https://api.minimax.io/v1
+
+[assistant.gemini]
+# model = ""             # empty = client default (e.g. "gemini-2.0-flash")
+# base_url = ""          # empty = https://generativelanguage.googleapis.com/v1beta
+
 [keybinds]
 # push_to_talk = "Option+Period"
 # open_assistant = "Cmd+G"
@@ -136,18 +168,6 @@ name = "jarvis-dark"
 # show_indicator = true
 # border_glow = true
 
-[games.enabled]
-# wordle = true
-# connections = true
-# asteroids = true
-# tetris = true
-# pinball = true
-# doodlejump = true
-# minesweeper = true
-# draw = true
-# subway = true
-# videoplayer = true
-
 [livechat]
 # enabled = true
 # server_port = 19847
@@ -155,8 +175,16 @@ name = "jarvis-dark"
 
 [presence]
 # enabled = true
-# server_url = ""
-# heartbeat_interval = 30
+# Presence rides the relay Room transport; it reuses [relay].url.
+# room_id = "jarvis-presence-global"
+
+[collab]
+# Collaborative terminal / pair programming. Rides the relay Room transport.
+# EXPERIMENTAL: limited auth — do not enable in production yet.
+# enabled = false
+# max_participants = 4
+# allow_takeover = true
+# require_signed_join = true
 
 [performance]
 # preset = "high"        # low, medium, high, ultra
@@ -198,15 +226,17 @@ name = "jarvis-dark"
 
 # -- Plugins --
 # Bookmark plugins appear in the command palette and open as webview panes.
+# A set of default bookmarks (Lichess, Monkeytype, Excalidraw, Desmos,
+# Hacker News, Spotify) is seeded automatically. Add your own below:
 # [[plugins.bookmarks]]
 # name = "Spotify"
 # url = "https://open.spotify.com"
 # category = "Web"
 
 # [[plugins.bookmarks]]
-# name = "Hacker News"
-# url = "https://news.ycombinator.com"
-# category = "Web"
+# name = "Lichess"
+# url = "https://lichess.org"
+# category = "Games"
 
 # Local plugins are discovered automatically from:
 #   ~/.config/jarvis/plugins/<plugin-id>/plugin.toml

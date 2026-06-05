@@ -1,7 +1,7 @@
 //! Skill router — dispatches AI requests to the appropriate provider.
 //!
-//! The router selects between Claude, Gemini, or other providers
-//! based on the task type, cost, and availability.
+//! The router selects between registered providers based on the task type,
+//! cost, and availability. Currently Claude is the only built-in provider.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,9 +9,15 @@ use std::sync::Arc;
 use crate::{AiClient, AiError, AiResponse, Message, ToolDefinition};
 
 /// Which AI provider to use for a given task.
+///
+/// `OpenAi` and `MiniMax` both speak the OpenAI Chat Completions wire format
+/// (served by a single parameterized client). `Gemini` uses Google's distinct
+/// Generative Language API wire format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Provider {
     Claude,
+    OpenAi,
+    MiniMax,
     Gemini,
 }
 

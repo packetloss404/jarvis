@@ -218,17 +218,6 @@ const VALID_PATHS: &[&str] = &[
     "panels.focus.restore_on_activate",
     "panels.focus.show_indicator",
     "panels.focus.border_glow",
-    // Games
-    "games.enabled.wordle",
-    "games.enabled.connections",
-    "games.enabled.asteroids",
-    "games.enabled.tetris",
-    "games.enabled.pinball",
-    "games.enabled.doodlejump",
-    "games.enabled.minesweeper",
-    "games.enabled.draw",
-    "games.enabled.subway",
-    "games.enabled.videoplayer",
     // Performance
     "performance.preset",
     "performance.frame_rate",
@@ -385,17 +374,6 @@ fn apply_setting(
             set_bool(&mut config.panels.focus.show_indicator, value);
         }
         "panels.focus.border_glow" => set_bool(&mut config.panels.focus.border_glow, value),
-        // -- Games --
-        "games.enabled.wordle" => set_bool(&mut config.games.enabled.wordle, value),
-        "games.enabled.connections" => set_bool(&mut config.games.enabled.connections, value),
-        "games.enabled.asteroids" => set_bool(&mut config.games.enabled.asteroids, value),
-        "games.enabled.tetris" => set_bool(&mut config.games.enabled.tetris, value),
-        "games.enabled.pinball" => set_bool(&mut config.games.enabled.pinball, value),
-        "games.enabled.doodlejump" => set_bool(&mut config.games.enabled.doodlejump, value),
-        "games.enabled.minesweeper" => set_bool(&mut config.games.enabled.minesweeper, value),
-        "games.enabled.draw" => set_bool(&mut config.games.enabled.draw, value),
-        "games.enabled.subway" => set_bool(&mut config.games.enabled.subway, value),
-        "games.enabled.videoplayer" => set_bool(&mut config.games.enabled.videoplayer, value),
         // -- Performance --
         "performance.preset" => set_str_enum(&mut config.performance.preset, value),
         "performance.frame_rate" => set_u32(&mut config.performance.frame_rate, value),
@@ -461,7 +439,6 @@ fn reset_section(config: &mut jarvis_config::schema::JarvisConfig, section: &str
         "voice" => config.voice = Default::default(),
         "keybinds" => config.keybinds = Default::default(),
         "panels" => config.panels = Default::default(),
-        "games" => config.games = Default::default(),
         "performance" => config.performance = Default::default(),
         "advanced" => config.advanced = Default::default(),
         "shell" => config.shell = Default::default(),
@@ -639,7 +616,6 @@ mod tests {
         assert!(is_valid_settings_path("effects.glow.intensity"));
         assert!(is_valid_settings_path("visualizer.enabled"));
         assert!(is_valid_settings_path("keybinds.push_to_talk"));
-        assert!(is_valid_settings_path("games.enabled.wordle"));
         assert!(is_valid_settings_path("auto_open.panels"));
         assert!(is_valid_settings_path("advanced.developer.show_fps"));
         assert!(is_valid_settings_path("window.titlebar_height"));

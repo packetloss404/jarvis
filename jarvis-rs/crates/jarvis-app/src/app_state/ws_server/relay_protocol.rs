@@ -19,6 +19,28 @@ impl DesktopHello {
     }
 }
 
+/// First message a pair-Room member sends to join an N:N relay room.
+///
+/// The relay's `connection.rs` wires `room_hello{session_id,member_id}` →
+/// `room_ready` and fans out `member_joined`/`member_left`/`member_count`.
+#[derive(Debug, Serialize)]
+pub struct RoomHello {
+    #[serde(rename = "type")]
+    pub msg_type: &'static str,
+    pub session_id: String,
+    pub member_id: String,
+}
+
+impl RoomHello {
+    pub fn new(session_id: String, member_id: String) -> Self {
+        Self {
+            msg_type: "room_hello",
+            session_id,
+            member_id,
+        }
+    }
+}
+
 /// Messages the relay sends back to us.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -31,6 +53,22 @@ pub enum RelayResponse {
 
     #[serde(rename = "peer_disconnected")]
     PeerDisconnected,
+
+    /// Room transport: our `room_hello` was accepted; the room is live.
+    #[serde(rename = "room_ready")]
+    RoomReady { session_id: String, member_id: String },
+
+    /// Room transport: another member joined the room.
+    #[serde(rename = "member_joined")]
+    MemberJoined { member_id: String },
+
+    /// Room transport: a member left the room.
+    #[serde(rename = "member_left")]
+    MemberLeft { member_id: String },
+
+    /// Room transport: current member count fan-out.
+    #[serde(rename = "member_count")]
+    MemberCount { count: u32 },
 
     #[serde(rename = "error")]
     Error { message: String },

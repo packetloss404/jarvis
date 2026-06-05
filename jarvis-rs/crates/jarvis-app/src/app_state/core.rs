@@ -88,6 +88,17 @@ pub struct JarvisApp {
     pub(super) assistant_open: bool,
     pub(super) assistant_rx: Option<std::sync::mpsc::Receiver<AssistantEvent>>,
     pub(super) assistant_tx: Option<std::sync::mpsc::Sender<String>>,
+    /// Channel for runtime AI provider switches (UI switcher -> async task).
+    pub(super) assistant_provider_tx:
+        Option<std::sync::mpsc::Sender<jarvis_config::schema::AiProvider>>,
+    /// Pending tool-approval requests awaiting a human decision, keyed by the
+    /// approval request id. The value is the oneshot SENDER back to the async
+    /// tool loop; resolving it (Approve/Deny) unblocks the gate. Entries are
+    /// inserted when a `ToolApprovalRequest` event arrives and removed when the
+    /// panel answers via `assistant_tool_approve` / `assistant_tool_deny` (or
+    /// dropped on shutdown, which fails the gate closed).
+    pub(super) assistant_pending_approvals:
+        HashMap<String, tokio::sync::oneshot::Sender<jarvis_ai::ApprovalDecision>>,
 
     // Mobile relay bridge
     pub(super) mobile_broadcaster: Option<Arc<super::ws_server::MobileBroadcaster>>,
@@ -98,6 +109,40 @@ pub struct JarvisApp {
     pub(super) relay_shutdown_tx: Option<tokio::sync::mpsc::Sender<()>>,
     pub(super) relay_key_tx: Option<tokio::sync::watch::Sender<Option<[u8; 32]>>>,
     pub(super) pairing_pane_id: Option<u32>,
+
+    // Pair programming (collaborative terminal) — C2.
+    pub(super) pair_manager: Option<Arc<jarvis_social::PairManager>>,
+    pub(super) pair_inbound_rx: Option<std::sync::mpsc::Receiver<super::pair::PairInbound>>,
+    pub(super) pair_cmd_tx: Option<tokio::sync::mpsc::Sender<super::pair::PairCommand>>,
+    pub(super) pair_session_id: Option<String>,
+    pub(super) pair_member_id: Option<String>,
+    /// The pane that hosts the pair *panel* (host or navigator). NOTE: this is
+    /// overloaded as both the panel-pane target AND the host-authority flag
+    /// (`is_pair_host` = this is set AND we own a live PairManager session). A
+    /// future cleanup should split panel-pane from host-authority; see
+    /// `JarvisApp::is_pair_host`.
+    pub(super) pair_host_pane_id: Option<u32>,
+    /// Our own sanitized display name for the current pair session, captured at
+    /// start/join so a navigator can announce it via a `Join` frame on connect.
+    pub(super) pair_display_name: Option<String>,
+    pub(super) pair_key_tx: Option<tokio::sync::watch::Sender<Option<[u8; 32]>>>,
+    /// M3 mid-join replay: a bounded ring buffer of the HOST's recent raw PTY
+    /// output. On `MemberJoined` the host replays it as a `Snapshot` frame so a
+    /// late joiner's terminal starts populated instead of blank. Empty / unused
+    /// on navigators. Reset on each `start_pair`.
+    pub(super) pair_snapshot_buf: super::pair::PairSnapshotBuffer,
+    /// M3 snapshot-on-join dedup: the host's MONOTONIC cumulative count of PTY
+    /// output bytes fanned to the room. Stamped onto each `pty_output` frame and
+    /// onto the join `Snapshot`, so a late joiner can drop live chunks the
+    /// snapshot already covers (`offset <= snapshot offset`). Reset on each
+    /// `start_pair`; unused on navigators.
+    pub(super) pair_output_offset: u64,
+    /// M3 per-session authentication roster: member→identity pubkey (TOFU),
+    /// per-sender anti-replay seq counters, and the pinned host. Consulted by
+    /// `verify_signed_frame` before any inbound frame is applied. Reset on each
+    /// `start_pair`.
+    pub(super) pair_auth: super::pair::PairAuthState,
+
     pub(super) chat_stream_host: Option<ChatStreamHostState>,
     pub(super) last_chat_stream_frame_at: Instant,
     pub(super) chat_stream_capture_tx: Option<SyncSender<ChatStreamCaptureRequest>>,
@@ -172,6 +217,8 @@ impl JarvisApp {
             assistant_open: false,
             assistant_rx: None,
             assistant_tx: None,
+            assistant_provider_tx: None,
+            assistant_pending_approvals: HashMap::new(),
             mobile_broadcaster: None,
             mobile_cmd_rx: None,
             relay_event_rx: None,
@@ -180,6 +227,17 @@ impl JarvisApp {
             relay_shutdown_tx: None,
             relay_key_tx: None,
             pairing_pane_id: None,
+            pair_manager: None,
+            pair_inbound_rx: None,
+            pair_cmd_tx: None,
+            pair_session_id: None,
+            pair_member_id: None,
+            pair_host_pane_id: None,
+            pair_display_name: None,
+            pair_key_tx: None,
+            pair_snapshot_buf: super::pair::PairSnapshotBuffer::default(),
+            pair_output_offset: 0,
+            pair_auth: super::pair::PairAuthState::default(),
             chat_stream_host: None,
             last_chat_stream_frame_at: Instant::now(),
             chat_stream_capture_tx: None,
