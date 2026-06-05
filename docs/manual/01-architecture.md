@@ -6,44 +6,51 @@ This document describes the internal architecture of the Jarvis desktop applicat
 
 ## 1. What Jarvis Is
 
-Jarvis is a GPU-accelerated desktop environment that combines terminal emulation, AI chat assistants, retro arcade games, live social chat, and a configurable visual effects system into a single tiled window. Users interact with multiple panes simultaneously -- each pane can be a terminal, an AI assistant, a chat room, a game, or a settings panel. All pane content is rendered via embedded WebViews (powered by `wry`), while the window chrome, background effects, and tiling layout are rendered natively through `wgpu`.
+Jarvis is a GPU-accelerated desktop environment that combines terminal emulation, agentic AI assistants, plugin panels (including retro arcade games and a music player), live social presence and chat, and a configurable visual effects system into a single tiled window. Users interact with multiple panes simultaneously -- each pane can be a terminal, an AI assistant, a chat room, a plugin (game/draw/music), or a settings panel. All pane content is rendered via embedded WebViews (powered by `wry`), while the window chrome, background effects, and tiling layout are rendered natively through `wgpu`.
 
 The application supports:
 
 - **Tiling window management** with split/zoom/resize/swap operations
 - **Embedded terminal emulation** via xterm.js connected to native PTY processes
-- **AI assistant panels** backed by Claude and Gemini streaming APIs
-- **Live social presence** with WebSocket-based real-time user tracking
-- **E2E encrypted chat** with ECDSA identity, ECDH key exchange, and AES-256-GCM
-- **Mobile pairing** via a WebSocket relay server with QR code provisioning
-- **Plugin system** for custom HTML/JS/CSS panels served via the `jarvis://` protocol
+- **Agentic, multi-provider AI assistant panels** backed by Claude, Gemini, and OpenAI-compatible (OpenAI / MiniMax) streaming APIs, with tool calling and an interactive tool-approval gate
+- **Live social presence and chat** carried over the relay's symmetric **Room** protocol (no Supabase / external presence server)
+- **E2E encrypted chat and mobile bridging** with ECDSA identity, ECDH key exchange, and AES-256-GCM
+- **Mobile pairing** via the standalone WebSocket relay server with QR code provisioning
+- **Plugin system** for custom HTML/JS/CSS panels served via the `jarvis://` protocol; the bundled games (Tetris, Asteroids, Pinball, etc.), drawing pad, and music player ship as plugins
+- **Experimental pair programming** (a shared terminal over an encrypted relay Room, gated behind `collab.enabled` and the `experimental-collab` feature)
 - **TOML-based configuration** with live reload, theme support, and validation
 
 ---
 
 ## 2. Repository Structure
 
-The repository root groups the **primary Rust app**, the **mobile companion**, docs, and tooling. The original macOS Python + Swift/Metal prototype has been removed from the working tree; it is preserved in history at the **`legacy-archive`** git tag.
+The repository root groups the **primary Rust app**, the **mobile companion**, docs, and tooling. `jarvis-rs/` is the sole application; the original macOS Python + Swift/Metal prototype is archived at the **`legacy-archive`** git tag and is no longer part of the tracked working tree.
 
 ```
 jarvis/
   README.md              # Rust-first overview + archive pointer
-  ARCHITECTURE.md        # This chapter's "where things live" summary
-  jarvis-rs/             # PRIMARY: Rust workspace (develop here)
-    Cargo.toml
-    crates/
-    assets/panels/       # Canonical bundled web UI
+  ARCHITECTURE.md        # "Where things live" summary
+  CHANGELOG.md
+  jarvis-rs/             # PRIMARY (and only) application: Rust workspace
+    Cargo.toml           # Workspace manifest (10 crate members)
+    crates/              # The 10 crates (see Section 3)
+    assets/panels/       # Canonical bundled web UI (terminal, chat, settings,
+                         #   presence, pair, boot, status_bar, and plugins/)
     testdata/            # Shared wire-protocol JSON fixtures (relay <-> desktop)
+    docs/ packaging/ scripts/
   jarvis-mobile/         # React Native companion (thin client)
   dev/                   # Development docs (pathforward analysis, archived plans)
-  relay/                 # Deployment helpers (separate from app crates)
-  resources/             # Built-in theme assets (loaded by jarvis-rs)
-  docs/                  # Website + published manual
+  relay/                 # Relay deployment helpers (Dockerfile, cloudbuild, deploy.sh)
+  resources/themes/      # Built-in theme assets
+  docs/                  # Website + published manual (this chapter lives here)
 ```
 
-> The original macOS Python + Swift/Metal prototype (formerly `legacy/`, with its
-> `main.py`, `metal-app/`, `requirements.txt`, `scripts/`, and Python tests) is no
-> longer in the working tree. Check it out with `git checkout legacy-archive`.
+> The original macOS Python + Swift/Metal prototype (`main.py`, `metal-app/`,
+> `requirements.txt`, `scripts/`, and the Python `skills/`, `voice/`,
+> `connectors/`, `presence/` packages) is no longer tracked in the working tree.
+> Check it out with `git checkout legacy-archive`. (An untracked, gitignored
+> `legacy/` scratch directory may exist locally but is not part of the repo and
+> does not build.)
 
 ---
 
@@ -59,10 +66,10 @@ The workspace at `jarvis-rs/Cargo.toml` defines 10 crates:
 | `jarvis-platform` | Library | OS abstractions: clipboard, paths, crash reports, input processing, keybind registry, crypto identity |
 | `jarvis-tiling` | Library | Binary split tree, layout engine, pane management, focus tracking, zoom, stacks (tabs) |
 | `jarvis-renderer` | Library | GPU rendering: wgpu context, background shader pipeline, quad renderer, UI chrome, command palette, assistant panel |
-| `jarvis-ai` | Library | AI client implementations: Claude, Gemini, Whisper; streaming, tool calling, session management, skill routing |
-| `jarvis-social` | Library | Social features: WebSocket realtime client, presence tracking, chat history, channels, identity; experimental voice/screen share/pair programming |
+| `jarvis-ai` | Library | Multi-provider AI clients (Claude, Gemini, OpenAI-compatible: OpenAI/MiniMax, Whisper); SSE streaming, agentic tool-calling loops with an approval gate, session management, skill routing |
+| `jarvis-social` | Library | Social features over the relay's symmetric **Room** transport: presence tracking, chat history, channels, identity; experimental voice/screen share/pair programming (feature-gated) |
 | `jarvis-webview` | Library | WebView management: wry wrapper, IPC bridge, content provider (`jarvis://` protocol), theme bridge, navigation control |
-| `jarvis-relay` | Binary (`jarvis-relay`) | Standalone WebSocket relay server for mobile-desktop bridging; rate limiting, session pairing, stale session reaping |
+| `jarvis-relay` | Binary (`jarvis-relay`) | Standalone WebSocket relay server: mobile-desktop session pairing **and** the symmetric Room fan-out used by presence/chat/pair; rate limiting, stale session reaping |
 
 ### 3.1 Crate Details
 
@@ -74,18 +81,18 @@ The foundation crate with zero internal-crate dependencies. Defines the shared v
 
 Key modules and types:
 
-- `actions::Action` -- Enum of every user-triggerable action (47 variants). Keybinds, command palette, CLI, and IPC all resolve to an `Action`. Defined in `actions/action_enum.rs`.
+- `actions::Action` -- Enum of every user-triggerable action (39 variants). Keybinds, command palette, CLI, and IPC all resolve to an `Action`. Defined in `actions/action_enum.rs`. Notable variants include pane management (`NewPane`, `ClosePane`, `SplitHorizontal/Vertical`, `Focus*`, `ZoomPane`, `ResizePane`, `SwapPane`, `ToggleBlankPane`), overlays (`OpenCommandPalette`, `OpenSettings`, `OpenChat`, `OpenPair`, `OpenAssistant`, `CloseOverlay`), navigation (`OpenURL`, `OpenURLPrompt`), terminal/clipboard (`Copy`, `Paste`, `SelectAll`, `Search*`, `Scroll*`, `ClearTerminal`), voice (`PushToTalk`, `ReleasePushToTalk`), mobile pairing (`PairMobile`, `RevokeMobilePairing`), and `ReloadConfig`/`Quit`. There is **no** dedicated `LaunchGame` action -- games are plugins opened via the command palette / `OpenURL`.
 - `actions::ResizeDirection` -- Left/Right/Up/Down for resize and swap operations.
-- `events::Event` -- Broadcast events: `ConfigReloaded`, `PaneOpened`, `PaneClosed`, `PaneFocused`, `PresenceUpdate`, `ChatMessage`, `Notification`, `Shutdown`.
-- `events::EventBus` -- Wrapper around `tokio::sync::broadcast::Sender<Event>` with publish/subscribe API. Capacity of 256 events.
-- `types::Rect` -- `{x, y, width, height}` as `f64`. Used for viewport and pane bounds.
+- `events::Event` -- Broadcast events: `ConfigReloaded`, `PaneOpened(PaneId)`, `PaneClosed(PaneId)`, `PaneFocused(PaneId)`, `PresenceUpdate { user_id, status }`, `ChatMessage { from, text }`, `Notification(String)`, `Shutdown`, plus a `#[serde(other)] Unknown` catch-all.
+- `events::EventBus` -- Wrapper around `tokio::sync::broadcast::Sender<Event>` with publish/subscribe API.
+- `types::Rect` -- `{x, y, width, height}` as `f64`. Used for viewport and pane bounds. (Defined in `types/core.rs`.)
 - `types::PaneId` -- Newtype wrapper `PaneId(u32)`.
 - `types::PaneKind` -- Enum: `Terminal`, `Assistant`, `Chat`, `WebView`, `ExternalApp`.
 - `types::AppState` -- Enum: `Starting`, `Running`, `ShuttingDown`.
-- `types::Color` -- RGBA color with hex/rgba string parsing.
+- `types::Color` -- RGBA color with hex/rgba string parsing (in `types/color.rs`).
 - `errors::JarvisError`, `errors::ConfigError`, `errors::PlatformError` -- Error hierarchy using `thiserror`.
-- `notifications::Notification` -- In-app toast with level, title, body, TTL.
-- `notifications::NotificationQueue` -- Bounded FIFO queue (default 16) with auto-eviction of expired notifications.
+- `notifications::Notification` / `NotificationLevel` -- In-app toast with level, title, body, TTL.
+- `notifications::NotificationQueue` -- Bounded FIFO queue with auto-eviction of expired notifications.
 - `id::new_id`, `id::new_correlation_id`, `id::SessionId` -- UUID v4 generators.
 
 #### `jarvis-config`
@@ -97,7 +104,7 @@ Manages the entire configuration lifecycle.
 
 Key modules:
 
-- `schema` -- 25+ sub-modules defining every config section as `#[derive(Serialize, Deserialize, Default)]` structs. Root type: `schema::JarvisConfig` with sections for theme, colors, font, terminal, shell, window, effects, layout, opacity, background, visualizer, startup, voice, keybinds, panels, games, livechat, presence, performance, updates, logging, advanced, auto_open, status_bar, relay, plugins.
+- `schema` -- Sub-modules defining every config section as `#[derive(Serialize, Deserialize, Default)]` structs. Root type: `schema::JarvisConfig` (27 sections): theme, colors, font, terminal, shell, window, effects, layout, opacity, background, visualizer, startup, voice, assistant, keybinds, panels, livechat, presence, performance, updates, logging, advanced, auto_open, status_bar, relay, plugins, collab. (There is no `games` section -- games are plugins.) `CONFIG_SCHEMA_VERSION` is `1`.
 - `toml_loader` -- Loads `config.toml` from the OS config directory (`dirs::config_dir()/jarvis/config.toml`). Creates a default config file if none exists.
 - `toml_loader::plugins` -- Discovers local plugin directories from `{config_dir}/jarvis/plugins/`.
 - `toml_writer` -- Serializes config back to TOML for the settings panel.
@@ -138,7 +145,8 @@ Key modules:
   - Key handle store (opaque u32 references to in-memory keys)
   - Identity persistence to JSON file with PKCS#8 DER encoding
   - Fingerprint: first 8 bytes of SHA-256 of the ECDSA public key SPKI DER
-- `winit_keys` -- Normalizes winit key names to canonical form.
+  - `PairFrameSigner` -- a cheap clone of the signing key, handed to the social/pair subsystem to sign/verify pair-programming frames without sharing the full service
+- `winit_keys::normalize_winit_key` -- Normalizes winit key names to canonical form.
 - `mouse` -- Mouse event helpers.
 - `notifications` -- OS-native notification support.
 
@@ -228,12 +236,13 @@ Key types:
 **Path:** `jarvis-rs/crates/jarvis-ai/src/lib.rs`
 **Depends on:** `jarvis-common`
 
-AI provider clients with a unified interface.
+Multi-provider, agentic AI clients with a unified interface.
 
 Key types:
 
-- `AiClient` trait -- Async trait with `send_message` and `send_message_streaming` methods.
-- `Message { role: Role, content: String }` -- Chat message. Role: `User`, `Assistant`, `System`, `Tool`.
+- `AiClient` trait -- Async trait with `send_message` and `send_message_streaming` methods. Implemented by every provider client.
+- `Message { role: Role, content: String, blocks: Vec<ContentBlock> }` -- Chat message. Plain-text messages carry `content`; agentic turns carry structured `blocks`. Role: `User`, `Assistant`, `System`, `Tool`.
+- `ContentBlock` -- `Text`, `ToolUse { id, name, input }`, `ToolResult { tool_use_id, content, is_error }` -- mirrors Claude's content-block model so tool-use / tool-result turns round-trip.
 - `ToolDefinition { name, description, parameters }` -- Function/tool schema for tool calling.
 - `AiResponse { content, tool_calls: Vec<ToolCall>, usage: TokenUsage }` -- Response with optional tool invocations.
 - `AiError` -- `ApiError`, `RateLimited`, `NetworkError`, `ParseError`, `Timeout`.
@@ -241,37 +250,43 @@ Key types:
 Providers:
 
 - `claude::ClaudeClient` / `ClaudeConfig` -- Claude API client with SSE streaming. Modules: `claude/client.rs`, `claude/api.rs`, `claude/config.rs`.
-- `gemini::GeminiClient` / `GeminiConfig` -- Gemini API client. Modules: `gemini/client.rs`, `gemini/api.rs`, `gemini/config.rs`.
+- `gemini::GeminiClient` / `GeminiConfig` -- Gemini (Google Generative Language API) client.
+- `openai::OpenAiClient` / `OpenAiConfig` -- One parameterized client speaking the OpenAI Chat Completions wire format, used for both the `OpenAi` and `MiniMax` providers.
 - `whisper::WhisperClient` / `WhisperConfig` -- OpenAI Whisper transcription client.
-- `router::SkillRouter` -- Routes user intents to the appropriate provider/skill. `Provider` enum, `Skill` enum.
+- `router::SkillRouter` -- Routes user intents to the appropriate provider/skill. `Provider` enum is `Claude | OpenAi | MiniMax | Gemini` (default `Claude`); `Skill { name, provider, system_prompt }`. Tool conversion helpers (`to_claude_tool`, `to_gemini_tool`, `to_openai_tool`) adapt the shared `ToolDefinition` to each provider's schema.
+
+Agentic session and tools:
+
 - `session::Session` -- Manages multi-turn conversation state with automatic tool-call loops. Modules: `session/chat.rs`, `session/manager.rs`, `session/types.rs`.
+- `session::ToolExecutor` / `ToolOutcome` / `ToolEvent` / `ToolEventCallback` -- Pluggable tool execution with per-call event reporting.
+- **Approval gate**: `ApprovalGate` / `ApprovalRequest` / `ApprovalDecision` / `ApprovalReceiver`. Tools in `APPROVAL_REQUIRED_TOOLS` (`write_file`, `run_command`) pause the agent loop until the user approves or denies via IPC, with an `APPROVAL_TIMEOUT` of 120s.
+- `tools` -- Tool definitions (`tools/definitions.rs`: `builtin_tools()`, `read_only_tools()`) and executors. `ReadOnlyToolExecutor` runs only safe tools; `WriteExecToolExecutor` additionally runs `WRITE_EXEC_TOOLS` (`write_file`, `run_command`, with a `RUN_COMMAND_TIMEOUT` of 30s) and is only invoked after approval. Sandboxing in `tools/sandbox.rs`.
 - `streaming` -- SSE stream parsing utilities.
 - `token_tracker::TokenTracker` -- Tracks cumulative token usage across providers.
-- `tools` -- Tool definitions (`tools/definitions.rs`) and sandboxed execution (`tools/sandbox.rs`).
 
 #### `jarvis-social`
 
 **Path:** `jarvis-rs/crates/jarvis-social/src/lib.rs`
 **Depends on:** `jarvis-common`
 
-Social features: presence, chat, identity, and experimental collaboration.
+Social features: presence, chat, identity, and experimental collaboration -- all carried over the relay's symmetric **Room** transport (the old Supabase/Phoenix `realtime` transport has been removed).
 
 Key types:
 
-- `presence::PresenceClient` -- WebSocket client that connects to a presence server, sends heartbeats, and receives user status updates. Returns `PresenceEvent` via channel.
-- `presence::PresenceEvent` -- `Connected`, `UserOnline`, `UserOffline`, `ActivityChanged`, `Poked`, `ChatMessage`, `Disconnected`, `Error`, and more.
-- `presence::PresenceConfig` -- Server URL, API key, heartbeat interval.
-- `realtime::RealtimeClient` -- Lower-level WebSocket client for real-time message passing. Modules: `realtime/client.rs`, `realtime/handler.rs`, `realtime/connection.rs`.
+- `room::RoomClient` / `RoomConfig` / `RoomEvent` / `RoomControl` -- A thin, transport-only WebSocket client that speaks the relay's symmetric **Room** protocol (`room_hello` -> `room_ready` + `member_joined`* + `member_count`, then opaque text fan-out via `RoomClient::send`). It knows nothing about presence semantics; it surfaces control frames (`MemberJoined`/`MemberLeft`/`MemberCount`) and every opaque text frame as a `RoomEvent::Frame`. This module **replaces** the former `realtime::RealtimeClient`.
+- `presence` (module: `presence/client.rs`, `event_translator.rs`, `helpers.rs`, `types.rs`) -- `PresenceClient` layers presence semantics on top of `RoomClient`: it sends `PresenceFrame`s and translates inbound `RoomEvent`s into `PresenceEvent`s. Returns events via channel.
+- `presence::PresenceEvent` -- `Connected { online_count }`, `Disconnected`, `UserOnline`, `UserOffline`, `ActivityChanged`, `GameInvite`, `Poked`, `ChatMessage`, `Error`, and more.
+- `presence::PresenceConfig` -- Relay/room URL, identity, heartbeat interval.
 - `chat::ChatHistory` / `ChatHistoryConfig` / `ChatMessage` -- Chat message storage.
 - `channels::Channel` / `ChannelManager` -- Chat channel management.
 - `identity::Identity` -- User identity (user_id, display_name) generation.
-- `protocol` -- Wire protocol types: `OnlineUser`, `UserStatus`, `PresencePayload`, `ChatMessagePayload`, `GameInvitePayload`, `PokePayload`, `ActivityUpdatePayload`.
+- `protocol` -- Wire protocol types: `OnlineUser`, `UserStatus`, `PresenceFrame`, `PresencePayload`, `ChatMessagePayload`, `GameInvitePayload`, `PokePayload`, `ActivityUpdatePayload`.
 
-Feature-gated experimental modules (behind `experimental-collab` feature flag):
+Feature-gated experimental modules (behind the `experimental-collab` feature flag):
 
-- `pair` -- Pair programming sessions (`PairManager`, `PairSession`, `PairRole`).
-- `voice` -- Voice chat rooms (`VoiceManager`, `VoiceRoom`, `VoiceConfig`).
-- `screen_share` -- Screen sharing (`ScreenShareManager`, `ShareQuality`).
+- `pair` -- Pair programming sessions over a Room (`PairManager`, `PairSession`, `PairRole`, `PairConfig`, `PairEvent`). Frames are signed via `PairFrameSigner` and exchanged as opaque encrypted text over the relay Room.
+- `voice` -- Voice chat rooms (`VoiceManager`, `VoiceRoom`, `VoiceConfig`, `VoiceEvent`); `VoiceSignal` in `protocol`.
+- `screen_share` -- Screen sharing (`ScreenShareManager`, `ScreenShareConfig`, `ShareQuality`, `ScreenShareEvent`); `ScreenShareSignal` in `protocol`.
 
 #### `jarvis-webview`
 
@@ -309,16 +324,20 @@ Key types:
 **Path:** `jarvis-rs/crates/jarvis-relay/src/main.rs`
 **Depends on:** (no internal crates -- standalone binary)
 
-A standalone WebSocket relay server for mobile-to-desktop bridging.
+A standalone WebSocket relay server (CLI flags: `--port` default 8080, `--session-ttl`, `--max-connections-per-ip`, `--max-sessions`). It serves three connection topologies, all keyed by a session ID and forwarding opaque text after the first message:
+
+- **Pairing (1:1)** -- `desktop_hello` / `mobile_hello`, with `peer_connected` / `peer_disconnected` notifications. Used for mobile<->desktop bridging.
+- **Broadcast (1:N)** -- `host_hello` / `spectator_hello`, with `host_connected` / `viewer_count`. Used for workspace/chat streaming to viewers.
+- **Room (N:N symmetric)** -- `room_hello { session_id, member_id }` -> `room_ready` + `member_joined`* + `member_count`, then symmetric opaque fan-out. This is the transport `jarvis-social` (presence/chat/pair) rides on.
 
 Modules:
 
-- `connection` -- Handles individual WebSocket connections, pairs desktop and mobile clients by session ID.
-- `protocol` -- Wire protocol for relay messages.
+- `connection` -- Handles individual WebSocket connections, parses the first `RelayHello`, and routes the connection into the appropriate topology.
+- `protocol` -- `RelayHello` / `RelayResponse` wire enums (only the first frame is parsed; the rest is opaque text). Wire conformance is pinned against JSON fixtures in `jarvis-rs/testdata/relay/`.
 - `session::SessionStore` -- Manages active sessions, supports stale session reaping.
 - `rate_limit::RateLimiter` -- Per-IP connection limiting and total session caps.
 
-The relay never inspects message payloads -- all PTY data is E2E encrypted between endpoints using the `CryptoService` from `jarvis-platform`.
+The relay never inspects message payloads -- all PTY/pair data is E2E encrypted between endpoints using the `CryptoService` from `jarvis-platform`.
 
 #### `jarvis-app`
 
@@ -328,51 +347,59 @@ The relay never inspects message payloads -- all PTY data is E2E encrypted betwe
 The main application binary. Wires everything together.
 
 Entry point (`main.rs`):
-1. `load_dotenv()` -- Loads `.env` file
+1. `load_dotenv()` -- Loads `.env` file (searched at the project root, the `jarvis-rs/` workspace root, then `./`)
 2. `install_panic_hook()` -- Installs crash report writer
-3. `cli::parse()` -- Parses CLI arguments (`--execute`, `--directory`, `--config`, `--log-level`)
+3. `cli::parse()` -- Parses CLI arguments (`-e/--execute`, `-d/--directory`, `--config`, `--log-level`)
 4. Initializes `tracing_subscriber` logging
-5. `jarvis_config::load_config()` -- Loads and validates config
+5. `jarvis_config::load_config()` -- Loads and validates config (falls back to defaults on error)
 6. `jarvis_platform::paths::ensure_dirs()` -- Creates platform directories
-7. `KeybindRegistry::from_config()` -- Builds keybind registry
-8. Creates `winit::EventLoop` and `JarvisApp`
-9. `event_loop.run_app(&mut app)` -- Enters the event loop
+7. Applies `--directory` (changes the working dir) if given
+8. `KeybindRegistry::from_config()` -- Builds keybind registry
+9. Creates `winit::EventLoop` and `JarvisApp::new(config, registry)`
+10. `event_loop.run_app(&mut app)` -- Enters the event loop
 
-**`app_state` module** (21 sub-modules):
+(An optional `updater` module is compiled in behind the `updater` cargo feature.)
+
+**`app_state` module** (sub-modules in `app_state/mod.rs`):
 
 - `core.rs` -- `JarvisApp` struct definition with all fields
 - `event_handler.rs` -- `impl ApplicationHandler for JarvisApp` (winit event loop integration)
 - `init.rs` -- Window creation, GPU renderer initialization, WebView subsystem setup, crypto identity loading
 - `dispatch.rs` -- Action dispatch: routes `Action` enum variants to subsystem calls
 - `shutdown.rs` -- Ordered shutdown: PTYs -> WebViews -> presence -> relay -> tokio runtime -> GPU
-- `polling.rs` -- Adaptive polling at ~120Hz for presence, assistant, webview events, PTY output, mobile commands, relay events, menu events
-- `pty_bridge/` -- PTY process management via `portable-pty`. Spawns shell processes, manages reader threads, bridges I/O between xterm.js and PTY
-- `webview_bridge/` -- 15 sub-modules handling all WebView-related operations:
-  - `ipc_dispatch.rs` -- IPC message validation (allowlist of 29 permitted kinds) and routing
+- `polling.rs` -- Polling at ~60Hz (every `POLL_INTERVAL` = 16ms) of: presence, pair, assistant, webview events, PTY output, chat stream, mobile commands, relay events, menu events
+- `terminal.rs` -- Terminal-pane setup / shell command helpers
+- `pty_bridge/` -- PTY process management via `portable-pty` (`spawn.rs`, `io.rs`, `types.rs`). Spawns shell processes, manages reader threads, bridges I/O between xterm.js and PTY
+- `webview_bridge/` -- 16 sub-modules handling all WebView-related operations:
+  - `ipc_dispatch.rs` -- IPC message validation (allowlist of 51 permitted kinds) and routing
   - `lifecycle.rs` -- WebView creation/destruction per pane
   - `bounds.rs` -- Coordinate conversion and bounds synchronization
   - `pty_handlers.rs` -- PTY input/resize/restart IPC handlers
   - `pty_polling.rs` -- Polls PTY output and forwards to WebView
   - `presence_handlers.rs` -- Presence user list and poke forwarding
-  - `settings_handlers.rs` -- Settings panel IPC (get/set config, theme changes)
-  - `assistant_handlers.rs` -- AI assistant input/output forwarding
+  - `settings_handlers.rs` -- Settings panel IPC (get/set/update/reset config, theme changes)
+  - `assistant_handlers.rs` -- AI assistant input/output forwarding, provider selection, tool approve/deny
   - `crypto_handlers.rs` -- Crypto operations proxied from WebView JS
   - `file_handlers.rs` -- File read operations for WebView
   - `theme_handlers.rs` -- Theme CSS injection into all WebViews
   - `status_bar_handlers.rs` -- Status bar initialization
-  - `chat_stream_handlers.rs` -- Workspace streaming to mobile chat (start/stop/status, 350ms frame interval capture)
-  - `emulator_handlers.rs` -- ROM file listing and loading for the retro game emulator panel (scans ~/ROMs, supports NES/SNES/GB/GBA/N64/Genesis/etc.)
-- `assistant.rs` / `assistant_task.rs` -- AI assistant panel state and background task
+  - `chat_stream_handlers.rs` -- Workspace streaming to viewers/mobile chat (start/stop/status)
+  - `emulator_handlers.rs` -- ROM file listing and loading for the emulator plugin (scans ~/ROMs; NES/SNES/GB/GBA/N64/Genesis/etc.)
+  - `music_handlers.rs` -- Music library init/scan/search/set-dir for the music-player plugin
+  - `pair_handlers.rs` -- Pair-programming IPC (`pair_start/join/leave/input/request_control/set_driver/cursor/status`)
+- `assistant.rs` / `assistant_task.rs` -- AI assistant panel state and the background agentic task (streaming + tool loop + approval gate)
 - `social.rs` -- Presence client lifecycle and event polling
-- `palette.rs` -- Command palette keyboard handler
-- `blanking.rs` -- Pane blanking: covers individual panes with a black overlay and blocks input. Used for privacy/focus management. State tracked in `blanked_panes: HashSet<u32>`
-- `workspace_capture/` -- Cross-platform workspace frame capture for live streaming to mobile chat. Native implementations on macOS and Linux; stub on Windows. Returns JPEG data URLs at 350ms intervals
+- `pair.rs` -- Pair-programming lifecycle: builds the `PairManager`, bridges its events to/from the relay Room, polled by `poll_pair` (idempotent; no-op while `collab.enabled` is false)
+- `music_library.rs` -- Local music library scanning/search (metadata via `lofty`) for the music-player plugin
+- `palette.rs` -- Command palette keyboard handler; injects plugin items into the palette
+- `blanking.rs` -- Pane blanking: covers individual panes with a black overlay and blocks input. State tracked in `blanked_panes`
+- `workspace_capture/` -- Cross-platform workspace frame capture for live streaming. Native implementations on macOS and Linux; stub on Windows
 - `resize_drag.rs` -- Mouse drag-to-resize pane borders
 - `title.rs` -- Dynamic window title updates
 - `ui_state.rs` -- UI chrome state updates (tab bar, status bar)
 - `menu.rs` -- Native menu bar (via `muda`)
-- `ws_server.rs` -- Mobile relay bridge WebSocket client
-- `types.rs` -- Internal types: `AssistantEvent`, `PresenceCommand`, `POLL_INTERVAL` (8ms / ~120Hz)
+- `ws_server/` -- Mobile relay bridge and pair-room WebSocket clients (`relay_client.rs`, `relay_polling.rs`, `relay_protocol.rs`, `pairing.rs`, `pair_room_client.rs`, `pair_protocol.rs`, `mobile_polling.rs`, `broadcast.rs`, `crypto_bridge.rs`, `startup.rs`)
+- `types.rs` -- Internal types: `AssistantEvent`, `PresenceCommand`, `POLL_INTERVAL` (16ms / ~60Hz)
 
 ---
 
@@ -407,8 +434,8 @@ Textual summary:
 - `jarvis-tiling`, `jarvis-ai`, `jarvis-social`, `jarvis-webview` each depend only on `jarvis-common`.
 - `jarvis-platform` depends on `jarvis-common` and `jarvis-config`.
 - `jarvis-renderer` depends on `jarvis-common`, `jarvis-config`, and `jarvis-platform`.
-- `jarvis-app` depends on all library crates.
-- `jarvis-relay` has no internal dependencies (standalone server binary).
+- `jarvis-app` depends on all library crates, and enables `jarvis-social`'s `experimental-collab` feature (so the pair/voice/screen-share modules are compiled in). `jarvis-app` does **not** depend on `jarvis-relay`.
+- `jarvis-relay` has no internal dependencies (standalone server binary). It is wire-compatible with `jarvis-social`'s `RoomClient` and the desktop relay client, verified by shared JSON fixtures in `jarvis-rs/testdata/relay/`.
 
 ---
 
@@ -419,12 +446,13 @@ Textual summary:
 ```
 main()
   |
-  +-- load_dotenv()                    Load .env from project root
+  +-- load_dotenv()                    Load .env (project root / jarvis-rs / cwd)
   +-- install_panic_hook()             Register crash report writer
-  +-- cli::parse()                     Parse --execute, --directory, --config, --log-level
+  +-- cli::parse()                     Parse -e/--execute, -d/--directory, --config, --log-level
   +-- tracing_subscriber::init()       Initialize structured logging
   +-- jarvis_config::load_config()     Load TOML -> apply theme -> discover plugins -> validate
   +-- jarvis_platform::ensure_dirs()   Create ~/.config/jarvis, ~/.local/share/jarvis, etc.
+  +-- (set working dir from --directory)
   +-- KeybindRegistry::from_config()   Build keybind lookup table
   +-- EventLoop::new()                 Create winit event loop
   +-- JarvisApp::new(config, registry) Construct app state (no window yet)
@@ -441,12 +469,13 @@ main()
               |     |     +-- ContentProvider::new(assets/panels)
               |     |     +-- Register plugin directories
               |     |     +-- WebViewManager::new() + WebViewRegistry::new()
-              |     +-- CryptoService::load_or_generate()
+              |     +-- CryptoService load/generate identity
               |     +-- initialize_menu() (native menu bar via muda)
               |
               +-- show_boot_webview() OR setup_default_layout()
-              +-- start_presence()           Connect to presence WebSocket server
-              +-- start_relay_client()       Connect to mobile relay server
+              +-- start_presence()           Connect to the relay Room (presence)
+              +-- start_relay_client()       Connect to the mobile relay (pairing)
+              +-- start_pair()               Wire pair-programming (no-op unless collab.enabled)
               +-- update_window_title()
               +-- request_redraw()
 ```
@@ -466,9 +495,9 @@ The event loop is driven by `winit`'s `ApplicationHandler` trait. `JarvisApp` im
   - `KeyboardInput` -- Routes through `handle_keyboard_input()` (see Section 7)
   - `RedrawRequested` -- Calls `update_chrome()` + `render_frame()`
 - **`about_to_wait()`** -- Called when the event queue is empty. Runs `poll_and_schedule()` which:
-  1. Every 8ms (~120Hz): polls presence events, assistant events, webview events, PTY output, mobile commands, relay events, menu events
+  1. Every `POLL_INTERVAL` (16ms, ~60Hz): polls presence, pair, assistant, webview events, PTY output, chat stream, mobile commands, relay events, menu events
   2. If `needs_redraw`: requests redraw and sets `ControlFlow::Poll`
-  3. Otherwise: sets `ControlFlow::WaitUntil(now + 8ms)` for power-efficient waiting
+  3. Otherwise: sets `ControlFlow::WaitUntil(now + 16ms)` for power-efficient waiting
 
 ### 5.3 Shutdown Sequence
 
@@ -521,7 +550,7 @@ Bidirectional communication between Rust and WebView JavaScript:
 - **Rust -> JS**: Rust calls `handle.evaluate_script("...")` or `handle.send_ipc(kind, payload)` which generates `window.jarvis.ipc._dispatch(kind, payload)`.
 - **Request/Response**: `window.jarvis.ipc.request(kind, payload)` returns a Promise. Rust responds with a payload containing `_reqId` to resolve the matching pending request.
 
-All IPC messages are validated against an allowlist of 29 permitted `kind` strings. Unknown kinds are rejected and logged.
+All IPC messages are validated against an allowlist of 51 permitted `kind` strings (`ALLOWED_IPC_KINDS` in `webview_bridge/ipc_dispatch.rs`). Unknown kinds are rejected and logged.
 
 ### 6.6 PTY Bridge
 
@@ -540,7 +569,7 @@ Panel assets are embedded in the binary at compile time via `include_dir`, so th
 
 ### 6.8 Sync/Async Bridge
 
-The main event loop runs synchronously on the main thread (required by winit). Async operations (presence WebSocket, AI streaming, relay client) run on a dedicated `tokio::runtime::Runtime` with 1 worker thread. Communication uses `std::sync::mpsc` channels (sync -> async) and `tokio::sync::mpsc` channels (async -> sync), polled at ~120Hz by the main thread.
+The main event loop runs synchronously on the main thread (required by winit). Async operations (the relay Room for presence/pair, AI streaming, the mobile relay client) run on dedicated `tokio::runtime::Runtime`s (multi-thread, 1 worker thread each). Communication uses `std::sync::mpsc` channels (sync -> async) and `tokio::sync::mpsc` channels (async -> sync), drained at ~60Hz (every 16ms) by the main thread.
 
 ### 6.9 Crypto Identity
 
@@ -615,16 +644,23 @@ Physical key press
     |           ZoomPane      -> tiling.execute(TilingCommand::Zoom) + sync_webview_bounds()
     |           ResizePane    -> tiling.execute(TilingCommand::Resize) + sync_webview_bounds()
     |           ToggleFullscreen -> window.set_fullscreen()
-    |           OpenCommandPalette -> create CommandPalette, set InputMode::CommandPalette
+    |           ToggleBlankPane  -> toggle_blank_for_focused_pane()
+    |           OpenCommandPalette -> create CommandPalette (+ inject plugin items),
+    |                                 set InputMode::CommandPalette
     |           OpenAssistant -> toggle assistant panel, set InputMode::Assistant
+    |           OpenChat / OpenSettings / OpenPair -> open the corresponding panel
     |           Copy          -> evaluate_script() to grab selection from xterm.js
     |           Paste         -> Clipboard::get_text() + evaluate_script() to inject
-    |           LaunchGame    -> load_url("jarvis://localhost/games/{game}.html")
-    |           OpenURL       -> load_url(normalized_url)
-    |           PairMobile    -> show_pair_code() (QR code in a pane)
+    |           OpenURL(url)  -> load_url(normalized_url); a jarvis://localhost/plugins/<id>/
+    |                            URL may request an opaque webview (e.g. WebGL games)
+    |           PairMobile    -> show pairing QR (relay pairing session)
     |           ReloadConfig  -> reload config, rebuild registry, re-inject themes
     |           Quit          -> publish Shutdown event, call shutdown()
     |           ...etc
+
+    Note: there is no LaunchGame action. The bundled games are plugins; they are
+    launched from the command palette (plugin items) or via OpenURL, which loads
+    jarvis://localhost/plugins/<game>/index.html.
     |
     +-- TerminalInput(bytes) -> (handled natively by xterm.js in focused WebView)
     |
@@ -691,19 +727,22 @@ The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform 
 | `skills/claude_code.py` | `jarvis-ai::claude::ClaudeClient` |
 | `voice/audio.py` | `jarvis-ai::whisper::WhisperClient` |
 | `connectors/token_tracker.py` | `jarvis-ai::token_tracker::TokenTracker` |
+| None (new) | `jarvis-ai` multi-provider clients (OpenAI / MiniMax / Gemini) + agentic tool loop with approval gate |
 | None (new) | `jarvis-tiling` (binary split tree tiling manager) |
 | None (new) | `jarvis-config` (TOML config with validation + live reload) |
 | None (new) | `jarvis-platform::CryptoService` (E2E encryption) |
-| None (new) | `jarvis-social` (WebSocket presence + chat) |
-| None (new) | `jarvis-relay` (mobile bridge server) |
-| None (new) | Plugin system (`jarvis://` protocol + plugin directories) |
+| None (new) | `jarvis-social` (presence + chat over the relay Room transport) |
+| None (new) | `jarvis-relay` (mobile bridge + Room/broadcast server) |
+| None (new) | Plugin system (`jarvis://` protocol + plugin directories; games, draw, music) |
+| None (new) | Experimental pair programming over an encrypted relay Room |
 
 ### 8.3 What Exists Where
 
-- The Rust workspace is the only stack in the working tree; it is self-contained in `jarvis-rs/`
-- The Rust binary is `jarvis` (from `jarvis-app`)
-- Bundled web assets (HTML/JS/CSS for panels and games) are in `jarvis-rs/assets/`
-- The archived prototype's Python entry point (`main.py`), Swift app (`metal-app/`), and supporting code are no longer in the tree -- they are preserved at the `legacy-archive` git tag (`git checkout legacy-archive` to inspect them)
+- The Rust workspace is the only stack; it is self-contained in `jarvis-rs/`
+- There are two binaries: `jarvis` (from `jarvis-app`) and `jarvis-relay` (from `jarvis-relay`)
+- Bundled web assets (HTML/JS/CSS for panels and the game/draw/music plugins) live in `jarvis-rs/assets/panels/` (with plugins under `assets/panels/plugins/`)
+- Shared relay <-> desktop wire fixtures live in `jarvis-rs/testdata/relay/`
+- The archived prototype's Python entry point (`main.py`), Swift app (`metal-app/`), and supporting code are no longer tracked in the tree -- they are preserved at the `legacy-archive` git tag (`git checkout legacy-archive` to inspect them)
 
 ---
 
@@ -711,14 +750,14 @@ The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform 
 
 The configuration system is layered:
 
-1. **Schema** (`jarvis-config::schema::JarvisConfig`) -- 25+ strongly-typed config sections, all with `#[serde(default)]`
+1. **Schema** (`jarvis-config::schema::JarvisConfig`) -- 27 strongly-typed config sections, all with `#[serde(default)]`
 2. **TOML Loading** -- Reads from `{config_dir}/jarvis/config.toml`, creates default if missing
-3. **Theme Application** -- Loads named theme, selectively overrides config fields
-4. **Plugin Discovery** -- Scans `{config_dir}/jarvis/plugins/` for local plugin directories
+3. **Theme Application** -- Loads the named theme (skipped for the default `jarvis-dark`), selectively overrides config fields
+4. **Plugin Discovery** -- Scans `{config_dir}/jarvis/plugins/` for local plugin directories into `config.plugins.local`
 5. **Validation** -- Checks color formats, numeric ranges, enum values, cross-field constraints
 6. **Live Reload** -- File watcher triggers `Action::ReloadConfig` which re-runs the pipeline
 
-Config sections include: theme, colors, font, terminal, shell, window, effects, layout, opacity, background, visualizer, startup, voice, keybinds, panels, games, livechat, presence, performance, updates, logging, advanced, auto_open, status_bar, relay, plugins.
+Config sections (27): theme, colors, font, terminal, shell, window, effects, layout, opacity, background, visualizer, startup, voice, assistant, keybinds, panels, livechat, presence, performance, updates, logging, advanced, auto_open, status_bar, relay, plugins, collab.
 
 ---
 

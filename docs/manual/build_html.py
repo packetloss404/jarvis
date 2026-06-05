@@ -22,6 +22,8 @@ CHAPTERS = [
     ("08-plugins.md", "Plugin System"),
     ("09-networking.md", "Networking & Social"),
     ("10-renderer.md", "Renderer & Visual Effects"),
+    ("11-ai-assistant.md", "AI Assistant"),
+    ("12-collaboration.md", "Collaborative Terminal"),
 ]
 
 # Read all chapters and build the data blocks

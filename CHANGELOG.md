@@ -8,9 +8,75 @@ Between 24 February and 1 March 2026, a large share of the work summarized in th
 
 ---
 
-## [Unreleased]
+## [Unreleased] — The Revival (2026-06-02 — 2026-06-05)
 
-Changes on your branch that are not yet tagged or released should be listed here over time.
+A near-complete rebuild of the inherited project — focused, secured, and extended into a
+self-hosted, multi-provider, collaboratively-capable app. 25 commits on top of the original
+baseline (`c083a15`): 229 files changed, **+16,171 / −23,717** (a net code reduction, driven
+by deleting the legacy macOS stack while adding new Rust subsystems). `cargo build --workspace`
+is clean and `cargo test --workspace` is green (**810 passed**, 1 intentionally-ignored Windows
+ConPTY echo test). Built and adversarially reviewed via multi-agent build/review passes.
+
+### Removed (from the original dyoburon version)
+
+- **The entire legacy macOS Python + Swift/Metal stack** — archived at the `legacy-archive`
+  git tag, then removed from the working tree:
+  - Python orchestrator: `legacy/main.py` (~1,900 lines), `config.py`, `connectors/`
+    (claude_proxy, http_client, token_tracker), `jarvis/` (commands, config, session),
+    `skills/` (claude_code, code_assistant, code_tools, router), `voice/` (audio, Whisper
+    client/server), `presence/` (Python presence server + client + demo bots + Dockerfile),
+    and the Python test suite.
+  - The Swift/Metal frontend: the entire `legacy/metal-app/` app (~50 files — Renderer,
+    shaders, Timeline, the WebView/chat layers, the manager classes, settings overlay, audio).
+- **The Supabase realtime backend** — `jarvis-social/src/realtime/*` (the hand-written
+  Phoenix/Supabase client, ~790 lines) deleted; chat + presence moved onto the project's own
+  relay (see Added). The dead Supabase project the original depended on is no longer used.
+- **The built-in "games" subsystem** — the `[games]` config schema and the bespoke game-launch
+  machinery (`Action::LaunchGame`, the `launch_game` IPC); the games themselves were reorganized
+  into plugins (see Changed).
+- **Legacy release & tooling** — the macOS/Sparkle GitHub release workflow (`release.yml`), the
+  Sparkle appcast template, the shell scripts (`scripts/{start,setup,login,package}.sh`,
+  `login.ps1`), and `pytest.ini`.
+- Dead/orphaned code surfaced during the rebuild (an unused skill router, a dead dual
+  signing-seam, stale Supabase residue) and a 1.4 MB tool cache wrongly tracked in git.
+
+> Note: an unused Gemini stub was briefly removed mid-rebuild and then **restored** as a
+> first-class provider — Gemini is present in the final tree.
+
+### Added
+
+- **Multi-provider AI assistant** — Claude, OpenAI GPT, Google Gemini, and MiniMax, switchable
+  in-panel (OpenAI + MiniMax share one OpenAI-compatible client). Provider keys from the environment.
+- **Agentic tools behind a fail-closed approval gate** — read-only filesystem tools by default;
+  `write_file` + `run_command` are opt-in and require explicit human approval per call, with
+  no-shell argv execution, sandbox-jailed paths, and `.cmd`/`.bat` refusal on Windows (BatBadBut).
+- **Self-hosted relay backend** — a new symmetric N:N "Room" session type in `jarvis-relay`;
+  chat and presence now run over it (no third-party backend), with per-member ECDSA identities.
+  Deployable anywhere — a Railway config (`railway.json` + `.dockerignore`) is included and the
+  relay is live on Railway.
+- **Collaborative terminal / pair programming** (experimental, off by default) — share a terminal
+  over the relay Room with driver/navigator roles; sessions are authenticated with per-member
+  signed frames (host pinned from the invite capability; replay- and impersonation-resistant).
+- **Windows workspace screen capture** (for live sharing).
+- **MIT `LICENSE`** (the license `Cargo.toml` declared but never shipped).
+
+### Changed / reorganized
+
+- **Games → first-party plugins** — the 8 games + music player now live under
+  `assets/panels/plugins/<id>/` with `plugin.toml` manifests (and an `opaque` flag for the WebGL
+  emulator), discovered + launched through the standard plugin path.
+- **Mobile chat migrated** off Supabase onto the relay Room (mirroring the desktop).
+- **Non-blocking ConPTY teardown** — fixes a Windows hang that blocked `cargo test --workspace`.
+- **Docs rebuilt** — `README`/`ARCHITECTURE`/`CONTRIBUTING` and the full technical manual updated
+  to the current code (new chapters **11 — AI Assistant** + **12 — Collaboration**); the marketing
+  site refreshed; the README screenshot replaced with a real running-app capture; `dev/`
+  reorganized (historical analyses archived under `_archive/`, a `ROADMAP.md` of remaining work added).
+
+### Known residuals
+
+- The relay's in-room `member_id` slot permits a denial-only DoS (content is unforgeable — pair
+  frames are signed). A full signed-slot binding and enabling collaboration by default are tracked
+  in [`dev/ROADMAP.md`](dev/ROADMAP.md).
 
 ---
 
@@ -18,7 +84,7 @@ Changes on your branch that are not yet tagged or released should be listed here
 
 ### Documentation, marketing site & analysis
 
-- Unified codebase analysis with an interactive HTML dashboard and strategic write-up (`dev/pathforward/`).
+- Unified codebase analysis with an interactive HTML dashboard and strategic write-up (now archived at `dev/_archive/pathforward/`).
 - Interactive Jarvis marketing site simulating a live session (tiles, terminal, chat, palette, games).
 - Manual refreshed for embedded assets, transparency, and newer platform behavior.
 

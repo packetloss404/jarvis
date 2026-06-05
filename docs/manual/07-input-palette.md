@@ -71,13 +71,15 @@ resolve to an `Action` before being dispatched.
 | `ResizePane { direction, delta }` | Resize Pane | Panes | Resize the focused pane in the given direction by `delta` pixels. |
 | `SwapPane(direction)` | Swap Pane | Panes | Swap the focused pane with its neighbor in the given direction. |
 | `ToggleFullscreen` | Toggle Fullscreen | Window | Toggle borderless fullscreen on the application window. |
+| `ToggleBlankPane` | Toggle Blank Window | Window | Toggle the focused pane between its content and a blank state. |
 | `Quit` | Quit | Window | Publish a `Shutdown` event, clean up, and exit the application. |
 | `OpenCommandPalette` | Command Palette | Apps | Open the command palette overlay. |
 | `OpenSettings` | Open Settings | Apps | Open the settings panel in a new horizontal split. |
-| `OpenChat` | Open Chat | Apps | Open the chat panel in a new horizontal split. |
+| `OpenChat` | Open Chat | Apps | Open the chat panel in a new horizontal split (`jarvis://localhost/chat/index.html`). |
+| `OpenPair` | Open Pair Programming | Apps | Open the collaborative pair-programming panel in a new horizontal split (`jarvis://localhost/pair/index.html`). The panel drives the session over pure IPC (`pair_start`/`pair_join` → `pair_event`/`pair_status`). |
 | `CloseOverlay` | Close Overlay | Apps | Close whichever overlay is open (assistant or palette) and return to `Terminal` mode. |
 | `OpenURLPrompt` | Open URL | Apps | Sentinel action -- never dispatched.  Intercepted by the palette to enter URL input mode. |
-| `OpenAssistant` | Open Assistant | Apps | Toggle the AI assistant panel (opens or closes). |
+| `OpenAssistant` | Open Assistant | Apps | Toggle the AI assistant panel (opens or closes). (Declared under "AI / Voice" in the enum, but `category()` groups it under **Apps**.) |
 | `PushToTalk` | Push to Talk | System | Begin push-to-talk voice capture. On key _release_, emits `ReleasePushToTalk`. |
 | `ReleasePushToTalk` | Release Push to Talk | System | End push-to-talk voice capture. Synthesized by `InputProcessor` on key release. |
 | `ScrollUp(n)` | Scroll Up | Terminal | Scroll the terminal up by `n` lines. Handled by the webview. |
@@ -92,12 +94,17 @@ resolve to an `Action` before being dispatched.
 | `SearchNext` | Find Next | Terminal | Jump to the next search match. |
 | `SearchPrev` | Find Previous | Terminal | Jump to the previous search match. |
 | `ClearTerminal` | Clear Terminal | Terminal | Clear the terminal scrollback via `xterm.clear()`. |
-| `LaunchGame(name)` | Play _Name_ | Games | Navigate the focused pane's webview to `jarvis://localhost/games/{name}.html`. Stores the original URL for Escape-to-exit. |
-| `OpenURL(url)` | (context-dependent) | Games / Web | Navigate the focused pane to the given URL. Auto-prepends `https://` if no scheme is present. Game URLs (kartbros, basketbros, etc.) are categorized as "Games"; everything else is "Web". |
+| `OpenURL(url)` | Open Website | Web | Navigate the focused pane to the given URL. Auto-prepends `https://` if no scheme is present. For `jarvis://` plugin URLs the webview is recreated (opaque if the plugin manifest requests it); for other URLs the original URL is stashed in `game_active` for Escape-to-exit. The label/category come from the bookmark/plugin config when the item is a bookmark; the generic fallbacks are "Open Website" / "Web". |
 | `PairMobile` | Pair Mobile Device | System | Display a pairing code for mobile device connection. |
 | `RevokeMobilePairing` | Revoke Mobile Pairing | System | Revoke the current mobile pairing and regenerate the session ID. |
 | `ReloadConfig` | Reload Config | System | Re-read the TOML config, rebuild the keybind registry, re-register plugin directories, and re-inject the theme into all webviews. |
 | `None` | None | System | No-op sentinel. Never dispatched. |
+
+> **Removed:** the `LaunchGame(name)` variant no longer exists, and there is no
+> longer a built-in "Games" category baked into `Action`. Bundled games and web
+> apps are now ordinary bookmarks/plugins reached through `OpenURL` and the
+> `jarvis://localhost/plugins/{id}/...` plugin URLs (categories come from config).
+> The `ToggleBlankPane` and `OpenPair` variants are new.
 
 ### ResizeDirection
 
@@ -152,10 +159,13 @@ cycle_panels_reverse = "Shift+Tab"
 split_vertical = "Cmd+D"
 split_horizontal = "Cmd+Shift+D"
 close_pane = "Cmd+W"
-command_palette = "Cmd+Shift+P"
+command_palette = "Cmd+Shift+P"   # default on macOS; "F1" on Windows/Linux
 copy = "Cmd+C"
 paste = "Cmd+V"
 ```
+
+> **Note:** The default for `command_palette` is platform-dependent:
+> `Cmd+Shift+P` on macOS, `F1` on Windows/Linux.
 
 ### Modifier Names (Case-Insensitive)
 
@@ -290,7 +300,7 @@ field name in `[keybinds]`.  The **Binding** column uses the `Cmd` abstraction
 | `split_vertical` | `Cmd+D` | `SplitVertical` | Split Vertical |
 | `split_horizontal` | `Cmd+Shift+D` | `SplitHorizontal` | Split Horizontal |
 | `close_pane` | `Cmd+W` | `ClosePane` | Close Pane |
-| `command_palette` | `Cmd+Shift+P` | `OpenCommandPalette` | Command Palette |
+| `command_palette` | `Cmd+Shift+P` (macOS) / `F1` (Win/Linux) | `OpenCommandPalette` | Command Palette |
 | `copy` | `Cmd+C` | `Copy` | Copy |
 | `paste` | `Cmd+V` | `Paste` | Paste |
 
@@ -503,12 +513,18 @@ determined by the `Action::category()` method:
 | Category | Actions |
 |----------|---------|
 | **Panes** | `NewPane`, `ClosePane`, `SplitHorizontal`, `SplitVertical`, `FocusPane(_)`, `FocusNextPane`, `FocusPrevPane`, `ZoomPane`, `SwapPane(_)`, `ResizePane { .. }` |
-| **Window** | `ToggleFullscreen`, `Quit` |
-| **Apps** | `OpenSettings`, `OpenAssistant`, `OpenChat`, `OpenURLPrompt`, `OpenCommandPalette`, `CloseOverlay` |
+| **Window** | `ToggleFullscreen`, `ToggleBlankPane`, `Quit` |
+| **Apps** | `OpenSettings`, `OpenAssistant`, `OpenChat`, `OpenPair`, `OpenURLPrompt`, `OpenCommandPalette`, `CloseOverlay` |
 | **Terminal** | `Copy`, `Paste`, `SelectAll`, `SearchOpen`, `SearchClose`, `SearchNext`, `SearchPrev`, `ScrollUp(_)`, `ScrollDown(_)`, `ScrollToTop`, `ScrollToBottom`, `ClearTerminal` |
-| **Games** | `LaunchGame(_)`, `OpenURL(_)` (when URL matches game domains: kartbros, basketbros, footballbros, soccerbros, wrestlebros, baseballbros, lichess) |
-| **Web** | `OpenURL(_)` (non-game URLs) |
+| **Web** | `OpenURL(_)` |
 | **System** | `PairMobile`, `RevokeMobilePairing`, `ReloadConfig`, `PushToTalk`, `ReleasePushToTalk`, `None` |
+
+> **Changed:** `Action::category()` no longer special-cases game URLs — there is
+> no built-in **Games** category. Every `OpenURL(_)` falls back to **Web**.
+> Games are now bookmarks whose category comes from config (e.g. the default
+> Lichess bookmark sets `category = "Games"`), so a "Games" header can still
+> appear in the palette, but it is sourced from `config.plugins.bookmarks`, not
+> from `Action::category()`.
 
 Plugin items (bookmarks and local plugins) use whatever category is specified
 in their configuration.  The default category for bookmarks is `"Plugins"`.
@@ -533,8 +549,14 @@ url = "https://example.com/dashboard"
 category = "Tools"
 ```
 
-Each bookmark becomes a `PaletteItem` with `action = OpenURL(url)` and no
-keybind display.
+Each bookmark becomes a `PaletteItem` with `action = OpenURL(url)`, the
+bookmark's own `name` as the label, its `category` for grouping, and no keybind
+display.  Bookmarks with an empty `name` or `url` are skipped.
+
+The web/game shortcuts that used to be hardcoded in `palette_actions()` now live
+here.  `PluginsConfig::default()` ships these bookmarks: **Lichess**
+(`category = "Games"`), **Monkeytype**, **Excalidraw**, **Desmos**,
+**Hacker News**, and **Spotify** (all `category = "Web"`).
 
 **Source**: `jarvis-rs/crates/jarvis-config/src/schema/plugins.rs`
 
@@ -580,16 +602,17 @@ subsystem.  The table below documents every case:
 | `ResizePane { direction, delta }` | Tiling | Map `ResizeDirection` to `Direction` and signed delta. Execute `TilingCommand::Resize`. Sync bounds. |
 | `SwapPane(direction)` | Tiling | Map direction, execute `TilingCommand::Swap`. Sync bounds. |
 | `ToggleFullscreen` | Window (winit) | Toggle between borderless fullscreen and windowed mode. |
+| `ToggleBlankPane` | Tiling / WebView | Toggle the focused pane between its content and a blank state (`toggle_blank_for_focused_pane()`). |
 | `Quit` | Event Bus + Shutdown | Publish `Event::Shutdown`, call `shutdown()`, set `should_exit = true`. |
 | `OpenCommandPalette` | Palette + Input | Create `CommandPalette`, inject plugins, set `CommandPalette` mode, send `palette_show` IPC, notify overlay state. |
 | `OpenAssistant` | Assistant + Input | Toggle: if open, close and return to `Terminal` mode. If closed, create `AssistantPanel`, set `Assistant` mode, start runtime. |
 | `CloseOverlay` | Palette / Assistant | Close whichever is open. If assistant, clear panel. If palette, send `palette_hide`. Return to `Terminal` mode. |
 | `OpenSettings` | Tiling + WebView | Set `Settings` mode. Split horizontally with `PaneKind::WebView`, load `jarvis://localhost/settings/index.html`. |
 | `OpenChat` | Tiling + WebView | Split horizontally with `PaneKind::Chat`, load `jarvis://localhost/chat/index.html`. |
+| `OpenPair` | Tiling + WebView | Split horizontally with `PaneKind::WebView`, load `jarvis://localhost/pair/index.html`. The panel then drives the session over IPC (`pair_start`/`pair_join`). |
 | `Copy` | WebView (JS eval) | Evaluate JS in the focused webview to grab the xterm.js selection (or DOM selection) and send it back via `clipboard_copy` IPC. |
 | `Paste` | Clipboard + WebView | Read system clipboard via `jarvis_platform::Clipboard`. Evaluate JS to paste into the focused element (input/textarea) or send via `pty_input` IPC for terminal paste. |
-| `LaunchGame(name)` | WebView | Store the pane's current URL in `game_active`. Navigate to `jarvis://localhost/games/{name}.html`. |
-| `OpenURL(url)` | WebView | Normalize URL (prepend `https://` if missing). Store current URL in `game_active`. Navigate to the URL. |
+| `OpenURL(url)` | WebView | Normalize URL (prepend `https://` if missing). Store the current URL in `game_active` (for Escape-to-exit). For `jarvis://` URLs the webview is destroyed and recreated so the custom-protocol handler is wired up (opaque if the plugin manifest's `opaque` flag is set); other URLs are loaded in place. |
 | `PairMobile` | Mobile | Call `show_pair_code()`. |
 | `RevokeMobilePairing` | Mobile | Call `revoke_mobile_pairing()`. Log confirmation. |
 | `ReloadConfig` | Config + Registry + Chrome | Reload TOML config. Rebuild `KeybindRegistry`. Rebuild `UiChrome`. Re-register plugin directories. Re-inject theme into all webviews. Publish `Event::ConfigReloaded`. On error, push a `Notification::error`. |
@@ -756,40 +779,30 @@ returned by `Action::palette_actions()`:
 | 3 | `SplitHorizontal` | Split Horizontal | Panes |
 | 4 | `SplitVertical` | Split Vertical | Panes |
 | 5 | `ToggleFullscreen` | Toggle Fullscreen | Window |
-| 6 | `OpenSettings` | Open Settings | Apps |
-| 7 | `OpenChat` | Open Chat | Apps |
-| 8 | `OpenURLPrompt` | Open URL | Apps |
-| 9 | `Copy` | Copy | Terminal |
-| 10 | `Paste` | Paste | Terminal |
-| 11 | `SelectAll` | Select All | Terminal |
-| 12 | `ScrollToTop` | Scroll to Top | Terminal |
-| 13 | `ScrollToBottom` | Scroll to Bottom | Terminal |
-| 14 | `ClearTerminal` | Clear Terminal | Terminal |
-| 15 | `LaunchGame("tetris")` | Play Tetris | Games |
-| 16 | `LaunchGame("asteroids")` | Play Asteroids | Games |
-| 17 | `LaunchGame("minesweeper")` | Play Minesweeper | Games |
-| 18 | `LaunchGame("pinball")` | Play Pinball | Games |
-| 19 | `LaunchGame("doodlejump")` | Play Doodle Jump | Games |
-| 20 | `LaunchGame("draw")` | Open Draw | Games |
-| 21 | `LaunchGame("subway")` | Play Subway Surfers | Games |
-| 22 | `OpenURL("https://kartbros.io")` | Play KartBros | Games |
-| 23 | `OpenURL("https://basketbros.io")` | Play Basket Bros | Games |
-| 24 | `OpenURL("https://footballbros.io")` | Play Football Bros | Games |
-| 25 | `OpenURL("https://soccerbros.gg")` | Play Soccer Bros | Games |
-| 26 | `OpenURL("https://wrestlebros.io")` | Play Wrestle Bros | Games |
-| 27 | `OpenURL("https://baseballbros.io")` | Play Baseball Bros | Games |
-| 28 | `OpenURL("https://lichess.org")` | Play Lichess | Games |
-| 29 | `OpenURL("https://monkeytype.com")` | Open Monkeytype | Web |
-| 30 | `OpenURL("https://excalidraw.com")` | Open Excalidraw | Web |
-| 31 | `OpenURL("https://www.desmos.com/calculator")` | Open Desmos | Web |
-| 32 | `OpenURL("https://news.ycombinator.com")` | Open Hacker News | Web |
-| 33 | `OpenURL("https://open.spotify.com")` | Open Spotify | Web |
-| 34 | `PairMobile` | Pair Mobile Device | System |
-| 35 | `RevokeMobilePairing` | Revoke Mobile Pairing | System |
-| 36 | `ReloadConfig` | Reload Config | System |
-| 37 | `Quit` | Quit | Window |
+| 6 | `ToggleBlankPane` | Toggle Blank Window | Window |
+| 7 | `OpenSettings` | Open Settings | Apps |
+| 8 | `OpenChat` | Open Chat | Apps |
+| 9 | `OpenPair` | Open Pair Programming | Apps |
+| 10 | `OpenURLPrompt` | Open URL | Apps |
+| 11 | `Copy` | Copy | Terminal |
+| 12 | `Paste` | Paste | Terminal |
+| 13 | `SelectAll` | Select All | Terminal |
+| 14 | `ScrollToTop` | Scroll to Top | Terminal |
+| 15 | `ScrollToBottom` | Scroll to Bottom | Terminal |
+| 16 | `ClearTerminal` | Clear Terminal | Terminal |
+| 17 | `PairMobile` | Pair Mobile Device | System |
+| 18 | `RevokeMobilePairing` | Revoke Mobile Pairing | System |
+| 19 | `ReloadConfig` | Reload Config | System |
+| 20 | `Quit` | Quit | Window |
 
-In addition, bookmark and local plugin items are appended dynamically at
-runtime (see [Plugin Items in the Palette](#plugin-items-in-the-palette)).
+> **Changed:** the previously hardcoded per-game `LaunchGame(...)` entries and
+> the "bros" / web `OpenURL(...)` entries have been **removed** from
+> `palette_actions()`. Those shortcuts are now sourced from
+> `config.plugins.bookmarks`. `ToggleBlankPane` and `OpenPair` are **new** entries.
+
+In addition, bookmark items (from `config.plugins.bookmarks`) and discovered
+local plugin items (from `config.plugins.local`) are appended dynamically at
+runtime via `inject_plugin_items()` (see
+[Plugin Items in the Palette](#plugin-items-in-the-palette)).
 
 **Source**: `jarvis-rs/crates/jarvis-common/src/actions/dispatch.rs`

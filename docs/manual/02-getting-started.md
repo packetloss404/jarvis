@@ -227,7 +227,7 @@ Local plugins are loaded from the platform config directory:
   ...                # Additional plugin files
 ```
 
-See the [Plugin System documentation](../plugins.md) for details.
+See the [Plugin System chapter](08-plugins.md) for details.
 
 ---
 

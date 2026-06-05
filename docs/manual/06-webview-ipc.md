@@ -29,7 +29,7 @@ Jarvis embeds web content into tiling panes using the [wry](https://github.com/n
 
 **Key architectural decisions:**
 
-- **One WebView per pane.** Every tiling pane that displays web content (terminal, chat, assistant, settings, presence, games) gets its own `wry::WebView` instance.
+- **One WebView per pane.** Every tiling pane that displays web content (terminal, chat, assistant, settings, presence, pair-programming, music, emulator, plugins) gets its own `wry::WebView` instance.
 - **Child WebViews.** All WebViews are created as children of the main application window via `build_as_child()`, positioned and sized using the tiling layout engine.
 - **Custom protocol.** Bundled HTML/JS/CSS assets are served through a `jarvis://` custom protocol rather than a local HTTP server.
 - **Bidirectional IPC.** JavaScript sends messages to Rust via `window.ipc.postMessage()`. Rust sends messages to JavaScript via `webview.evaluate_script()`.
@@ -61,7 +61,7 @@ jarvis://localhost/chat/index.html
 jarvis://localhost/assistant/index.html
 jarvis://localhost/settings/index.html
 jarvis://localhost/presence/index.html
-jarvis://localhost/games/tetris.html
+jarvis://localhost/pair/index.html
 jarvis://localhost/boot/index.html
 jarvis://localhost/plugins/{plugin-id}/index.html
 ```
@@ -84,6 +84,11 @@ Additional panels resolved by name (not by `PaneKind`):
 |------------|-----|
 | `settings` | `jarvis://localhost/settings/index.html` |
 | `presence` | `jarvis://localhost/presence/index.html` |
+| `pair` | `jarvis://localhost/pair/index.html` (opened via `Action::OpenPair`) |
+
+Plugin panels (music, emulator, and any discovered local plugin) are served
+under `jarvis://localhost/plugins/{plugin-id}/{entry}` rather than a dedicated
+top-level URL.
 
 ### URI Resolution
 
@@ -414,8 +419,13 @@ Every message must have a `kind` field that appears in the `ALLOWED_IPC_KINDS` a
 | `open_panel` | `{ panel: "terminal"\|"assistant"\|"chat"\|"settings"\|"presence" }` | Open a new panel (splits the focused pane horizontally) |
 | `panel_close` | (none) | Close this panel (refused if it's the last pane) |
 | `panel_toggle` | `{ panel: string }` | Toggle a panel from the status bar |
-| `open_settings` | (none) | Open or focus the settings panel |
-| `launch_game` | `{ game: "tetris"\|"asteroids"\|"minesweeper"\|"pinball"\|"doodlejump"\|"draw"\|"subway"\|"videoplayer"\|"emulator" }` | Navigate the current pane to a game; stores original URL for Escape-back |
+| `open_settings` | (none) | Open or focus the settings panel (status bar entry point; calls `handle_open_panel`) |
+
+> **Removed:** `launch_game` no longer exists. Games and web apps are now
+> plain bookmarks/plugins reached via `OpenURL` (palette) or the
+> `jarvis://localhost/plugins/{id}/...` plugin URLs. Escape-to-exit is still
+> handled the same way (the original URL is stashed in `game_active` and the
+> WebView is recreated on Escape).
 
 #### Settings
 
@@ -439,7 +449,56 @@ Every message must have a `kind` field that appears in the `ALLOWED_IPC_KINDS` a
 | Kind | Payload | Description |
 |------|---------|-------------|
 | `assistant_input` | `{ text: string }` | User input to the AI assistant (max 4096 chars) |
-| `assistant_ready` | (none) | Assistant panel loaded and ready for messages |
+| `assistant_ready` | (none) | Assistant panel loaded and ready for messages; starts the AI runtime |
+| `assistant_tool_approve` | `{ id: string }` | Human approves a pending mutating/exec tool call. Resolves the matching approval oneshot with `Approve`, unblocking the async tool loop. Unknown/already-resolved ids are ignored (the gate fails closed on timeout). |
+| `assistant_tool_deny` | `{ id: string }` | Human denies a pending tool call. Resolves the matching oneshot with `Deny` (fail closed). |
+| `set_ai_provider` | `{ provider: "claude"\|"openai"\|"minimax"\|"gemini" }` | Switch the active AI provider (persisted to config, client rebuilt for the next turns). Unknown names are rejected; API keys come from environment variables, never this message. |
+
+#### Chat Stream (workspace screen-share)
+
+| Kind | Payload | Description |
+|------|---------|-------------|
+| `chat_stream_control` | `{ _reqId: number, action: "status"\|"start"\|"stop" }` | Control the workspace screen-share for the chat panel. `start` spins up the capture worker and begins emitting `chat_stream_host_frame` JPEG frames (~every 350 ms); `stop` ends it; `status` reports current state. |
+
+#### Music Player
+
+All music kinds use the request-response pattern (`_reqId`) and reply with a `*_response` kind.
+
+| Kind | Payload | Description |
+|------|---------|-------------|
+| `music_init` | `{ _reqId: number }` | Load the cached music library (or return an empty/default state). |
+| `music_scan` | `{ _reqId: number, path?: string }` | Scan a directory for audio files, cache the result, return the track list. |
+| `music_search` | `{ _reqId: number, query: string }` | Filter the in-memory library by title/artist/album (case-insensitive). |
+| `music_set_dir` | `{ _reqId: number, path: string }` | Change the music directory (used on next scan). |
+
+> Audio bytes themselves are streamed via the `jarvis://` custom protocol, not IPC.
+
+#### Emulator
+
+| Kind | Payload | Description |
+|------|---------|-------------|
+| `emulator_list_roms` | `{ _reqId: number }` | Scan `~/ROMs` and return filenames matching the ROM-extension allowlist (`nes`, `gb`, `gba`, `n64`, `iso`, `zip`, ...). |
+| `emulator_load_rom` | `{ _reqId: number, filename: string }` | Read a ROM from `~/ROMs` and return it base64-encoded (max 64 MB; filename is traversal-checked and canonicalize-contained). |
+
+#### Pair Programming (collaborative sessions)
+
+Panel↔Rust is pure IPC. The relay room socket, room worker, and host-authoritative routing live in Rust (`app_state::pair`, `ws_server`). Down-events are `pair_event` and `pair_status` (see the Rust→JS table).
+
+| Kind | Payload | Description |
+|------|---------|-------------|
+| `pair_start` | `{ cols?: number, rows?: number, display_name?: string }` | Host a new session on this pane: spawns a shared PTY, brings up the room worker, registers the session in the local `PairManager`, pins the host identity, and replies with `pair_event { event: "session_started", invite, role: "host" }` + a `pair_status` snapshot. Refused if `collab.enabled = false` or no relay is configured. |
+| `pair_join` | `{ invite_code\|session_id: string, display_name?: string }` | Join an existing session by invite code (base64url of session id + host pubkey). Joins view-only; pins the host pubkey from the invite. The joiner never calls `create_session`, so host-only write paths fail closed. |
+| `pair_leave` | (none) | Leave/end the current session. Kills the shared shell (host), tears down the worker, emits `pair_event { event: "session_ended" }`. |
+| `pair_input` | `{ data: string }` | Driver/navigator keystrokes. Emits a signed `term_input` frame to the room (capped at `MAX_TERM_INPUT_BYTES`); the host re-validates (driver-gated) before writing to its PTY. |
+| `pair_request_control` | (none) | Navigator asks for the driver seat. Emits a `request_control` frame; the host arbitrates (honoring `allow_takeover`). |
+| `pair_set_driver` | `{ user_id: string }` | Host-only: grant/change the driver seat (`user_id` ≤ 64 chars). Enforces `allow_takeover` and broadcasts `driver_changed`. |
+| `pair_cursor` | `{ row: number, col: number }` | Broadcast the local cursor position as a ghost cursor. |
+| `pair_status` | (none) | Request the current session status snapshot (replies with a `pair_status` down-event). |
+
+> **Security:** every inbound frame is end-to-end ECDSA-signed and verified before
+> the host honors it. Under `require_signed_join` (the default) unsigned or
+> unverifiable frames are dropped fail-closed; host-only frames are accepted only
+> from the pinned host, and `term_input` only from the verified current driver.
 
 #### Crypto
 
@@ -519,6 +578,17 @@ These are dispatched via `handle.send_ipc(kind, payload)` which calls `window.ja
 | `palette_show` | `{ items, query, selectedIndex, mode, placeholder }` | Show the command palette overlay |
 | `palette_update` | `{ items, query, selectedIndex, mode, placeholder }` | Update the command palette display |
 | `palette_hide` | (none) | Hide the command palette overlay |
+| `chat_stream_control_response` | `{ _reqId, relayUrl, active, sourceTitle?, isController? }` or `{ _reqId, error, relayUrl }` | Response to `chat_stream_control` |
+| `chat_stream_host_frame` | `{ mime: "image/jpeg", dataUrl, title }` or `{ error }` | A captured workspace frame for the chat screen-share |
+| `chat_stream_host_stopped` | `{ reason: string }` | The workspace screen-share stopped |
+| `music_init_response` | `{ _reqId, music_dir, tracks, cached }` | Response to `music_init` |
+| `music_scan_response` | `{ _reqId, music_dir, tracks, track_count }` or `{ _reqId, error }` | Response to `music_scan` |
+| `music_search_response` | `{ _reqId, tracks }` | Response to `music_search` |
+| `music_set_dir_response` | `{ _reqId, music_dir }` or `{ _reqId, error }` | Response to `music_set_dir` |
+| `emulator_list_roms_response` | `{ _reqId, roms: string[] }` or `{ _reqId, error }` | Response to `emulator_list_roms` |
+| `emulator_load_rom_response` | `{ _reqId, data: base64, filename }` or `{ _reqId, error }` | Response to `emulator_load_rom` |
+| `pair_event` | `{ event: "session_started"\|"session_ended"\|"session_meta"\|"error"\|... , ... }` | Pair-programming session event pushed to the panel |
+| `pair_status` | `{ session_id, member_id, role, connected, invite?, host_user_id?, driver_user_id?, allow_takeover?, cols?, rows?, participants? }` | Authoritative (host) or identity-only (navigator) pair session snapshot |
 
 ---
 
@@ -538,13 +608,19 @@ panel_focus, presence_request_users, presence_poke,
 settings_init, settings_set_theme, settings_update,
 settings_reset_section, settings_get_config,
 assistant_input, assistant_ready,
+assistant_tool_approve, assistant_tool_deny, set_ai_provider,
 open_panel, panel_close, panel_toggle, open_settings,
-status_bar_init, launch_game, ping, boot_complete,
+status_bar_init, ping, boot_complete, chat_stream_control,
 crypto, window_drag, keybind, read_file,
 clipboard_copy, clipboard_paste, open_url,
-palette_click, palette_hover, palette_dismiss,
-debug_event
+palette_click, palette_hover, palette_dismiss, debug_event,
+emulator_list_roms, emulator_load_rom,
+music_init, music_scan, music_search, music_set_dir,
+pair_start, pair_join, pair_leave, pair_input,
+pair_request_control, pair_set_driver, pair_cursor, pair_status
 ```
+
+> **Removed:** `launch_game` is no longer in the allowlist.
 
 The check is case-sensitive and exact-match. `"PTY_INPUT"`, `"pty_input_extra"`, `"pty_input\0"`, `"ping; rm -rf /"` are all rejected.
 
@@ -581,14 +657,16 @@ If parsing fails, the message is rejected.
 ### Additional Per-Handler Validation
 
 Individual handlers perform their own validation:
-- **Panel names** are checked against `ALLOWED_PANELS`: `["terminal", "assistant", "chat", "settings", "presence"]`
-- **Game names** are checked against `ALLOWED_GAMES`: `["tetris", "asteroids", "minesweeper", "pinball", "doodlejump", "draw", "subway", "videoplayer", "emulator"]`
+- **Panel names** (for `open_panel`) are checked against `ALLOWED_PANELS`: `["terminal", "assistant", "chat", "settings", "presence"]`
+- **AI provider names** (for `set_ai_provider`) are checked against `["claude", "openai", "minimax", "gemini"]` (case-sensitive)
 - **Settings paths** are checked against `VALID_PATHS` (100+ whitelisted dotted paths like `"colors.primary"`, `"font.size"`)
 - **PTY resize** values are sanity-checked: cols/rows must be 1-500
 - **Assistant input** is capped at 4096 characters
 - **Presence poke** target_user_id must be non-empty and at most 64 characters
 - **Crypto operations** are validated by operation name: `init`, `derive_room_key`, `derive_shared_key`, `encrypt`, `decrypt`, `sign`, `verify`
-- **Display names** are sanitized: only alphanumeric, spaces, hyphens; truncated to 20 chars
+- **ROM filenames** (for `emulator_load_rom`) reject `/`, `\`, and `..`, then canonicalize-contain to `~/ROMs`; max 64 MB; extension allowlist
+- **Pair `term_input`** is capped at `MAX_TERM_INPUT_BYTES`; `pair_set_driver` user_id ≤ 64 chars; every inbound pair frame is ECDSA-verified before it is honored
+- **Display names** are sanitized: only alphanumeric, spaces, hyphens; truncated to 20 chars (used by presence and pair)
 
 ---
 
@@ -600,7 +678,7 @@ The navigation handler controls which URLs a WebView is allowed to load. It uses
 
 ### Tier 1: HTTP/HTTPS Always Allowed
 
-Any URL starting with `https://` or `http://` is permitted. This allows panels to load CDN resources (e.g., Supabase, xterm.js) and navigate to external games.
+Any URL starting with `https://` or `http://` is permitted. This allows panels to load CDN resources (e.g., xterm.js, EmulatorJS) and navigate to external sites (bookmarks, the emulator's data CDN).
 
 ### Tier 2: Non-HTTP Scheme Allowlist
 
@@ -1029,7 +1107,7 @@ pub enum WebViewEvent {
 
 ### Page Load Handling
 
-When a page finishes loading in the focused pane, the handle receives OS focus to ensure the keyboard shortcut forwarder works. Additionally, for "Bros" games (kartbros, basketbros, etc.), an ad-blocker CSS/JS snippet is injected.
+When a page finishes loading in the focused pane, the handle receives OS focus to ensure the keyboard shortcut forwarder works (important after navigating back from a game/plugin URL). On every `Finished` load the app also re-applies any "blank pane" state for that pane via `apply_blank_state_to_pane()`.
 
 ---
 

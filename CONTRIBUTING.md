@@ -9,7 +9,7 @@ Thank you for helping improve Jarvis. This repository intentionally holds **two*
 | **Primary product (default)** | [`jarvis-rs/`](jarvis-rs/) | All new features, bug fixes, and UX work for the cross-platform app. |
 | **Mobile companion** | [`jarvis-mobile/`](jarvis-mobile/) | React Native client; keep it a thin companion relative to the desktop app. |
 | **Website & manual** | [`docs/`](docs/) | Marketing site, technical manual — publishable / contributor-facing. |
-| **Dev docs** | [`dev/`](dev/) | Internal development notes, pathforward analysis (`dev/pathforward/`), archived plans and plugins notes (`dev/_archive/`). |
+| **Dev docs** | [`dev/`](dev/) | Internal notes: active design docs + roadmap (`dev/plans/`, `dev/ROADMAP.md`); historical analyses and old plans archived under `dev/_archive/`. |
 
 > The original macOS Python + Swift/Metal stack has been removed from the working tree and archived at the **`legacy-archive`** git tag. There is no in-tree legacy code to maintain.
 

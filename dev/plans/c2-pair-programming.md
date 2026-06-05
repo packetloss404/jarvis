@@ -1,8 +1,11 @@
 # C2 — Collaborative Terminal / Pair Programming — Implementation Spec
 
-Status: **planned** (not yet implemented). Branch target: `revive/collab-ai`.
-Produced 2026-06-04 from a read-only design pass. This is the executable blueprint
-for the C2 milestone; hand it to an implementation agent.
+Status: **IMPLEMENTED (M1–M3)**, experimental — `collab.enabled` defaults `false`.
+Produced 2026-06-04 as the design blueprint; M1 (read-only shared terminal), M2
+(driver input/takeover), and M3 (signed-frame authentication) all shipped. The
+user-facing reference now lives in [docs/manual/12-collaboration.md](../../docs/manual/12-collaboration.md);
+this doc is retained as the design record (see §6 for the security model + the one
+documented residual: the relay member-id slot denial-only DoS).
 
 ## 0. Existing world (built vs missing)
 

@@ -1,6 +1,8 @@
 # Chapter 8: Plugin System
 
-The Jarvis plugin system lets you build custom panels, tools, and web applications that run inside Jarvis with full access to the IPC bridge. Plugins appear in the command palette and load as webview panes -- the same mechanism that powers built-in panels like Settings, Chat, and Games.
+The Jarvis plugin system lets you build custom panels, tools, and web applications that run inside Jarvis with full access to the IPC bridge. Plugins appear in the command palette and load as webview panes -- the same mechanism that powers built-in panels like Settings and Chat.
+
+The bundled games (Asteroids, Tetris, Pinball, Doodle Jump, Minesweeper, Draw, Subway Surfers, and the Emulator) and the Music Player are themselves **first-party plugins** -- they ship inside the binary as embedded plugins, each with its own `plugin.toml`, and are discovered and surfaced through exactly the same plugin pipeline as your own plugins. There is no separate "games" subsystem.
 
 This chapter covers everything you need to know to configure, create, and debug plugins.
 
@@ -8,18 +10,21 @@ This chapter covers everything you need to know to configure, create, and debug 
 
 ## 8.1 Overview
 
-The plugin system is organized into two tiers, each with different capabilities and complexity:
+The plugin system is organized into three tiers, each with different capabilities and complexity:
 
 | Tier | What it is | Where it lives | What it can do |
 |------|-----------|----------------|----------------|
-| **Bookmark** | A named URL | `config.toml` | Opens any website in a Jarvis pane |
+| **Bookmark** | A named URL | `config.toml` (`[[plugins.bookmarks]]`) | Opens any website in a Jarvis pane |
 | **Local Plugin** | HTML/JS/CSS folder | `~/.config/jarvis/plugins/` | Full `jarvis://` protocol + IPC bridge |
+| **Embedded (first-party) Plugin** | HTML/JS/CSS folder compiled into the binary | `assets/panels/plugins/<id>/` | Full `jarvis://` protocol + IPC bridge |
 
 **Bookmark plugins** are the simplest form: a name, a URL, and an optional category, all declared in your configuration file. They require no files on disk and load any website directly in a Jarvis pane.
 
 **Local plugins** are full HTML/JS/CSS applications that live in a folder on your filesystem. They are served through the `jarvis://` custom protocol, have access to the IPC bridge (`window.jarvis.ipc`), and can communicate bidirectionally with the Rust backend.
 
-Both tiers appear as entries in the command palette. Selecting a plugin navigates the focused pane to the plugin's content. Pressing Escape returns the pane to its previous state.
+**Embedded (first-party) plugins** are the plugins that ship with Jarvis -- the games and the Music Player. Their folders live under `assets/panels/plugins/<id>/` and are compiled directly into the binary via `include_dir!`. They use the same `plugin.toml` manifest, the same `jarvis://localhost/plugins/<id>/<entry>` URL scheme, and the same palette/IPC machinery as local plugins. The only differences are that they are discovered from the embedded asset tree rather than the filesystem, and their manifests may set the `opaque` flag (see Section 8.2/8.3.2).
+
+All three tiers appear as entries in the command palette. Selecting a plugin navigates the focused pane to the plugin's content. Pressing Escape returns the pane to its previous state.
 
 ---
 
@@ -149,15 +154,16 @@ A typical plugin folder looks like this:
 
 ### 8.3.2 The Manifest: plugin.toml
 
-Every local plugin requires a `plugin.toml` file in its root folder. The manifest is deserialized into an internal `Manifest` struct with these fields:
+Every local plugin requires a `plugin.toml` file in its root folder. The same manifest format is used by both filesystem (local) plugins and embedded (first-party) plugins. The manifest is deserialized into an internal `Manifest` struct with these fields:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | No | Folder name | Display name in the command palette |
 | `category` | string | No | `"Plugins"` | Palette category for grouping |
 | `entry` | string | No | `"index.html"` | Entry point HTML file |
+| `opaque` | bool | No | `false` | Render the plugin in a non-transparent (opaque) WebView |
 
-All fields are optional. A completely empty `plugin.toml` is valid -- the plugin will use the folder name as its display name, `"Plugins"` as its category, and `index.html` as its entry point.
+All fields are optional. A completely empty `plugin.toml` is valid -- the plugin will use the folder name as its display name, `"Plugins"` as its category, `index.html` as its entry point, and `false` for `opaque`.
 
 **Minimal valid manifest:**
 
@@ -172,6 +178,44 @@ name = "Project Dashboard"
 category = "Productivity"
 entry = "app.html"
 ```
+
+#### The `opaque` flag
+
+By default every plugin runs in a **transparent** WebView so it blends into the Jarvis glass/blur background. This is a problem for WebGL content: a WebGL canvas writes its own alpha channel, and in a transparent WebView that alpha makes the canvas see-through (effectively invisible). The `opaque` flag opts a plugin out of transparency and gives it a solid background.
+
+```toml
+# assets/panels/plugins/emulator/plugin.toml
+name = "Emulator"
+category = "Games"
+entry = "index.html"
+opaque = true
+```
+
+The flag is consulted on the launch (navigation) path, not at discovery time. When the user opens a plugin, `Action::OpenURL` parses the plugin ID out of the `jarvis://localhost/plugins/<id>/...` URL (via `plugin_id_from_url`), looks up the matching `LocalPlugin`, and reads its `opaque` field. For a `jarvis://` URL the webview is always destroyed and recreated so the custom-protocol handler is wired up correctly; if `opaque` is `true` the new webview is built with `create_webview_for_pane_opaque`, which sets `WebViewConfig.transparent = false`:
+
+```rust
+// dispatch.rs — Action::OpenURL, jarvis:// branch
+let opaque = plugin_id_from_url(&normalized)
+    .and_then(|id| self.config.plugins.local.iter().find(|lp| lp.id == id))
+    .map(|lp| lp.opaque)
+    .unwrap_or(false);
+if opaque {
+    self.create_webview_for_pane_opaque(pane_id, &normalized);
+} else {
+    self.create_webview_for_pane_with_url(pane_id, &normalized);
+}
+```
+
+```rust
+// webview_bridge/lifecycle.rs
+pub(in crate::app_state) fn create_webview_for_pane_opaque(&mut self, pane_id: u32, url: &str) {
+    let mut config = WebViewConfig::with_url(url);
+    config.transparent = false;
+    self.create_webview_for_pane_with_config(pane_id, config);
+}
+```
+
+Among the bundled plugins, only the **emulator** sets `opaque = true` (it renders via WebGL). All other plugins -- including the other games -- run transparent.
 
 When the `name` field is empty or omitted, the discovery logic falls back to the folder name:
 
@@ -191,7 +235,7 @@ Plugin discovery is performed by the `discover_local_plugins()` function. This f
 2. Skips any entry that is not a directory.
 3. For each directory, checks for the existence of `plugin.toml`.
 4. Reads and parses the manifest file.
-5. Constructs a `LocalPlugin` struct with the folder name as `id`, the parsed `name` (or folder name as fallback), `category`, and `entry`.
+5. Constructs a `LocalPlugin` struct with the folder name as `id`, the parsed `name` (or folder name as fallback), `category`, `entry`, and `opaque`.
 
 Directories without a `plugin.toml` are silently ignored. Manifests that fail to parse produce a warning log:
 
@@ -223,45 +267,111 @@ pub struct LocalPlugin {
     pub name: String,     // Display name in palette
     pub category: String, // Palette category grouping
     pub entry: String,    // Entry HTML file (default "index.html")
+    pub opaque: bool,     // Non-transparent WebView (e.g. WebGL games)
 }
 ```
 
-Local plugins are stored in `PluginsConfig.local`, which is marked `#[serde(skip)]` because local plugins are discovered from the filesystem at runtime, not deserialized from `config.toml`.
+Both filesystem-discovered and embedded (first-party) plugins are represented as `LocalPlugin` values and stored together in `PluginsConfig.local`, which is marked `#[serde(skip)]` because these plugins are discovered at runtime (from the filesystem and from the embedded asset tree), not deserialized from `config.toml`.
 
 ---
 
-## 8.4 How Plugins Load
+## 8.4 Embedded (First-Party) Plugins
+
+The plugins that ship with Jarvis -- the games and the Music Player -- are **embedded** plugins. Their source folders live under `assets/panels/plugins/<id>/` in the repository and are baked into the binary at compile time via `include_dir!`:
+
+```rust
+// content.rs
+static EMBEDDED_PANELS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../assets/panels");
+```
+
+### 8.4.1 The Bundled Plugins
+
+Each bundled plugin is its own folder under `assets/panels/plugins/` with a `plugin.toml`:
+
+| Folder (id) | name | category | opaque |
+|-------------|------|----------|--------|
+| `asteroids` | Asteroids | Games | |
+| `tetris` | Tetris | Games | |
+| `pinball` | Pinball | Games | |
+| `doodlejump` | Doodle Jump | Games | |
+| `minesweeper` | Minesweeper | Games | |
+| `draw` | Draw | Games | |
+| `subway` | Subway Surfers | Games | |
+| `emulator` | Emulator | Games | `true` |
+| `music-player` | Music Player | Media | |
+
+The games are no longer a separate "games" subsystem. There is no `[games]` config section, and the old `Action::LaunchGame` / `launch_game` IPC message have been removed. A game is launched exactly like any other plugin: by navigating the focused pane to `jarvis://localhost/plugins/<id>/<entry>` via `Action::OpenURL`.
+
+### 8.4.2 Discovery and Registration
+
+Embedded plugins are discovered by `ContentProvider::discover_embedded_plugins()`. It walks the embedded `plugins/` directory, and for each subfolder reads `plugin.toml`, parses it into a `Manifest { name, category, entry, opaque }` (with the same defaults as filesystem plugins -- empty name falls back to the folder id, `category = "Plugins"`, `entry = "index.html"`, `opaque = false`), and returns an `EmbeddedPlugin { id, name, category, entry, opaque }` for each valid manifest. Subfolders without a parseable `plugin.toml` are skipped.
+
+Registration happens at startup in `initialize_webviews()` (`init.rs`). Embedded plugins are merged into `config.plugins.local` so they live alongside any filesystem plugins:
+
+```rust
+// init.rs — initialize_webviews()
+for plugin in ContentProvider::discover_embedded_plugins() {
+    // Filesystem plugins take precedence — skip an embedded plugin whose id
+    // is already provided by a disk plugin.
+    if !self.config.plugins.local.iter().any(|lp| lp.id == plugin.id) {
+        self.config.plugins.local.push(jarvis_config::schema::LocalPlugin {
+            id: plugin.id,
+            name: plugin.name,
+            category: plugin.category,
+            entry: plugin.entry,
+            opaque: plugin.opaque,
+        });
+    }
+}
+```
+
+Two consequences of this merge:
+
+- **Filesystem plugins take precedence.** If you create a disk plugin under `~/.config/jarvis/plugins/` whose folder name matches a bundled plugin id (e.g. `tetris`), your version wins and the embedded one is not added. This lets you override a bundled plugin.
+- **No `add_plugin_dir` for embedded plugins.** Only *filesystem* plugins get registered with `content_provider.add_plugin_dir(...)`. Embedded plugin assets are served straight from the compiled-in asset tree: when a request for `plugins/<id>/<asset>` is not found among the registered filesystem plugin dirs, `ContentProvider::resolve` falls through to the embedded `EMBEDDED_PANELS` lookup (the embedded tree literally contains `plugins/<id>/...`).
+
+Because embedded plugins are merged into `config.plugins.local`, everything downstream -- palette injection and the `opaque` lookup on launch -- treats them identically to local plugins.
+
+---
+
+## 8.5 How Plugins Load
 
 Understanding the complete loading flow helps when debugging or building more advanced plugins:
 
 ```
 1. Jarvis starts (or ReloadConfig is dispatched)
        |
-2. discover_local_plugins() scans ~/.config/jarvis/plugins/
-   - Lists subdirectories
-   - Reads plugin.toml from each
-   - Builds LocalPlugin { id, name, category, entry }
+2a. discover_local_plugins() scans ~/.config/jarvis/plugins/
+    - Lists subdirectories, reads plugin.toml from each
+    - Builds LocalPlugin { id, name, category, entry, opaque }
+2b. ContentProvider::discover_embedded_plugins() walks the compiled-in
+    assets/panels/plugins/ tree and builds the same records for the
+    bundled games + music player (filesystem ids take precedence)
        |
-3. Each plugin dir is registered with the ContentProvider
+3. Each *filesystem* plugin dir is registered with the ContentProvider
    content_provider.add_plugin_dir("my-plugin", "/path/to/my-plugin")
+   (embedded plugins need no registration — they live in EMBEDDED_PANELS)
        |
 4. User opens command palette (Cmd+Shift+P / Ctrl+Shift+P)
        |
 5. inject_plugin_items() creates palette entries:
    - Bookmarks  -> Action::OpenURL("https://...")
-   - Local      -> Action::OpenURL("jarvis://localhost/plugins/{id}/{entry}")
+   - Plugins    -> Action::OpenURL("jarvis://localhost/plugins/{id}/{entry}")
+     (both local and embedded plugins, since they share config.plugins.local)
        |
 6. User selects a plugin from the palette
        |
 7. dispatch(Action::OpenURL(url))
-   - The focused pane's webview navigates to the URL
    - The previous URL is saved in game_active (so Escape can go back)
+   - For a jarvis:// URL, the pane's webview is destroyed and recreated
+     so the custom-protocol handler is wired up. If the plugin's manifest
+     sets opaque=true, the new webview is created non-transparent.
        |
 8. WebView requests jarvis://localhost/plugins/my-plugin/index.html
        |
 9. Custom protocol handler -> ContentProvider.resolve()
-   - Looks up "my-plugin" in plugin_dirs
-   - Reads the file from disk
+   - Looks up "my-plugin" in plugin_dirs (filesystem)
+   - On miss, falls through to the embedded EMBEDDED_PANELS tree
    - Performs containment check (directory traversal protection)
    - Returns 200 with correct MIME type
        |
@@ -271,7 +381,7 @@ Understanding the complete loading flow helps when debugging or building more ad
 11. User presses Escape -> navigates back to the previous page
 ```
 
-The `OpenURL` dispatch handler in `dispatch.rs` implements the navigation and back-navigation tracking:
+The `OpenURL` dispatch handler in `dispatch.rs` implements the navigation and back-navigation tracking. For `jarvis://` URLs it destroys and recreates the webview (WebView2 on Windows does not route `load_url` through the custom-protocol handler) and consults the plugin's `opaque` flag; for ordinary `http(s)://` URLs it navigates in place:
 
 ```rust
 Action::OpenURL(ref url) => {
@@ -281,26 +391,47 @@ Action::OpenURL(ref url) => {
         url.clone()
     };
     let pane_id = self.tiling.focused_id();
-    if let Some(ref mut registry) = self.webviews {
-        if let Some(handle) = registry.get_mut(pane_id) {
-            let original_url = handle.current_url().to_string();
-            if let Err(e) = handle.load_url(&normalized) {
-                tracing::warn!(error = %e, url = %normalized, "Failed to open URL");
-            } else {
-                self.game_active.insert(pane_id, original_url);
+    if normalized.starts_with("jarvis://") {
+        // Save current URL for Escape, then destroy + recreate the webview.
+        if let Some(ref registry) = self.webviews {
+            if let Some(handle) = registry.get(pane_id) {
+                self.game_active.insert(pane_id, handle.current_url().to_string());
+            }
+        }
+        if let Some(ref mut registry) = self.webviews {
+            registry.destroy(pane_id);
+        }
+        // Look up the plugin manifest's `opaque` flag from the URL.
+        let opaque = plugin_id_from_url(&normalized)
+            .and_then(|id| self.config.plugins.local.iter().find(|lp| lp.id == id))
+            .map(|lp| lp.opaque)
+            .unwrap_or(false);
+        if opaque {
+            self.create_webview_for_pane_opaque(pane_id, &normalized);
+        } else {
+            self.create_webview_for_pane_with_url(pane_id, &normalized);
+        }
+    } else {
+        // http(s):// — navigate the existing webview in place.
+        if let Some(ref mut registry) = self.webviews {
+            if let Some(handle) = registry.get_mut(pane_id) {
+                let original_url = handle.current_url().to_string();
+                if handle.load_url(&normalized).is_ok() {
+                    self.game_active.insert(pane_id, original_url);
+                }
             }
         }
     }
 }
 ```
 
-The `game_active` map stores the previous URL for each pane, enabling Escape to restore the original content.
+The `game_active` map stores the previous URL for each pane, enabling Escape to restore the original content. (The name is historical -- it now tracks any plugin/bookmark navigation, not just games.)
 
 ---
 
-## 8.5 Plugin Development Guide
+## 8.6 Plugin Development Guide
 
-### 8.5.1 Step-by-Step: Creating a Plugin
+### 8.6.1 Step-by-Step: Creating a Plugin
 
 **Step 1: Create the plugin folder.**
 
@@ -373,7 +504,7 @@ Create `index.html` in the plugin folder:
 
 Open the command palette and select "Reload Config". Your plugin appears under the "Tools" category. Select "Hello World" and it loads in the focused pane.
 
-### 8.5.2 Development Workflow
+### 8.6.2 Development Workflow
 
 The recommended development workflow is:
 
@@ -387,11 +518,11 @@ If you add, remove, or rename a plugin folder, or change `plugin.toml`, you need
 
 ---
 
-## 8.6 The IPC Bridge API
+## 8.7 The IPC Bridge API
 
 Every webview in Jarvis -- including plugins -- receives the IPC bridge automatically. It is injected as an initialization script (`IPC_INIT_SCRIPT`) that runs before any page scripts. The bridge is available at `window.jarvis.ipc`.
 
-### 8.6.1 Core Methods
+### 8.7.1 Core Methods
 
 **`send(kind, payload)`** -- Fire-and-forget message to Rust.
 
@@ -430,7 +561,7 @@ Under the hood, `request` assigns a unique `_reqId` to the payload, sends the me
 
 **`postMessage(msg)`** -- Low-level: sends a raw object. Prefer `send()` which wraps your payload with the `{ kind, payload }` structure that the Rust side expects.
 
-### 8.6.2 Checking Bridge Availability
+### 8.7.2 Checking Bridge Availability
 
 The bridge is available as soon as your script runs. There is no `DOMContentLoaded` race because the initialization script runs before your page's scripts. However, if you want to be defensive:
 
@@ -441,7 +572,7 @@ if (window.jarvis && window.jarvis.ipc) {
 }
 ```
 
-### 8.6.3 Request-Response Internals
+### 8.7.3 Request-Response Internals
 
 The request-response pattern works as follows:
 
@@ -454,17 +585,16 @@ The request-response pattern works as follows:
 
 ---
 
-## 8.7 Available IPC Messages
+## 8.8 Available IPC Messages
 
-### 8.7.1 Messages You Can Send (JS to Rust)
+### 8.8.1 Messages You Can Send (JS to Rust)
 
 | Kind | Payload | Behavior |
 |------|---------|----------|
 | `ping` | `{}` | Health check. Rust replies with `pong`. |
 | `clipboard_copy` | `{ text: "..." }` | Copy text to the system clipboard. |
 | `clipboard_paste` | `{}` | **Request-response.** Returns clipboard contents as `{ kind: "text", text }` or `{ kind: "image", data_url }`. |
-| `open_url` | `{ url: "https://..." }` | Navigate the current pane to a URL. URLs without a scheme get `https://` prepended. |
-| `launch_game` | `{ game: "tetris" }` | Launch a built-in game in the current pane. |
+| `open_url` | `{ url: "https://..." }` | Navigate the current pane to a URL (or to a plugin via `jarvis://localhost/plugins/<id>/<entry>`). URLs without a scheme get `https://` prepended. |
 | `open_settings` | `{}` | Open the Settings panel. |
 | `open_panel` | `{ kind: "terminal" }` | Open a new panel of the given kind. |
 | `panel_close` | `{}` | Close the current panel (will not close the last one). |
@@ -474,7 +604,7 @@ The request-response pattern works as follows:
 | `window_drag` | `{}` | Start dragging the window (for custom titlebars). |
 | `debug_event` | `{ type, ...data }` | Log structured data to the Rust `tracing::info!` output. |
 
-### 8.7.2 Messages You Can Receive (Rust to JS)
+### 8.8.2 Messages You Can Receive (Rust to JS)
 
 | Kind | Payload | When |
 |------|---------|------|
@@ -489,9 +619,9 @@ For request-response messages (`clipboard_paste`, `read_file`), the response arr
 
 ---
 
-## 8.8 Keyboard and Input Handling
+## 8.9 Keyboard and Input Handling
 
-### 8.8.1 How Keyboard Events Work
+### 8.9.1 How Keyboard Events Work
 
 Keyboard events in plugins follow a layered interception model:
 
@@ -503,7 +633,7 @@ Keyboard events in plugins follow a layered interception model:
 
 4. **Normal mode.** All other keyboard input goes to your plugin's webview normally. Standard HTML elements like `<input>`, `<textarea>`, and custom key handlers work as expected.
 
-### 8.8.2 Keys That Pass Through
+### 8.9.2 Keys That Pass Through
 
 These Cmd+key combinations are NOT intercepted and reach your plugin normally:
 
@@ -514,7 +644,7 @@ These Cmd+key combinations are NOT intercepted and reach your plugin normally:
 - `Cmd+X` / `Ctrl+X` -- cut
 - `Cmd+Z` / `Ctrl+Z` -- undo
 
-### 8.8.3 Handling Escape in Your Plugin
+### 8.9.3 Handling Escape in Your Plugin
 
 If your plugin has modal dialogs or internal states that should close on Escape, handle it before the IPC bridge does:
 
@@ -535,11 +665,11 @@ Note that `e.stopPropagation()` may not prevent the bridge from seeing Escape in
 
 ---
 
-## 8.9 Styling and Theming
+## 8.10 Styling and Theming
 
 Plugins run in a transparent webview with the Jarvis theme's CSS variables injected into every page. Using these variables ensures your plugin matches the user's chosen theme automatically.
 
-### 8.9.1 Available CSS Variables
+### 8.10.1 Available CSS Variables
 
 **Colors:**
 
@@ -576,7 +706,7 @@ Plugins run in a transparent webview with the Jarvis theme's CSS variables injec
 
 These variables update automatically when the user changes themes or reloads config. The theme injection is handled by `inject_theme_into_all_webviews()`, which is called during `ReloadConfig`.
 
-### 8.9.2 Transparent Backgrounds
+### 8.10.2 Transparent Backgrounds
 
 The webview background is transparent by default. Set your `body` background to `transparent` or use the theme variables:
 
@@ -588,7 +718,7 @@ body {
 }
 ```
 
-### 8.9.3 Starter Template
+### 8.10.3 Starter Template
 
 This CSS template provides a solid starting point for any plugin:
 
@@ -635,7 +765,7 @@ input:focus, textarea:focus {
 
 Always provide fallback values in your `var()` declarations (e.g., `var(--color-primary, #cba6f7)`) so the plugin renders correctly even if theme injection has not yet occurred.
 
-### 8.9.4 Detecting Theme Changes Programmatically
+### 8.10.4 Detecting Theme Changes Programmatically
 
 If your plugin uses a canvas or other non-CSS rendering, you can watch for theme changes:
 
@@ -653,9 +783,9 @@ observer.observe(document.documentElement, {
 
 ---
 
-## 8.10 Asset Loading and MIME Types
+## 8.11 Asset Loading and MIME Types
 
-### 8.10.1 Referencing Assets
+### 8.11.1 Referencing Assets
 
 Your plugin can include any static assets. Reference them with relative paths in your HTML:
 
@@ -669,7 +799,7 @@ Your plugin can include any static assets. Reference them with relative paths in
 
 Relative paths work because the browser resolves them against the current URL (`jarvis://localhost/plugins/my-plugin/index.html`).
 
-### 8.10.2 Supported MIME Types
+### 8.11.2 Supported MIME Types
 
 The `ContentProvider` determines MIME types by file extension using the `mime_from_extension` function. The complete mapping:
 
@@ -701,7 +831,7 @@ The `ContentProvider` determines MIME types by file extension using the `mime_fr
 
 Files with unrecognized extensions are served as `application/octet-stream`, which may not render correctly in the webview.
 
-### 8.10.3 External Resources
+### 8.11.3 External Resources
 
 Plugins can load resources from the web. The navigation handler permits all `https://` and `http://` URLs:
 
@@ -713,7 +843,7 @@ Plugins can load resources from the web. The navigation handler permits all `htt
 
 Standard browser CORS rules apply to `fetch()` and `XMLHttpRequest` calls.
 
-### 8.10.4 WebAssembly
+### 8.11.4 WebAssembly
 
 `.wasm` files are served with the correct `application/wasm` MIME type, enabling you to load WebAssembly modules:
 
@@ -724,9 +854,9 @@ const { instance } = await WebAssembly.instantiateStreaming(response);
 
 ---
 
-## 8.11 Security Model
+## 8.12 Security Model
 
-### 8.11.1 Directory Traversal Protection
+### 8.12.1 Directory Traversal Protection
 
 Plugin assets are sandboxed to their own folder. The `ContentProvider` enforces this by canonicalizing both the plugin's base path and the requested file path, then verifying the file path starts with the base path:
 
@@ -757,7 +887,7 @@ jarvis://localhost/plugins/my-plugin/../other-plugin/secret.json  -> 404
 
 Symlinks that escape the plugin directory are also blocked because `std::fs::canonicalize` resolves symlinks to their real paths before the containment check.
 
-### 8.11.2 Navigation Allowlist
+### 8.12.2 Navigation Allowlist
 
 The webview navigation handler enforces a strict allowlist for non-HTTP(S) schemes. Only these URL patterns are permitted:
 
@@ -777,7 +907,7 @@ The following are explicitly blocked:
 - `ftp://` -- FTP protocol
 - Any other unrecognized scheme
 
-### 8.11.3 IPC Allowlist
+### 8.12.3 IPC Allowlist
 
 All IPC messages from JavaScript are validated against a strict allowlist before processing. The complete list of accepted `kind` values:
 
@@ -786,15 +916,24 @@ pty_input          pty_resize        pty_restart       terminal_ready
 panel_focus        presence_request_users              presence_poke
 settings_init      settings_set_theme                  settings_update
 settings_reset_section               settings_get_config
-assistant_input    assistant_ready
+assistant_input    assistant_ready   assistant_tool_approve
+assistant_tool_deny                  set_ai_provider
 open_panel         panel_close       panel_toggle      open_settings
-status_bar_init    launch_game
-ping               boot_complete     crypto            window_drag
+status_bar_init
+ping               boot_complete     chat_stream_control
+crypto             window_drag
 keybind            read_file
 clipboard_copy     clipboard_paste   open_url
 palette_click      palette_hover     palette_dismiss
 debug_event
+emulator_list_roms emulator_load_rom
+music_init         music_scan        music_search      music_set_dir
+pair_start         pair_join         pair_leave        pair_input
+pair_request_control                 pair_set_driver
+pair_cursor        pair_status
 ```
+
+Note that `launch_game` is **no longer** in the allowlist -- games are launched as plugins via `open_url`. The `emulator_*` and `music_*` kinds are used by the bundled emulator and music-player plugins respectively; the `pair_*` kinds power mobile pairing.
 
 Any message with a `kind` not in this list is **silently dropped** with a warning log:
 
@@ -806,7 +945,7 @@ The allowlist check is case-sensitive. `"PTY_INPUT"` is rejected. Injection atte
 
 Additionally, the IPC handler validates that the raw message body is valid JSON before forwarding it to the dispatch layer.
 
-### 8.11.4 What Plugins CAN Do
+### 8.12.4 What Plugins CAN Do
 
 - Read and write the system clipboard (via `clipboard_copy` and `clipboard_paste` IPC messages)
 - Navigate the current pane to any URL
@@ -819,7 +958,7 @@ Additionally, the IPC handler validates that the raw message body is valid JSON 
 - Start window drag operations
 - Log debug events to the Rust log
 
-### 8.11.5 What Plugins CANNOT Do
+### 8.12.5 What Plugins CANNOT Do
 
 - Access the `file://` protocol directly
 - Execute `javascript:` URLs
@@ -831,13 +970,13 @@ Additionally, the IPC handler validates that the raw message body is valid JSON 
 
 ---
 
-## 8.12 Hot Reload
+## 8.13 Hot Reload
 
-### 8.12.1 Bookmark Plugins
+### 8.13.1 Bookmark Plugins
 
 Edit your `config.toml`, then trigger "Reload Config" from the command palette. Bookmark changes take effect immediately the next time the palette is opened.
 
-### 8.12.2 Local Plugin Files (HTML/JS/CSS)
+### 8.13.2 Local Plugin Files (HTML/JS/CSS)
 
 Since files are read from disk on every request by the `ContentProvider`, changes to your plugin's source files take effect the next time the plugin is loaded. You can:
 
@@ -846,9 +985,11 @@ Since files are read from disk on every request by the `ContentProvider`, change
 
 Option 2 is the fastest workflow during development.
 
-### 8.12.3 Adding or Removing Plugins
+### 8.13.3 Adding or Removing Plugins
 
 Create or delete the plugin folder under `~/.config/jarvis/plugins/`, then trigger "Reload Config" from the command palette. The discovery runs again, the `ContentProvider`'s plugin directory map is cleared and rebuilt, and the palette updates accordingly.
+
+This applies to *filesystem* plugins. Embedded (first-party) plugins are discovered and merged once at startup (in `initialize_webviews`); `ReloadConfig` rebuilds `config.plugins.local` from the freshly loaded config and re-registers only filesystem plugin directories. Embedded plugin assets are always available from the compiled-in asset tree regardless of reload.
 
 The reload logic in `dispatch.rs`:
 
@@ -869,15 +1010,15 @@ Action::ReloadConfig => {
 }
 ```
 
-### 8.12.4 Editing plugin.toml
+### 8.13.4 Editing plugin.toml
 
-Changes to the manifest (name, category, entry) require a "Reload Config" to take effect in the palette, since the manifest is only read during discovery.
+Changes to the manifest (name, category, entry, opaque) require a "Reload Config" to take effect in the palette, since the manifest is only read during discovery.
 
 ---
 
-## 8.13 Debugging Plugins
+## 8.14 Debugging Plugins
 
-### 8.13.1 DevTools
+### 8.14.1 DevTools
 
 In debug builds (`cargo build` without `--release`), DevTools are enabled for all webviews. The `WebViewConfig` defaults to `devtools: cfg!(debug_assertions)`. Right-click inside your plugin and select "Inspect Element" to open the developer tools.
 
@@ -888,7 +1029,7 @@ In release builds, DevTools are disabled by default. Enable them by setting:
 inspector_enabled = true
 ```
 
-### 8.13.2 Console Logging
+### 8.14.2 Console Logging
 
 Standard `console.log`, `console.warn`, and `console.error` work in DevTools:
 
@@ -896,7 +1037,7 @@ Standard `console.log`, `console.warn`, and `console.error` work in DevTools:
 console.log('Plugin loaded, IPC available:', !!window.jarvis?.ipc);
 ```
 
-### 8.13.3 Debug Events
+### 8.14.3 Debug Events
 
 Send structured debug events to the Rust log:
 
@@ -913,7 +1054,7 @@ These appear in the Jarvis log output as `tracing::info!` entries:
 [JS] webview event (pane_id: 1, event: {"type":"my_plugin_state","data":{"count":42,"status":"running"}})
 ```
 
-### 8.13.4 Ping/Pong Test
+### 8.14.4 Ping/Pong Test
 
 Verify the IPC bridge is working:
 
@@ -922,7 +1063,7 @@ window.jarvis.ipc.on('pong', () => console.log('IPC bridge works!'));
 window.jarvis.ipc.send('ping', {});
 ```
 
-### 8.13.5 Built-in Diagnostic Logging
+### 8.14.5 Built-in Diagnostic Logging
 
 The IPC bridge automatically sends diagnostic events for certain DOM events. During development, you can observe these in the Rust log:
 
@@ -934,11 +1075,11 @@ These are sent as `debug_event` IPC messages by the initialization script.
 
 ---
 
-## 8.14 Vibe Coding a Plugin with AI
+## 8.15 Vibe Coding a Plugin with AI
 
 The plugin system is designed to be AI-friendly: single-file HTML plugins with an injected bridge API and CSS variables. Here is how to build plugins with Claude, ChatGPT, Cursor, or any AI coding assistant.
 
-### 8.14.1 The Prompt Template
+### 8.15.1 The Prompt Template
 
 Give your AI this context and ask it to build what you need:
 
@@ -947,7 +1088,8 @@ I'm building a plugin for Jarvis, a terminal/desktop app with a webview plugin s
 
 Plugin structure:
 - Folder at ~/.config/jarvis/plugins/my-plugin/
-- plugin.toml with: name, category, entry (defaults to index.html)
+- plugin.toml with: name, category, entry (defaults to index.html),
+  and opaque (defaults to false; set true only for WebGL/opaque content)
 - HTML/JS/CSS files served via jarvis:// protocol
 
 The IPC bridge (available as window.jarvis.ipc):
@@ -977,7 +1119,7 @@ Requirements:
 - Use window.jarvis.ipc for any system interaction
 ```
 
-### 8.14.2 Example AI Prompts
+### 8.15.2 Example AI Prompts
 
 **Sticky notes plugin:**
 
@@ -1003,7 +1145,7 @@ a stopwatch, and a countdown timer. Add keyboard shortcuts
 (S for stopwatch start/stop, R for reset). Use large monospace numbers.
 ```
 
-### 8.14.3 Tips for AI-Assisted Development
+### 8.15.3 Tips for AI-Assisted Development
 
 1. **Start with one file.** Tell the AI to put everything in `index.html` with inline `<style>` and `<script>`. Split into separate files later if needed.
 
@@ -1025,7 +1167,7 @@ localStorage.setItem('sessions', JSON.stringify(sessions));
 
 ---
 
-## 8.15 Complete Example: Pomodoro Timer
+## 8.16 Complete Example: Pomodoro Timer
 
 This example demonstrates a full plugin with timer logic, multiple states, and localStorage persistence.
 
@@ -1203,7 +1345,7 @@ category = "Productivity"
 
 ---
 
-## 8.16 Complete Example: Markdown Previewer
+## 8.17 Complete Example: Markdown Previewer
 
 This example demonstrates a split-pane editor using a CDN library (marked.js) and IPC clipboard integration.
 
@@ -1367,9 +1509,9 @@ category = "Tools"
 
 ---
 
-## 8.17 Cookbook: Common Patterns
+## 8.18 Cookbook: Common Patterns
 
-### 8.17.1 Persistent Data Storage
+### 8.18.1 Persistent Data Storage
 
 ```javascript
 // Save
@@ -1381,7 +1523,7 @@ const myData = JSON.parse(localStorage.getItem('my-plugin:data') || '{}');
 
 Always namespace your keys with your plugin ID. All plugins share the same `jarvis://localhost` localStorage origin.
 
-### 8.17.2 Clipboard Operations
+### 8.18.2 Clipboard Operations
 
 ```javascript
 // Copy text to clipboard
@@ -1396,7 +1538,7 @@ async function readClipboard() {
 }
 ```
 
-### 8.17.3 URL Navigation
+### 8.18.3 URL Navigation
 
 ```javascript
 function openUrl(url) {
@@ -1404,7 +1546,7 @@ function openUrl(url) {
 }
 ```
 
-### 8.17.4 Reading Image Files
+### 8.18.4 Reading Image Files
 
 ```javascript
 async function readImageFile(path) {
@@ -1416,7 +1558,7 @@ async function readImageFile(path) {
 
 Note: `read_file` currently only supports image files (PNG, JPEG, GIF, WebP, BMP) with a maximum size of 5 MB.
 
-### 8.17.5 Opening Panels
+### 8.18.5 Opening Panels
 
 ```javascript
 // Open a new terminal pane
@@ -1426,7 +1568,7 @@ window.jarvis.ipc.send('open_panel', { kind: 'terminal' });
 window.jarvis.ipc.send('panel_close', {});
 ```
 
-### 8.17.6 Full-Screen Canvas Plugin
+### 8.18.6 Full-Screen Canvas Plugin
 
 ```html
 <style>
@@ -1454,7 +1596,7 @@ window.jarvis.ipc.send('panel_close', {});
 </script>
 ```
 
-### 8.17.7 Inter-Plugin Communication
+### 8.18.7 Inter-Plugin Communication
 
 Plugins share the same `localStorage` namespace. You can use this as a simple message bus:
 
@@ -1479,7 +1621,7 @@ Note: `storage` events only fire in other windows/tabs, not the one that made th
 
 ---
 
-## 8.18 Troubleshooting
+## 8.19 Troubleshooting
 
 ### Plugin does not appear in the palette
 
@@ -1508,7 +1650,7 @@ Note: `storage` events only fire in other windows/tabs, not the one that made th
 
 ### Escape key closes my plugin unexpectedly
 
-Pressing Escape when a plugin is loaded navigates back to the previous page. This is by design (same behavior as exiting a game). If you need Escape inside your plugin, capture it at the document level with `stopPropagation`, but be aware the capture-phase IPC listener may still see it. See Section 8.8.3 for details.
+Pressing Escape when a plugin is loaded navigates back to the previous page. This is by design (same behavior as exiting a game). If you need Escape inside your plugin, capture it at the document level with `stopPropagation`, but be aware the capture-phase IPC listener may still see it. See Section 8.9.3 for details.
 
 ### Plugin assets return 404
 
@@ -1520,7 +1662,7 @@ Pressing Escape when a plugin is loaded navigates back to the previous page. Thi
 
 The `ipc.request()` method has a 10-second timeout. If your request consistently times out:
 
-1. Verify the message `kind` is in the IPC allowlist (Section 8.11.3).
+1. Verify the message `kind` is in the IPC allowlist (Section 8.12.3).
 2. Check the Rust logs for any error processing the request.
 3. Ensure you are using `request()` for message kinds that support request-response (`clipboard_paste`, `read_file`). Fire-and-forget messages like `clipboard_copy` do not send a response.
 
@@ -1535,7 +1677,7 @@ localStorage.setItem('key', value);             // Bad -- may collide
 
 ---
 
-## 8.19 Reference: Full IPC Message Table
+## 8.20 Reference: Full IPC Message Table
 
 ### JS to Rust (send)
 
@@ -1544,8 +1686,7 @@ localStorage.setItem('key', value);             // Bad -- may collide
 | `ping` | `{}` | Rust replies with `pong` |
 | `clipboard_copy` | `{ text: string }` | Copy to system clipboard |
 | `clipboard_paste` | `{}` | Request-response. Returns `{ kind, text?, data_url? }` |
-| `open_url` | `{ url: string }` | Navigate current pane. Auto-prepends `https://` if no scheme. |
-| `launch_game` | `{ game: string }` | Launch built-in game |
+| `open_url` | `{ url: string }` | Navigate current pane (incl. `jarvis://localhost/plugins/<id>/<entry>`). Auto-prepends `https://` if no scheme. |
 | `open_panel` | `{ kind: string }` | Open new panel |
 | `panel_close` | `{}` | Close current panel |
 | `open_settings` | `{}` | Open settings panel |

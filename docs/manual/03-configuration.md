@@ -26,11 +26,12 @@ The configuration schema version is **1** (`CONFIG_SCHEMA_VERSION = 1`).
   - [\[visualizer\]](#visualizer)
   - [\[startup\]](#startup)
   - [\[voice\]](#voice)
+  - [\[assistant\]](#assistant)
   - [\[keybinds\]](#keybinds)
   - [\[panels\]](#panels)
-  - [\[games\]](#games)
   - [\[livechat\]](#livechat)
   - [\[presence\]](#presence)
+  - [\[collab\]](#collab)
   - [\[performance\]](#performance)
   - [\[updates\]](#updates)
   - [\[logging\]](#logging)
@@ -651,7 +652,7 @@ What to show after boot animation completes or is skipped.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | string | `"wordle"` | Game to launch |
+| `name` | string | `"tetris"` | Game to launch |
 
 **\[startup.on\_ready.skill\]** (when `action = "skill"`):
 
@@ -727,6 +728,84 @@ volume = 0.3
 
 ---
 
+### \[assistant\]
+
+AI assistant / provider configuration. Selects which AI provider the agentic
+assistant uses and controls the tool-permission posture.
+
+> **API keys are never stored in config.** They are read from environment
+> variables only (and are never written to config or logs):
+>
+> | Provider | API key source |
+> |----------|----------------|
+> | `claude` | `claude auth login` (Claude Code OAuth) or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` |
+> | `openai` | `OPENAI_API_KEY` |
+> | `minimax` | `MINIMAX_API_KEY` |
+> | `gemini` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) |
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `provider` | enum | `"claude"` | AI provider: `claude`, `openai`, `minimax`, `gemini` |
+| `tools_mode` | enum | `"read_only"` | Tool-permission mode: `read_only`, `read_write` |
+| `require_approval` | bool | `true` | Require explicit human approval before each mutating/exec tool call |
+
+#### Tool / approval-gate semantics
+
+The assistant is agentic: it can call tools. What tools it may call — and
+whether they execute — is governed by `tools_mode` and `require_approval`:
+
+- **`tools_mode = "read_only"` (default)** exposes only the read-only
+  filesystem tools (`read_file`, `search_files`, `search_content`,
+  `list_directory`), scoped to the workspace. The model cannot even *request*
+  `write_file` or `run_command` — they are not offered.
+- **`tools_mode = "read_write"`** additionally exposes the mutating/exec tools
+  (`write_file`, `run_command`). This is strictly opt-in.
+- **`require_approval = true` (default)** means that, even in `read_write`
+  mode, every `write_file` / `run_command` call **blocks on explicit human
+  approval** in the panel before it runs. On deny or timeout it fails closed
+  (nothing executes). In `read_only` mode this field is moot — no mutating
+  tools are exposed at all. Keep it `true`; it is a safety escape hatch, not a
+  convenience toggle.
+
+#### \[assistant.claude\]
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | `""` | Model override (empty = client default) |
+
+#### \[assistant.openai\]
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | `""` | Model override (empty = client default, e.g. `gpt-4o`) |
+| `base_url` | string | `""` | API base URL override (empty = `https://api.openai.com/v1`) |
+
+#### \[assistant.minimax\]
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | `""` | Model override (empty = client default, e.g. `MiniMax-M2`) |
+| `base_url` | string | `""` | OpenAI-compatible base URL override (empty = `https://api.minimax.io/v1`) |
+
+#### \[assistant.gemini\]
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | `""` | Model override (empty = client default, e.g. `gemini-2.0-flash`) |
+| `base_url` | string | `""` | API base URL override (empty = `https://generativelanguage.googleapis.com/v1beta`) |
+
+```toml
+[assistant]
+provider = "openai"
+tools_mode = "read_write"   # opt into write_file + run_command (approval-gated)
+require_approval = true      # keep true — every mutating call still needs approval
+
+[assistant.openai]
+model = "gpt-4o-mini"
+```
+
+---
+
 ### \[keybinds\]
 
 Keyboard shortcuts. Format: `"Modifier+Key"` where Modifier is `Cmd`,
@@ -755,7 +834,7 @@ validation error.
 | `split_vertical` | string | `"Cmd+D"` | Split pane vertically |
 | `split_horizontal` | string | `"Cmd+Shift+D"` | Split pane horizontally |
 | `close_pane` | string | `"Cmd+W"` | Close current pane |
-| `command_palette` | string | `"Cmd+Shift+P"` | Open command palette |
+| `command_palette` | string | `"Cmd+Shift+P"` (macOS) / `"F1"` (other) | Open command palette |
 | `copy` | string | `"Cmd+C"` | Copy selection |
 | `paste` | string | `"Cmd+V"` | Paste from clipboard |
 
@@ -810,56 +889,6 @@ border_glow = false
 
 ---
 
-### \[games\]
-
-Built-in games configuration.
-
-#### \[games.enabled\]
-
-Toggle individual games on or off. All default to `true`.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `wordle` | bool | `true` | Enable Wordle |
-| `connections` | bool | `true` | Enable Connections |
-| `asteroids` | bool | `true` | Enable Asteroids |
-| `tetris` | bool | `true` | Enable Tetris |
-| `pinball` | bool | `true` | Enable Pinball |
-| `doodlejump` | bool | `true` | Enable Doodle Jump |
-| `minesweeper` | bool | `true` | Enable Minesweeper |
-| `draw` | bool | `true` | Enable Draw |
-| `subway` | bool | `true` | Enable Subway |
-| `videoplayer` | bool | `true` | Enable Video Player |
-
-#### \[games.fullscreen\]
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `keyboard_passthrough` | bool | `true` | Pass keyboard events to the game in fullscreen |
-| `escape_to_exit` | bool | `true` | Press Escape to exit fullscreen |
-
-#### \[\[games.custom\_paths\]\]
-
-Add custom games as an array of tables. Each entry has:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Display name of the custom game |
-| `path` | string | Filesystem path to the game |
-
-```toml
-[games.enabled]
-wordle = true
-tetris = true
-pinball = false
-
-[[games.custom_paths]]
-name = "my-game"
-path = "/path/to/game"
-```
-
----
-
 ### \[livechat\]
 
 Livechat server and moderation settings.
@@ -910,18 +939,47 @@ max_message_length = 1000
 
 ### \[presence\]
 
-Online presence / social connectivity.
+Online presence / social connectivity. Presence rides the relay **Room**
+transport: it reuses the relay endpoint from `[relay].url` and joins a shared
+room named by `room_id`. (There is no separate presence server URL or
+heartbeat setting, and no Supabase configuration -- those were removed.)
 
-| Field | Type | Default | Valid Range | Description |
-|-------|------|---------|-------------|-------------|
-| `enabled` | bool | `true` | -- | Enable presence system |
-| `server_url` | string | `""` | -- | Presence server URL |
-| `heartbeat_interval` | u32 | `30` | 10--300 | Heartbeat interval in seconds |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Enable presence system |
+| `room_id` | string | `"jarvis-presence-global"` | Session id of the global presence room every desktop joins |
 
 ```toml
 [presence]
 enabled = true
-heartbeat_interval = 60
+room_id = "my-team-presence"
+```
+
+---
+
+### \[collab\]
+
+Collaborative terminal / pair-programming sessions. Like presence, collab
+rides the relay **Room** transport (it reuses `[relay].url`).
+
+> **Experimental.** Disabled by default. Membership is authenticated with
+> end-to-end signed frames (per-app ECDSA identity); the shared room key is
+> confidentiality-only and the signatures are the security boundary between
+> members.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Master toggle. When false, all pair IPC and transport are no-ops |
+| `max_participants` | usize | `4` | Maximum participants per session (including the host) |
+| `allow_takeover` | bool | `true` | Whether navigators may request/take the driver seat |
+| `require_signed_join` | bool | `true` | Enforce end-to-end ECDSA-signed frames. When false, the legacy permissive (unsigned) path is used -- experiments only |
+
+```toml
+[collab]
+enabled = true
+max_participants = 6
+allow_takeover = true
+require_signed_join = true
 ```
 
 ---
@@ -1097,7 +1155,7 @@ Mobile relay bridge configuration for connecting mobile clients.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `url` | string | `"wss://jarvis-relay-363598788638.us-central1.run.app/ws"` | WebSocket URL of the relay server |
+| `url` | string | `"wss://jarvis-relay-production-3eb6.up.railway.app/ws"` | WebSocket URL of the relay server (defaults to the Railway deployment) |
 | `auto_connect` | bool | `false` | Connect to relay automatically on startup |
 
 ```toml
@@ -1120,11 +1178,27 @@ webview panes. Defined in the config file.
 
 #### \[\[plugins.bookmarks\]\]
 
+Each bookmark is an entry in the `plugins.bookmarks` array of tables:
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | `""` | Display name in the palette |
 | `url` | string | `""` | URL to open |
 | `category` | string | `"Plugins"` | Palette category grouping |
+
+If you do not specify any bookmarks, the following six are **seeded
+automatically**:
+
+| Name | URL | Category |
+|------|-----|----------|
+| Lichess | `https://lichess.org` | `Games` |
+| Monkeytype | `https://monkeytype.com` | `Web` |
+| Excalidraw | `https://excalidraw.com` | `Web` |
+| Desmos | `https://www.desmos.com/calculator` | `Web` |
+| Hacker News | `https://news.ycombinator.com` | `Web` |
+| Spotify | `https://open.spotify.com` | `Web` |
+
+Defining your own `[[plugins.bookmarks]]` entries replaces the seeded list.
 
 ```toml
 [[plugins.bookmarks]]
@@ -1153,6 +1227,7 @@ point. The manifest format:
 name = "My Timer"
 category = "Tools"
 entry = "index.html"   # default
+opaque = false         # set true for WebGL/games that need an opaque webview
 ```
 
 | Field | Type | Default | Description |
@@ -1160,6 +1235,10 @@ entry = "index.html"   # default
 | `name` | string | folder name | Display name |
 | `category` | string | `"Plugins"` | Palette category |
 | `entry` | string | `"index.html"` | HTML entry point file |
+| `opaque` | bool | `false` | Force an opaque webview (e.g. WebGL games) |
+
+Each discovered plugin's folder name is used as its plugin ID (in the
+`<plugin-id>` path segment and palette URLs).
 
 ---
 
@@ -1399,12 +1478,6 @@ Per-state overrides (`state_listening`, `state_speaking`, `state_skill`, `state_
 | `livechat.nickname.validation.max_length` | 5 | 50 |
 | `livechat.automod.rate_limit` | 1 | 20 |
 | `livechat.automod.max_message_length` | 100 | 2000 |
-
-### Presence
-
-| Field | Min | Max |
-|-------|-----|-----|
-| `presence.heartbeat_interval` | 10 | 300 |
 
 ### Updates
 

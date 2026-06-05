@@ -39,7 +39,7 @@ New work happens exclusively in `jarvis-rs/`.
 | Path | Role |
 |------|------|
 | [`docs/`](docs/) | **Website** and published docs: marketing pages (`docs/index.html`), [technical manual](docs/manual/README.md) |
-| [`dev/`](dev/) | **Development documentation** only: pathforward analysis (`dev/pathforward/`), archived planning and plugins notes (`dev/_archive/`), and similar internal write-ups |
+| [`dev/`](dev/) | **Development documentation** only: active design docs (`dev/plans/`) and the forward roadmap (`dev/ROADMAP.md`); historical strategic analyses and dated planning docs are archived under `dev/_archive/` |
 | [`relay/`](relay/) | Deployment scripts for relay infrastructure (not the `jarvis-relay` crate source) |
 | [`resources/`](resources/) | Built-in theme YAML files under `resources/themes/`, loaded at runtime by `jarvis-rs` |
 | [`.github/workflows/`](.github/workflows/) | Rust CI and release workflows |
@@ -57,5 +57,7 @@ New work happens exclusively in `jarvis-rs/`.
 ## Further reading
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — builds, tests, PR hints  
-- [dev/pathforward/finalfindings.md](dev/pathforward/finalfindings.md) — strategic analysis (some paths are historical; see status note at top of that file if present)  
+- [dev/ROADMAP.md](dev/ROADMAP.md) — remaining/incomplete work and the forward roadmap  
+- [dev/plans/c2-pair-programming.md](dev/plans/c2-pair-programming.md) — collaborative-terminal design + security model  
+- [dev/_archive/](dev/_archive/) — historical: the original strategic analyses (`pathforward/`) and dated planning docs  
 - [docs/manual/02-getting-started.md](docs/manual/02-getting-started.md) — install and build details  

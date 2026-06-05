@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Jarvis — The Multiplayer Desktop Environment</title>
+<title>Jarvis — The Programmable Tiling Desktop Shell</title>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -275,7 +275,7 @@ body{
   <!-- Tab Bar -->
   <div id="tab-bar">
     <div class="tab active" data-pane="terminal"><div class="dot" style="background:var(--blue)"></div>terminal</div>
-    <div class="tab" data-pane="claude"><div class="dot" style="background:var(--mauve)"></div>claude</div>
+    <div class="tab" data-pane="claude"><div class="dot" style="background:var(--mauve)"></div>assistant</div>
     <div class="tab" data-pane="chat"><div class="dot" style="background:var(--pink)"></div>#general</div>
     <div class="tab-spacer"></div>
     <div class="presence"><div class="online-dot"></div><span id="online-count">3 online</span></div>
@@ -307,7 +307,7 @@ body{
       <div class="pane" id="pane-claude" style="flex:1.1">
         <div class="pane-header">
           <div class="pane-dot" style="background:var(--mauve)"></div>
-          CLAUDE ASSISTANT
+          AI ASSISTANT &middot; claude / gpt / gemini / minimax
         </div>
         <div class="pane-body" id="claude-body">
           <div id="claude-messages"></div>
@@ -315,10 +315,10 @@ body{
             <button data-q="What is Jarvis?">what is jarvis?</button>
             <button data-q="Tell me about the terminal">terminal</button>
             <button data-q="How does the plugin system work?">plugins</button>
-            <button data-q="Tell me about the AI integration">ai integration</button>
+            <button data-q="Tell me about the AI integration">ai assistant</button>
             <button data-q="How does the tiling work?">tiling</button>
             <button data-q="Tell me about security and encryption">encryption</button>
-            <button data-q="What games are built in?">games</button>
+            <button data-q="Tell me about pair programming">collab</button>
             <button data-q="Tell me about mobile companion">mobile</button>
           </div>
         </div>
@@ -430,11 +430,11 @@ const bootLines=[
   {t:'info',d:50,text:'[cfg]  theme: jarvis-dark (catppuccin mocha)'},
   {t:'info',d:80,text:'[tile] binary split-tree initialized'},
   {t:'info',d:60,text:'[pty]  3 terminal sessions spawned'},
-  {t:'info',d:50,text:'[web]  wry webview bridge active (29 IPC kinds)'},
-  {t:'info',d:70,text:'[ai]   claude opus connected (streaming + tool calling)'},
-  {t:'info',d:50,text:'[ai]   whisper transcription ready'},
-  {t:'info',d:80,text:'[plug] 3 plugins discovered, registered in palette'},
-  {t:'info',d:60,text:'[chat] 7 channels synced (#general, #discord, #help ...)'},
+  {t:'info',d:50,text:'[web]  wry webview bridge active (IPC allowlist enforced)'},
+  {t:'info',d:70,text:'[ai]   agentic assistant ready (claude/openai/gemini/minimax)'},
+  {t:'info',d:50,text:'[ai]   tools: read-only by default, write/exec behind approval gate'},
+  {t:'info',d:80,text:'[plug] 9 plugins discovered (games + music), registered in palette'},
+  {t:'info',d:60,text:'[chat] connected to jarvis-relay (self-hosted, no third-party)'},
   {t:'info',d:50,text:'[chat] ECDSA P-256 identity loaded, E2E ready'},
   {t:'accent',d:80,text:'[net]  presence connected — 4 users online'},
   {t:'info',d:50,text:'[sys]  event loop: 120 Hz (8ms poll)'},
@@ -467,11 +467,11 @@ function finishBoot(){
   $('#desktop').classList.add('active');
   setTimeout(()=>{termIn.focus();startChat()},600);
   // Welcome in terminal
-  raw(`<span class="header">JARVIS</span> <span class="muted">— multiplayer desktop environment</span>`);
+  raw(`<span class="header">JARVIS</span> <span class="muted">— a programmable tiling desktop shell for vibe coding</span>`);
   raw(`<span class="muted">Type</span> <span class="info">help</span> <span class="muted">to see commands. Press</span> <span class="warn">Ctrl+K</span> <span class="muted">for command palette.</span>`);
   raw('');
-  // Initial Claude message
-  addClaudeMsg('assistant',`Welcome. I'm the Claude assistant panel.\n\nAsk me anything about Jarvis, or click a topic below to learn more. This panel supports streaming responses, tool calling (up to 10 rounds), session history, and multiple concurrent instances.\n\nI can explain the architecture, the tiling engine, the plugin system, encryption, or anything else.`);
+  // Initial assistant message
+  addClaudeMsg('assistant',`Welcome. I'm the AI assistant panel.\n\nI'm multi-provider — switch between **Claude**, **OpenAI GPT**, **Google Gemini**, and **MiniMax** right in the panel header. I'm also agentic: I can use sandboxed tools to read your project, and any write/exec action is gated behind a human approval prompt (read-only by default).\n\nAsk me anything about Jarvis, or click a topic below. I can explain the architecture, the tiling engine, the plugin system, encryption, or anything else.`);
 }
 $('#boot-skip').onclick=finishBoot;
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
@@ -485,11 +485,11 @@ const CMDS={
     raw(`  <span class="info">features</span>        <span class="muted">list all jarvis features</span>`);
     raw(`  <span class="info">architecture</span>    <span class="muted">show the 10-crate workspace</span>`);
     raw(`  <span class="info">terminal</span>        <span class="muted">terminal emulation details</span>`);
-    raw(`  <span class="info">ai</span>              <span class="muted">AI assistant integration</span>`);
-    raw(`  <span class="info">chat</span>            <span class="muted">live chat & encryption</span>`);
+    raw(`  <span class="info">ai</span>              <span class="muted">agentic multi-provider assistant</span>`);
+    raw(`  <span class="info">chat</span>            <span class="muted">live chat, relay & encryption</span>`);
     raw(`  <span class="info">tiling</span>          <span class="muted">tiling window manager</span>`);
-    raw(`  <span class="info">plugins</span>         <span class="muted">plugin system</span>`);
-    raw(`  <span class="info">games</span>           <span class="muted">built-in games & emulator</span>`);
+    raw(`  <span class="info">plugins</span>         <span class="muted">plugin system (games, music, ...)</span>`);
+    raw(`  <span class="info">games</span>           <span class="muted">bundled game plugins & emulator</span>`);
     raw(`  <span class="info">mobile</span>          <span class="muted">mobile companion</span>`);
     raw(`  <span class="info">config</span>          <span class="muted">show example config</span>`);
     raw(`  <span class="info">keybinds</span>        <span class="muted">keyboard shortcuts</span>`);
@@ -507,17 +507,17 @@ const CMDS={
     raw('');
     const feats=[
       ['Terminal Emulation','xterm.js v5, one PTY per pane, 10K scrollback, VT100'],
-      ['Claude AI Assistant','Streaming responses, tool calling, multi-session, Whisper voice'],
-      ['Live Chat','7 channels, ECDSA-signed messages, emoji reactions, image sharing'],
+      ['Agentic AI Assistant','Multi-provider (Claude/GPT/Gemini/MiniMax), tools, approval gate'],
+      ['Live Chat','Self-hosted relay, ECDSA-signed messages, emoji reactions, image sharing'],
       ['E2E Encryption','ECDH P-256 key exchange + AES-256-GCM for DMs and relay'],
       ['Tiling WM','Binary split-tree, unlimited nesting, drag resize, zoom, stacks'],
       ['GPU Rendering','wgpu (Vulkan/Metal/DX12), hex grid shaders, 120 Hz'],
-      ['Plugin System','HTML/JS/CSS plugins, jarvis:// protocol, IPC bridge'],
-      ['Command Palette','37+ actions, fuzzy search, plugin injection'],
-      ['Built-In Games','Tetris, Asteroids, Minesweeper, Pinball, retro emulator'],
+      ['Plugin System','jarvis:// HTML/JS/CSS plugins (games, music player, ...), IPC bridge'],
+      ['Command Palette','Fuzzy search, plugin injection, keybind actions'],
+      ['Pair Programming','Collaborative terminal over the relay (experimental)'],
       ['Mobile Companion','QR pairing, E2E relay, workspace streaming'],
       ['Presence','Real-time user status, poke notifications, online list'],
-      ['Settings Panel','Live preview, theme switching, 25+ config sections, hot-reload'],
+      ['Settings Panel','Live preview, theme switching, config sections, hot-reload'],
     ];
     feats.forEach(([k,v])=>raw(`  <span class="teal">▸</span> <span class="blue">${esc(k)}</span>  <span class="muted">${esc(v)}</span>`));
     raw('');
@@ -528,7 +528,7 @@ const CMDS={
     const crates=[
       ['jarvis-app','Window, event loop, action dispatch, subsystem coordination'],
       ['jarvis-renderer','wgpu GPU rendering, hex grid shaders, UI chrome'],
-      ['jarvis-ai','Claude, Gemini, Whisper — streaming & tool calling'],
+      ['jarvis-ai','Claude/GPT/Gemini/MiniMax — agentic tool loop, sandbox'],
       ['jarvis-tiling','Binary split tree, layout engine, pane management'],
       ['jarvis-webview','wry WebView wrapper, IPC bridge, content provider'],
       ['jarvis-social','Presence, chat, channels, identity, voice/screen-share'],
@@ -558,22 +558,23 @@ const CMDS={
     raw('');
   },
   ai(){
-    raw(`<span class="header">AI ASSISTANT INTEGRATION</span>`);
+    raw(`<span class="header">AGENTIC AI ASSISTANT</span>`);
     raw('');
-    raw(`  <span class="table-key">Primary</span><span class="table-val">Claude Opus (streaming responses)</span>`);
-    raw(`  <span class="table-key">Alternative</span><span class="table-val">Gemini</span>`);
-    raw(`  <span class="table-key">Voice</span><span class="table-val">Whisper transcription (push-to-talk)</span>`);
-    raw(`  <span class="table-key">Tool Calling</span><span class="table-val">Automatic loops, up to 10 rounds</span>`);
-    raw(`  <span class="table-key">Sessions</span><span class="table-val">Persistent conversation history</span>`);
-    raw(`  <span class="table-key">Tracking</span><span class="table-val">Token usage across providers</span>`);
-    raw(`  <span class="table-key">Concurrency</span><span class="table-val">Multiple assistant panels simultaneously</span>`);
+    raw(`  <span class="table-key">Providers</span><span class="table-val">Claude · OpenAI GPT · Google Gemini · MiniMax</span>`);
+    raw(`  <span class="table-key">Switching</span><span class="table-val">In-panel dropdown, history preserved</span>`);
+    raw(`  <span class="table-key">Streaming</span><span class="table-val">Token-by-token via SSE</span>`);
+    raw(`  <span class="table-key">Agentic Loop</span><span class="table-val">Tool calls, up to 10 rounds per turn</span>`);
+    raw(`  <span class="table-key">Tools</span><span class="table-val">Read-only by default (read/list/search files)</span>`);
+    raw(`  <span class="table-key">Write / Exec</span><span class="table-val">Opt-in, gated behind fail-closed human approval</span>`);
+    raw(`  <span class="table-key">Sandbox</span><span class="table-val">Workspace-jailed paths, no-shell argv execution</span>`);
+    raw(`  <span class="table-key">Keys</span><span class="table-val">Read from env only, never written to config</span>`);
     raw('');
   },
   chat(){
     raw(`<span class="header">LIVE CHAT & PRESENCE</span>`);
     raw('');
-    raw(`  <span class="table-key">Backend</span><span class="table-val">Supabase Realtime (WebSocket)</span>`);
-    raw(`  <span class="table-key">Channels</span><span class="table-val">#general #discord #showoff #help #random #games #memes</span>`);
+    raw(`  <span class="table-key">Backend</span><span class="table-val">jarvis-relay — self-hosted WebSocket (no third party)</span>`);
+    raw(`  <span class="table-key">Rooms</span><span class="table-val">Symmetric N:N relay sessions for chat + presence</span>`);
     raw(`  <span class="table-key">Signing</span><span class="table-val">Every message ECDSA-P256-SHA256 signed</span>`);
     raw(`  <span class="table-key">DM Encryption</span><span class="table-val">ECDH key exchange + AES-256-GCM</span>`);
     raw(`  <span class="table-key">Features</span><span class="table-val">Emoji reactions, image sharing, lightbox</span>`);
@@ -601,32 +602,36 @@ const CMDS={
     raw(`<span class="header">PLUGIN SYSTEM</span>`);
     raw('');
     raw(`  <span class="accent">Tier 1: Bookmark Plugins</span>`);
-    raw(`  <span class="muted">  URLs configured directly in config.toml</span>`);
+    raw(`  <span class="muted">  Named URLs configured directly in config.toml</span>`);
     raw('');
     raw(`  <span class="accent">Tier 2: Local Plugins</span>`);
     raw(`  <span class="muted">  Full HTML/JS/CSS folders in ~/.config/jarvis/plugins/</span>`);
     raw('');
+    raw(`  <span class="accent">Tier 3: Embedded (first-party) Plugins</span>`);
+    raw(`  <span class="muted">  Games + Music Player, compiled into the binary</span>`);
+    raw('');
     raw(`  <span class="table-key">Protocol</span><span class="table-val">jarvis:// custom scheme for asset serving</span>`);
     raw(`  <span class="table-key">IPC Bridge</span><span class="table-val">window.jarvis.ipc (send, request, on)</span>`);
     raw(`  <span class="table-key">Integration</span><span class="table-val">Auto-registered in command palette</span>`);
-    raw(`  <span class="table-key">IPC Kinds</span><span class="table-val">29 allowed message types</span>`);
-    raw(`  <span class="table-key">Navigation</span><span class="table-val">Allowlisted: jarvis://, http(s)://, about:blank</span>`);
+    raw(`  <span class="table-key">Sandbox</span><span class="table-val">Per-plugin dir, IPC allowlist, navigation allowlist</span>`);
+    raw('');
+    raw(`  <span class="muted">Games are plugins — there is no separate "games" subsystem.</span>`);
     raw('');
   },
   games(){
-    raw(`<span class="header">BUILT-IN GAMES & EMULATOR</span>`);
+    raw(`<span class="header">BUNDLED PLUGINS — GAMES, MUSIC & EMULATOR</span>`);
     raw('');
-    raw(`  <span class="accent">Embedded Games</span>`);
-    raw(`  <span class="muted">  Tetris, Asteroids, Minesweeper, Pinball, Doodle Jump,</span>`);
-    raw(`  <span class="muted">  Drawing Canvas, Subway Surfers, Video Player</span>`);
+    raw(`  <span class="muted">Games ship as first-party plugins (not a separate subsystem).</span>`);
     raw('');
-    raw(`  <span class="accent">External Games</span>`);
-    raw(`  <span class="muted">  KartBros, BasketBros, FootballBros, SoccerBros,</span>`);
-    raw(`  <span class="muted">  WrestleBros, Lichess, Excalidraw, Desmos, Monkeytype</span>`);
+    raw(`  <span class="accent">Embedded Game Plugins</span>`);
+    raw(`  <span class="muted">  Tetris, Asteroids, Minesweeper, Pinball,</span>`);
+    raw(`  <span class="muted">  Doodle Jump, Draw, Subway Surfers</span>`);
     raw('');
-    raw(`  <span class="accent">Retro Emulator</span>`);
-    raw(`  <span class="muted">  NES, SNES, Game Boy, GBA, N64, Genesis</span>`);
-    raw(`  <span class="muted">  ROMs from ~/ROMs (max 64MB)</span>`);
+    raw(`  <span class="accent">Other Bundled Plugins</span>`);
+    raw(`  <span class="muted">  Music Player, Retro Emulator (WebGL)</span>`);
+    raw('');
+    raw(`  <span class="accent">Bring Your Own</span>`);
+    raw(`  <span class="muted">  Bookmark plugins point a pane at any web app/game</span>`);
     raw('');
     raw(`  <span class="info">Try it:</span> <span class="muted">type</span> <span class="warn">tetris</span> <span class="muted">to play right here!</span>`);
     raw('');
@@ -692,9 +697,9 @@ const CMDS={
     raw(`  <span class="table-key">GPU Backend</span><span class="table-val">wgpu 24 (Vulkan / Metal / DX12)</span>`);
     raw(`  <span class="table-key">Frame Rate</span><span class="table-val">120 Hz (8ms poll)</span>`);
     raw(`  <span class="table-key">PTY Throughput</span><span class="table-val">~8 MB/s (64KB/frame)</span>`);
-    raw(`  <span class="table-key">IPC Kinds</span><span class="table-val">29 message types</span>`);
-    raw(`  <span class="table-key">Palette Actions</span><span class="table-val">37+</span>`);
-    raw(`  <span class="table-key">Chat Channels</span><span class="table-val">7 default</span>`);
+    raw(`  <span class="table-key">AI Providers</span><span class="table-val">4 (Claude / GPT / Gemini / MiniMax)</span>`);
+    raw(`  <span class="table-key">Bundled Plugins</span><span class="table-val">9 (games + music player)</span>`);
+    raw(`  <span class="table-key">Chat Backend</span><span class="table-val">jarvis-relay (self-hosted)</span>`);
     raw(`  <span class="table-key">Chat Buffer</span><span class="table-val">500 msgs/channel</span>`);
     raw(`  <span class="table-key">Scrollback</span><span class="table-val">10,000 lines default</span>`);
     raw(`  <span class="table-key">Config Sections</span><span class="table-val">25+</span>`);
@@ -780,27 +785,29 @@ $('#pane-terminal').addEventListener('click',()=>termIn.focus());
 
 // ── Claude Panel ─────────────────────────────────────
 const claudeResponses={
-  'What is Jarvis?':`Jarvis is a **multiplayer, GPU-accelerated desktop environment** built entirely in Rust.\n\nIt fuses terminal emulation, AI assistants, live encrypted chat, retro games, and a plugin system into a single tiled interface. Think of it as a tiling window manager that's also a social platform.\n\n**Key differentiators:**\n• Multiplayer-first — real-time chat and presence built in\n• AI-native — multiple concurrent Claude panels with streaming\n• GPU-rendered — wgpu with Vulkan/Metal/DX12, 120 Hz\n• E2E encrypted — ECDSA signing, ECDH key exchange, AES-256-GCM\n• Cross-platform — macOS, Linux, Windows\n\nThe codebase is organized as 10 Rust crates with clear boundaries: \`jarvis-app\`, \`jarvis-renderer\`, \`jarvis-ai\`, \`jarvis-tiling\`, \`jarvis-webview\`, \`jarvis-social\`, \`jarvis-config\`, \`jarvis-platform\`, \`jarvis-common\`, and \`jarvis-relay\`.`,
+  'What is Jarvis?':`Jarvis is a **programmable, GPU-rendered tiling desktop shell** built entirely in Rust — designed for vibe coding.\n\nIt fuses a tiling window manager, a PTY-backed terminal, an agentic AI assistant, self-hosted encrypted chat & presence, and a \`jarvis://\` plugin system into a single tiled interface.\n\n**Key differentiators:**\n• Tiling-first — binary split-tree shell with a terminal and plugins\n• Agentic AI — multi-provider (Claude / OpenAI GPT / Gemini / MiniMax), tool-using, with a human approval gate\n• Self-hosted — chat & presence run over Jarvis's own relay, no third-party backend\n• Collaborative — share a terminal for pair programming (experimental)\n• E2E encrypted — ECDSA signing, ECDH key exchange, AES-256-GCM\n• Cross-platform — Windows, macOS, Linux\n\nThe codebase is organized as 10 Rust crates with clear boundaries: \`jarvis-app\`, \`jarvis-renderer\`, \`jarvis-ai\`, \`jarvis-tiling\`, \`jarvis-webview\`, \`jarvis-social\`, \`jarvis-config\`, \`jarvis-platform\`, \`jarvis-common\`, and \`jarvis-relay\`. Build it from source with \`cargo run\`.`,
 
   'Tell me about the terminal':`The terminal is powered by **xterm.js v5.5.0** running inside a WebView, with one PTY per pane via \`portable-pty\`.\n\n**Capabilities:**\n• Full VT100/xterm escape sequence support\n• 10,000 line scrollback (configurable up to 100K)\n• Clickable URL detection\n• Multiple cursor styles: block, underline, beam\n• System clipboard integration\n• Visual and audio bell alerts\n• Terminal-to-GUI resize sync via ResizeObserver\n\n**Performance:**\n• Up to 64 KB per frame, ~8 MB/s throughput\n• PTY output throttling prevents UI stalls\n• Environment sanitized (allowlist of safe variables)\n\nYou can run multiple independent shell sessions side by side in the tiling layout.`,
 
-  'How does the plugin system work?':`The plugin system has **two tiers:**\n\n**Tier 1 — Bookmark Plugins**\nSimple URL references in your \`config.toml\`. Point to any web app and it opens in a pane.\n\n**Tier 2 — Local Plugins**\nFull HTML/JS/CSS folders in \`~/.config/jarvis/plugins/\`. These get:\n• The \`jarvis://\` custom protocol for asset serving\n• Full IPC bridge via \`window.jarvis.ipc\`\n• Automatic registration in the command palette\n\n**IPC Bridge API:**\n\`\`\`javascript\nwindow.jarvis.ipc.send(kind, payload)    // fire-and-forget\nwindow.jarvis.ipc.request(kind, payload) // returns Promise\nwindow.jarvis.ipc.on(kind, callback)     // event listener\n\`\`\`\n\nThere are 29 allowed IPC message kinds covering PTY control, panel management, clipboard, crypto, and more. Navigation is restricted to \`jarvis://\`, \`http(s)://\`, and \`about:blank\`.`,
+  'How does the plugin system work?':`The plugin system has **three tiers:**\n\n**Tier 1 — Bookmark Plugins**\nNamed URL references in your \`config.toml\`. Point to any web app and it opens in a pane.\n\n**Tier 2 — Local Plugins**\nFull HTML/JS/CSS folders in \`~/.config/jarvis/plugins/\`.\n\n**Tier 3 — Embedded (first-party) Plugins**\nThe bundled games and the Music Player ship as plugins compiled into the binary. Games are **not** a separate subsystem — they go through the exact same plugin pipeline.\n\nTiers 2 and 3 get:\n• The \`jarvis://\` custom protocol for asset serving\n• Full IPC bridge via \`window.jarvis.ipc\`\n• Automatic registration in the command palette\n\n**IPC Bridge API:**\n\`\`\`javascript\nwindow.jarvis.ipc.send(kind, payload)    // fire-and-forget\nwindow.jarvis.ipc.request(kind, payload) // returns Promise\nwindow.jarvis.ipc.on(kind, callback)     // event listener\n\`\`\`\n\nIPC kinds are checked against a strict allowlist covering PTY control, panel management, clipboard, AI, pairing, and more. Navigation is restricted to \`jarvis://\`, \`http(s)://\`, and \`about:blank\`, and each plugin is jailed to its own directory.`,
 
-  'Tell me about the AI integration':`Jarvis has **multi-provider AI integration:**\n\n**Claude (Primary)**\n• Streaming responses with token-by-token rendering\n• Tool calling with automatic loops (up to 10 rounds)\n• Session management with full conversation history\n• Token tracking across sessions\n• Multiple concurrent assistant panels\n\n**Gemini**\n• Alternative provider support\n• Same streaming interface\n\n**Whisper**\n• Voice transcription with push-to-talk (Option+.)\n• Audio captured and sent for transcription\n• Results appear in the assistant panel\n\nThe AI system lives in the \`jarvis-ai\` crate. Each assistant panel runs independently, so you can have multiple Claude conversations going simultaneously in different panes.`,
+  'Tell me about the AI integration':`Jarvis ships an **agentic, multi-provider AI assistant:**\n\n**Four providers, one trait**\n• **Claude** (Anthropic Messages API)\n• **OpenAI GPT** (Chat Completions)\n• **Google Gemini** (Generative Language API)\n• **MiniMax** (OpenAI-compatible)\n\nSwitch between them from a dropdown in the panel header — your conversation history is preserved across the switch. API keys are read from the environment only and are never written to config.\n\n**Agentic tool loop**\n• Streams token-by-token, then runs any tools the model requests (up to 10 rounds per turn)\n• **Read-only by default**: read / list / search files, jailed to the workspace\n• **Write & exec are opt-in** and every mutating call blocks on a **fail-closed human approval gate**\n• \`run_command\` never touches a shell — argv is tokenized, allowlisted, and sandboxed\n\nThe AI system lives in the \`jarvis-ai\` crate. The tool set, system prompt, and loop are identical across providers — only the transport client changes.`,
 
   'How does the tiling work?':`The tiling engine uses a **binary split tree** — a data structure where:\n\n• Each **internal node** stores a split direction (horizontal or vertical) and a ratio\n• Each **leaf node** holds a pane reference\n• Layout is computed by **recursively subdividing** the available Rect\n\n**Operations:**\n• Split horizontal/vertical — creates a new sibling node\n• Resize — drag pane borders to adjust split ratios\n• Swap — exchange two panes' positions\n• Zoom — temporarily fullscreen a single pane\n• Close — remove a leaf and collapse the parent\n• Stack — multiple panes at one leaf (tabbed)\n\n**Smart defaults:**\n• Auto-split direction based on pane aspect ratio (wide → vertical, tall → horizontal)\n• Default gap: 6px, border radius: 8px\n• All configurable via TOML\n\nThe implementation lives in \`jarvis-tiling\` and handles layout, focus tracking, and pane lifecycle. You can actually resize the panes on this very page!`,
 
-  'Tell me about security and encryption':`Jarvis takes **cryptographic identity** seriously:\n\n**Identity**\n• Persistent ECDSA P-256 keypair stored locally\n• SHA-256 fingerprinting (truncated to 8 bytes)\n• Trust-on-First-Use (TOFU) verification model\n\n**Chat Signing**\n• Every message includes an ECDSA-P256-SHA256 signature\n• Signature verification badges displayed in chat\n• Prevents message tampering and impersonation\n\n**E2E Encrypted DMs**\n• ECDH P-256 key exchange between participants\n• AES-256-GCM symmetric encryption derived from shared secret\n• Keys never transmitted — only public key exchange\n\n**Relay Security**\n• Mobile relay uses same ECDH → AES-256 scheme\n• Cipher persists across reconnections (downgrade protection)\n• Session TTL 300s, rate limited to 10 concurrent per IP\n\n**Defense in Depth**\n• IPC message allowlist (compile-time enforced, 29 kinds)\n• Navigation allowlist (jarvis://, http(s)://, about:blank)\n• CSS injection prevention (all theme values sanitized)\n• XSS prevention (chat uses .textContent, never .innerHTML)\n• PTY environment sanitized (allowlist of safe variables)`,
+  'Tell me about security and encryption':`Jarvis takes **cryptographic identity** seriously:\n\n**Identity**\n• Persistent ECDSA P-256 keypair stored locally\n• SHA-256 fingerprinting (truncated to 8 bytes)\n• Trust-on-First-Use (TOFU) verification model\n\n**Chat Signing**\n• Every message includes an ECDSA-P256-SHA256 signature\n• Signature verification badges displayed in chat\n• Prevents message tampering and impersonation\n\n**E2E Encrypted DMs**\n• ECDH P-256 key exchange between participants\n• AES-256-GCM symmetric encryption derived from shared secret\n• Keys never transmitted — only public key exchange\n\n**Relay Security**\n• Mobile relay uses same ECDH → AES-256 scheme\n• Cipher persists across reconnections (downgrade protection)\n• Session TTL 300s, rate limited to 10 concurrent per IP\n\n**AI Tool Safety**\n• Read-only tools by default; write/exec gated behind a fail-closed approval gate\n• Filesystem access jailed to the workspace; no-shell argv execution with an allowlist\n\n**Defense in Depth**\n• IPC message allowlist (unknown kinds dropped)\n• Navigation allowlist (jarvis://, http(s)://, about:blank)\n• CSS injection prevention (all theme values sanitized)\n• XSS prevention (chat uses .textContent, never .innerHTML)\n• PTY environment sanitized (allowlist of safe variables)`,
 
-  'What games are built in?':`Jarvis comes loaded with games:\n\n**Embedded (runs in pane)**\n• Tetris, Asteroids, Minesweeper, Pinball\n• Doodle Jump, Drawing Canvas, Subway Surfers\n• Video Player\n\n**External (web-based)**\n• KartBros, BasketBros, FootballBros, SoccerBros\n• WrestleBros, BaseballBros\n• Lichess (chess), Excalidraw (whiteboard)\n• Desmos (graphing), Monkeytype (typing)\n\n**Retro Emulator**\n• Supports NES, SNES, Game Boy, GBA, N64, Genesis\n• Load ROMs from ~/ROMs directory (max 64 MB)\n• Full gamepad support\n\nAll games launch via the command palette or keybinds. They run inside tiled panes, so you can code in one pane and play Tetris in another.\n\nTry typing \`tetris\` in the terminal on this page!`,
+  'What games are built in?':`Games in Jarvis are **plugins** — they ship as first-party embedded plugins and go through the same \`jarvis://\` pipeline as everything else. There's no separate "games" subsystem.\n\n**Bundled game plugins**\n• Tetris, Asteroids, Minesweeper, Pinball\n• Doodle Jump, Draw, Subway Surfers\n\n**Other bundled plugins**\n• Music Player\n• Retro Emulator (WebGL, runs in an opaque webview)\n\n**Bring your own**\n• A bookmark plugin can point a pane at any web game or app\n\nAll plugins launch via the command palette. They run inside tiled panes, so you can code in one pane and play Tetris in another.\n\nTry typing \`tetris\` in the terminal on this page!`,
 
-  'Tell me about mobile companion':`The **mobile companion** lets you access Jarvis from your phone:\n\n**Pairing**\n• QR code displayed on desktop (Unicode half-block rendering)\n• Scan with phone camera to establish connection\n• ECDH P-256 key exchange during pairing\n\n**Relay Server**\n• \`jarvis-relay\` — standalone WebSocket relay binary\n• Bridges desktop ↔ mobile with E2E encryption\n• AES-256-GCM derived from ECDH shared secret\n\n**Features**\n• PTY I/O streaming — use your terminal from your phone\n• Workspace capture — live screen streaming via JPEG (350ms intervals)\n• Session persistence and revocation\n\n**Security**\n• Session TTL: 300 seconds\n• Rate limited: 10 concurrent sessions per IP\n• Cipher persists across reconnections (no downgrade)\n\nThe relay is a separate binary that can run anywhere — on your machine, a VPS, or a shared server.`,
+  'Tell me about mobile companion':`The **mobile companion** lets you access Jarvis from your phone:\n\n**Pairing**\n• QR code displayed on desktop (Unicode half-block rendering)\n• Scan with phone camera to establish connection\n• ECDH P-256 key exchange during pairing\n\n**Relay Server**\n• \`jarvis-relay\` — standalone WebSocket relay binary\n• Bridges desktop ↔ mobile with E2E encryption\n• AES-256-GCM derived from ECDH shared secret\n\n**Features**\n• PTY I/O streaming — use your terminal from your phone\n• Workspace capture — live screen streaming via JPEG (350ms intervals)\n• Session persistence and revocation\n\n**Security**\n• Session TTL: 300 seconds\n• Rate limited: 10 concurrent sessions per IP\n• Cipher persists across reconnections (no downgrade)\n\nThe relay is a separate binary that can run anywhere — on your machine, a VPS, or a shared server (a Railway/Docker config is included).`,
+
+  'Tell me about pair programming':`Jarvis has an **experimental collaborative terminal** for pair programming (off by default — gated on \`collab.enabled\`).\n\n**How it works**\n• A **host** owns a real PTY and is the source of truth\n• Exactly one participant holds the **driver** seat; their keystrokes flow to the host's PTY\n• Everyone else is a **navigator** — they watch, move a ghost cursor, and can request control\n\n**Transport**\n• Rides the relay's symmetric **Room** sessions (the same self-hosted \`jarvis-relay\`)\n• The relay is a thin, opaque forwarder — it never sees plaintext\n• Frames are **end-to-end signed** between members, with driver-gated input\n\nThe coordination logic lives in \`jarvis-social\` (\`pair/manager.rs\`) behind the \`experimental-collab\` feature flag; the app wires it to the relay. It's deliberately opt-in — treat it as a preview.`,
 };
 
 function addClaudeMsg(role,text){
   const div=document.createElement('div');div.className='claude-msg';
   const roleEl=document.createElement('div');roleEl.className=`claude-role ${role}`;
-  roleEl.textContent=role==='user'?'You':'Claude';
+  roleEl.textContent=role==='user'?'You':'Assistant';
   div.appendChild(roleEl);
   const textEl=document.createElement('div');textEl.className='claude-text';
   div.appendChild(textEl);claudeMsgs.appendChild(div);
@@ -869,10 +876,10 @@ const chatMessages=[
   {user:5,text:'just paired my phone via QR, the relay is instant',delay:22000},
   {user:1,text:'the tiling engine handles 12 panes without breaking a sweat',delay:27000},
   {user:2,text:'new theme looks amazing with catppuccin mocha',react:'💜',delay:32000},
-  {user:3,text:'whisper transcription is surprisingly accurate',delay:38000},
+  {user:3,text:'the approval gate caught the agent before it ran anything sketchy',react:'🛡️',delay:38000},
   {user:0,text:'pushed a PR for the new settings panel',delay:43000},
   {user:4,text:'the binary split tree visualization is so satisfying to watch',delay:49000},
-  {user:5,text:'just discovered you can stack tabs in a single pane leaf',delay:55000},
+  {user:5,text:'switched the assistant from claude to gemini mid-convo, history kept',delay:55000},
   {user:1,text:'wgpu 24 upgrade went smoothly, vulkan perf is better',delay:62000},
 ];
 let chatIdx=0;
@@ -985,12 +992,14 @@ const paletteActions=[
   {label:'Play Tetris',cat:'Games',action:()=>{CMDS.tetris();focusTerminal()}},
   {label:'Clear Terminal',cat:'Terminal',action:()=>{CMDS.clear();focusTerminal()}},
   {label:'Open Manual',cat:'Docs',action:()=>CMDS.manual()},
-  {label:'Ask Claude: What is Jarvis?',cat:'AI',action:()=>askClaude('What is Jarvis?')},
-  {label:'Ask Claude: Terminal',cat:'AI',action:()=>askClaude('Tell me about the terminal')},
-  {label:'Ask Claude: Plugins',cat:'AI',action:()=>askClaude('How does the plugin system work?')},
-  {label:'Ask Claude: Tiling',cat:'AI',action:()=>askClaude('How does the tiling work?')},
-  {label:'Ask Claude: Security',cat:'AI',action:()=>askClaude('Tell me about security and encryption')},
-  {label:'Ask Claude: Games',cat:'AI',action:()=>askClaude('What games are built in?')},
+  {label:'Ask AI: What is Jarvis?',cat:'AI',action:()=>askClaude('What is Jarvis?')},
+  {label:'Ask AI: Terminal',cat:'AI',action:()=>askClaude('Tell me about the terminal')},
+  {label:'Ask AI: Plugins',cat:'AI',action:()=>askClaude('How does the plugin system work?')},
+  {label:'Ask AI: AI Assistant',cat:'AI',action:()=>askClaude('Tell me about the AI integration')},
+  {label:'Ask AI: Tiling',cat:'AI',action:()=>askClaude('How does the tiling work?')},
+  {label:'Ask AI: Security',cat:'AI',action:()=>askClaude('Tell me about security and encryption')},
+  {label:'Ask AI: Pair Programming',cat:'AI',action:()=>askClaude('Tell me about pair programming')},
+  {label:'Ask AI: Games',cat:'AI',action:()=>askClaude('What games are built in?')},
 ];
 function askClaude(q){
   if(claudeBusy)return;

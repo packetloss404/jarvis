@@ -1,26 +1,216 @@
 # 09 -- Networking, Social, and Communication
 
-This chapter covers Jarvis's networked features: the live chat system, online
-presence, the mobile relay bridge, the cryptographic identity layer, and the
-AI assistant panel.  Every subsystem is described from both the user-facing
-perspective and the implementation perspective so that contributors can
-navigate the codebase confidently.
+This chapter covers Jarvis's networked features: the WebSocket **relay** that
+underpins everything, the live chat system, online presence, the mobile relay
+bridge, the cryptographic identity layer, and the AI assistant panel.  Every
+subsystem is described from both the user-facing perspective and the
+implementation perspective so that contributors can navigate the codebase
+confidently.
+
+A single piece of infrastructure ties the networked features together: the
+**`jarvis-relay`** WebSocket server.  Chat, presence, the mobile bridge,
+screen-share broadcast, and pair programming all speak to it.  There is **no
+Supabase** in Jarvis any more -- the relay's symmetric **Room** sessions
+replaced Supabase Realtime for chat and presence.
 
 ---
 
 ## Table of Contents
 
-1. [Live Chat System](#live-chat-system)
-2. [Presence System](#presence-system)
-3. [Relay System and Mobile Bridge](#relay-system-and-mobile-bridge)
-4. [Mobile Device Pairing](#mobile-device-pairing)
-5. [Crypto Service and Identity](#crypto-service-and-identity)
-6. [AI Assistant Panel](#ai-assistant-panel)
-7. [Chat Panel Features](#chat-panel-features)
-8. [Workspace Streaming](#workspace-streaming)
-9. [Retro Game Emulator](#retro-game-emulator)
-10. [Network Configuration Reference](#network-configuration-reference)
-11. [Security Model](#security-model)
+1. [Relay Server (`jarvis-relay`)](#relay-server-jarvis-relay)
+2. [Live Chat System](#live-chat-system)
+3. [Presence System](#presence-system)
+4. [Mobile Relay Bridge](#mobile-relay-bridge)
+5. [Mobile Device Pairing](#mobile-device-pairing)
+6. [Crypto Service and Identity](#crypto-service-and-identity)
+7. [AI Assistant Panel](#ai-assistant-panel)
+8. [Chat Panel Features](#chat-panel-features)
+9. [Workspace Streaming](#workspace-streaming)
+10. [Retro Game Emulator](#retro-game-emulator)
+11. [Network Configuration Reference](#network-configuration-reference)
+12. [Security Model](#security-model)
+
+---
+
+## Relay Server (`jarvis-relay`)
+
+### Overview
+
+Source: `jarvis-rs/crates/jarvis-relay/src/`
+
+`jarvis-relay` is a standalone Tokio WebSocket server (binary crate).  It is a
+thin message forwarder: it parses **only the first frame** of each connection
+(the *hello*), registers the client in a session, and from then on forwards
+**opaque text frames** between peers without ever inspecting payload content.
+All application-level encryption is end-to-end between the endpoints; the relay
+sees only ciphertext (for the bridge) or already-built application frames (for
+chat/presence).
+
+### Three Session Kinds
+
+The relay multiplexes three different topologies onto one server, chosen by the
+client's hello message (`session.rs`, `Role::session_kind`):
+
+| Kind        | Roles                | Topology | Used by |
+|-------------|----------------------|----------|---------|
+| **Bridge**  | `Desktop`, `Mobile`  | 1:1      | Mobile relay bridge (desktop terminal on a phone) |
+| **Broadcast** | `Host`, `Spectator` | 1:N      | Host-to-spectators screen-share |
+| **Room**    | `Member`             | N:N (symmetric) | Chat, presence, pair programming |
+
+A session is identified by its `session_id`.  Within a session, every client
+gets an `mpsc::Sender<String>` handle in the `SessionStore`; forwarding is just
+pushing the incoming text frame onto the right peer senders.
+
+### Hello Protocol (Client to Relay)
+
+The first message identifies the client's role.  Defined in `protocol.rs`
+(`RelayHello`):
+
+```json
+// Bridge
+{"type": "desktop_hello",   "session_id": "abc123..."}
+{"type": "mobile_hello",    "session_id": "abc123..."}
+
+// Broadcast
+{"type": "host_hello",      "session_id": "abc123..."}
+{"type": "spectator_hello", "session_id": "abc123..."}
+
+// Room (note the extra member_id)
+{"type": "room_hello", "session_id": "abc123...", "member_id": "m1"}
+```
+
+If no valid hello arrives within **10 seconds**, the connection is dropped.
+Session IDs are validated against `max_session_id_len` (default 64 bytes) and
+must be non-empty.
+
+### Control Responses (Relay to Client)
+
+Defined in `protocol.rs` (`RelayResponse`):
+
+| `type`               | Session kind | Meaning |
+|----------------------|--------------|---------|
+| `session_ready`      | Bridge/Broadcast | Registered; carries `session_id` |
+| `peer_connected`     | Bridge       | The other side joined |
+| `peer_disconnected`  | Bridge       | The other side left |
+| `host_connected`     | Broadcast    | Host came online |
+| `host_disconnected`  | Broadcast    | Host left |
+| `viewer_count`       | Broadcast    | Spectator count changed |
+| `room_ready`         | Room         | Member registered; carries `session_id` |
+| `member_joined`      | Room         | A member joined; carries `member_id` |
+| `member_left`        | Room         | A member left; carries `member_id` |
+| `member_count`       | Room         | Current member count |
+| `error`              | any          | Fatal / validation error |
+
+### Bridge Sessions (1:1)
+
+Desktop clients **create** a bridge session; mobile clients **join** an
+existing one.  The desktop is sent `session_ready`; when the mobile joins, both
+sides receive `peer_connected`.  After that, each text frame from one side is
+forwarded verbatim to the other.  A desktop reconnecting with the same
+`session_id` replaces the old desktop registration.  See
+[Mobile Relay Bridge](#mobile-relay-bridge).
+
+### Broadcast Sessions (1:N)
+
+A `host_hello` auto-creates the session; `spectator_hello` clients join it.
+The host's frames fan out to all spectators; the relay also emits `viewer_count`
+to everyone as spectators come and go, and `host_connected` /
+`host_disconnected` to spectators.  This backs host-to-spectator screen-share
+(covered with the collaboration features).
+
+### Room Sessions (N:N, symmetric)
+
+Rooms are the newest and most general session kind.  They back relay-hosted
+**chat**, **presence**, and **pair programming**.
+
+- The **first** `room_hello` for a `session_id` **auto-creates** the room
+  (subject to the global session cap); subsequent members join it.  Each
+  participant is identified by its `member_id`.
+- On join the member receives `room_ready`, then **one `member_joined` per
+  member already present** (its initial roster), then a `member_count`.  Every
+  existing member receives a `member_joined { member_id }` for the newcomer.
+- After registration, an **opaque text frame** from a member is forwarded to
+  **every other member** (all-but-sender fan-out) -- a member never receives
+  its own frames.
+- Reconnecting with the **same `member_id` replaces** that member's channel
+  rather than adding a duplicate.
+- On disconnect the relay fans out `member_left { member_id }` and an updated
+  `member_count` to the remaining members.  When the **last** member leaves,
+  the room is removed.
+- `{"type":"ping"}` keepalive frames are **dropped** (not forwarded), exactly
+  as on bridge links.
+
+Because a pair-programming room's `session_id` is itself a capability secret,
+the relay logs only a truncated, non-reversible fingerprint of that id (first
+6 chars + length) for `Member` connections.
+
+### Session Store and Reaping
+
+`SessionStore` (`session.rs`) maps session IDs to a `Session` enum
+(`Bridge` / `Broadcast` / `Room`).  A background reaper runs every 60 seconds
+and removes sessions older than `session_ttl` (default 300 s) that have no
+live peers (no mobile for bridge, no host/spectators for broadcast, no members
+for room).
+
+### Rate Limiting
+
+`RateLimiter` (`rate_limit.rs`) enforces:
+
+| Parameter                  | Default | Description |
+|----------------------------|---------|-------------|
+| `max_connections_per_ip`   | 10      | Concurrent WebSocket connections per IP |
+| `max_connect_rate_per_ip`  | 20      | New connections per IP per rate window |
+| `rate_window_secs`         | 60      | Sliding window for rate counting |
+| `max_total_sessions`       | 1000    | Global session cap |
+| `max_session_id_len`       | 64      | Maximum session ID length in bytes |
+
+Rate-limited connections are rejected before the WebSocket handshake completes.
+The global session cap is checked when a hello would **create** a new session
+(desktop bridge, or first room member); joining an existing session never trips
+it.
+
+### CLI Arguments and `$PORT`
+
+Source: `jarvis-rs/crates/jarvis-relay/src/main.rs`
+
+```
+jarvis-relay [OPTIONS]
+
+Options:
+  -p, --port <PORT>                Port to listen on [default: 8080]
+      --session-ttl <SECONDS>      Max stale session age [default: 300]
+      --max-connections-per-ip <N> Per-IP concurrent limit [default: 10]
+      --max-sessions <N>           Global session cap [default: 1000]
+```
+
+The relay binds `0.0.0.0:<port>`.  If the environment variable **`$PORT`** is
+set (Railway, Cloud Run, Heroku, etc.) it **overrides** the `--port` default,
+so the same binary deploys anywhere with no flags.
+
+### Deployment
+
+The relay is a single self-contained binary that can be deployed anywhere.  A
+container build and a Railway configuration are included in the repo root:
+
+- **`relay/Dockerfile`** -- a multi-stage build.  Stage 1 (`rust:1.83-slim`)
+  compiles `jarvis-relay` from the workspace (it first stubs every crate's
+  source to pre-cache dependencies, then builds the real relay).  Stage 2
+  (`debian:bookworm-slim`) copies just the `jarvis-relay` binary, sets
+  `ENV PORT=8080`, exposes `8080`, and runs `jarvis-relay --port 8080`
+  (the binary still honors `$PORT` if the platform overrides it).
+- **`railway.json`** -- uses the `DOCKERFILE` builder pointing at
+  `relay/Dockerfile`, with `restartPolicyType: ON_FAILURE` and up to 10
+  retries.
+
+The **default relay URL** shipped in the desktop config points at the Railway
+deployment (see [Relay Configuration](#relay-configuration)).
+
+### Wire Conformance
+
+The relay's control messages are pinned by shared JSON fixtures under
+`jarvis-rs/testdata/relay/` (e.g. `session_ready.json`, `room_ready.json`).
+Both `jarvis-relay` and the desktop client (`jarvis-app`) test against the same
+files so the two sides cannot drift.
 
 ---
 
@@ -29,59 +219,90 @@ navigate the codebase confidently.
 ### Overview
 
 Jarvis ships a multi-channel live chat panel that lets users communicate in
-real time.  The chat is backed by **Supabase Realtime** (Phoenix Channels v1
-protocol over WebSocket) and runs entirely inside a WebView panel loaded from
-`jarvis://localhost/chat/index.html`.
+real time.  The chat is backed by the **relay's Room sessions** -- there is no
+Supabase and no third-party SDK any more.  The panel runs inside a WebView
+loaded from `jarvis://localhost/chat/index.html`.
+
+Each chat channel (and each DM) maps to **one relay Room** whose `session_id`
+is the channel ID.  The relay fans out any opaque application frame a member
+sends to all *other* members of that Room.  Messages are end-to-end protected
+by the same crypto as before (ECDSA signatures on every frame; AES-256-GCM for
+DMs).
 
 ### Architecture
 
 ```
  Chat WebView (HTML/JS)
    |
-   |-- Supabase JS SDK (CDN, SRI-verified)
+   |-- RoomConnection (one per channel/DM)
    |      |
-   |      +-- wss://<project>.supabase.co/realtime/v1/websocket
+   |      +-- WebSocket --> jarvis-relay (Room session, session_id == channelId)
    |
-   |-- jarvis.ipc.request('crypto', ...)   (Rust-side CryptoService)
+   |-- jarvis.ipc.request('crypto', ...)         (Rust-side CryptoService)
+   |-- jarvis.ipc.request('chat_stream_control', {action:'status'})
+   |        (fetches the relay URL from Rust)
    |
    +-- AutoMod  (client-side moderation, JS)
 ```
 
-All chat messages are broadcast via Supabase Realtime channels.  The chat
-panel connects directly from the WebView; the Rust backend does **not**
-proxy chat traffic.  Crypto operations (encryption, signing, key derivation)
-are delegated to the Rust `CryptoService` through IPC so that WebView
-JavaScript never handles raw key material.
+The chat panel connects **directly** from the WebView to the relay; the Rust
+backend does not proxy chat traffic.  Crypto operations (encryption, signing,
+key derivation) are delegated to the Rust `CryptoService` through IPC so that
+WebView JavaScript never handles raw key material.  The relay URL itself is
+obtained from Rust via the `chat_stream_control` `status` IPC.
+
+### `RoomConnection` (Transport)
+
+Source: `jarvis-rs/assets/panels/chat/index.html`, `RoomConnection`
+
+`RoomConnection` is a small WebSocket wrapper that speaks the relay's Room
+protocol.  Per channel it:
+
+1. Opens a WebSocket and sends
+   `{"type":"room_hello", "session_id": channelId, "member_id": <stable id>}`.
+2. Waits for `room_ready`, then handles `member_joined` / `member_left` /
+   `member_count` control frames (distinguished by their `type` field).
+3. Surfaces every other frame -- the **application frames** tagged with a `k`
+   field (`k:"message"`, `k:"reaction"`, or `k:"presence"`) -- to the chat app
+   via an `onAppFrame` handler.
+4. Sends a `{"type":"ping"}` keepalive every 25 s (which the relay drops).
+5. Reconnects with exponential backoff (base 2 s, max 30 s, 8 attempts, 75-125%
+   jitter); after the cap it prompts the user to reload.
 
 ### Channels
 
-Seven channels are pre-configured:
+Seven channels are pre-configured (`CONFIG.CHANNELS`):
 
-| Supabase Channel ID          | Display Name |
-|------------------------------|-------------|
-| `jarvis-livechat`            | `# general` |
-| `jarvis-livechat-discord`    | `# discord` |
-| `jarvis-livechat-showoff`    | `# showoff` |
-| `jarvis-livechat-help`       | `# help`    |
-| `jarvis-livechat-random`     | `# random`  |
-| `jarvis-livechat-games`      | `# games`   |
-| `jarvis-livechat-memes`      | `# memes`   |
+| Room session ID (`session_id`) | Display Name |
+|--------------------------------|-------------|
+| `jarvis-livechat`              | `# general` |
+| `jarvis-livechat-discord`      | `# discord` |
+| `jarvis-livechat-showoff`      | `# showoff` |
+| `jarvis-livechat-help`         | `# help`    |
+| `jarvis-livechat-random`       | `# random`  |
+| `jarvis-livechat-games`        | `# games`   |
+| `jarvis-livechat-memes`        | `# memes`   |
 
-The `general` channel is the **primary** channel: it carries Supabase
-Presence state (online user tracking).  All channels are subscribed at
-startup so that messages arriving on background channels are buffered and
-unread counts are tracked.
-
-Channel switching is instant because every channel is pre-subscribed.
+The `general` channel (`jarvis-livechat`, the default) is the **primary** Room:
+it carries chat presence (the in-channel online roster).  A separate
+`RoomConnection` is opened for **every** channel at startup, so messages
+arriving on background channels are buffered and unread counts are tracked, and
+channel switching is instant.
 Source: `jarvis-rs/assets/panels/chat/index.html`, `CONFIG.CHANNELS`.
 
-### Channels (Backend)
+### In-Channel Presence Roster
 
-On the Rust side, `jarvis-social` provides a `ChannelManager` struct
-(`jarvis-rs/crates/jarvis-social/src/channels.rs`) that maintains an
-in-memory set of channels with member tracking.  Two channels are created
-by default: `general` and `games`.  Users are auto-joined, and the manager
-supports join, leave, leave-all, member listing, and per-user channel queries.
+The chat panel maintains its own per-channel online roster on the **primary**
+Room, independent of the global presence system:
+
+- On `room_ready` (and on each `member_joined`) the panel broadcasts a
+  `{"k":"presence", ...}` frame announcing its `memberId`, `userId`, `nick`,
+  ECDSA `pubkey`, `fingerprint`, ECDH `dhPubkey`, and `online_at`.
+- Received presence frames populate a `memberId -> {nick, fingerprint, pubkey,
+  dhPubkey, userId}` map, which drives the user-count display and the
+  online-users dropdown (the source of the DH key used to start a DM).
+- `member_left` drops the member from the roster; `member_count` refreshes the
+  count.
 
 ### Chat History
 
@@ -104,10 +325,13 @@ and its DOM is capped at 600 nodes to prevent unbounded growth.
 3. Emoji shortcodes (`:smile:`, `:fire:`, etc.) are replaced with Unicode
    emoji.
 4. The message is signed with the user's ECDSA P-256 key via
-   `Identity.sign()` (IPC to Rust).
-5. The payload is broadcast on the active Supabase channel:
+   `Identity.sign()` (IPC to Rust).  The signature is computed over the
+   canonical string `id|userId|nick|ts|text`.
+5. The application frame is sent on the active channel's `RoomConnection` via
+   `sendFrame()`.  The relay fans it out to all other members of that Room:
    ```json
    {
+     "k": "message",
      "id": "<uuid>",
      "userId": "<uuid>",
      "nick": "alice",
@@ -118,27 +342,35 @@ and its DOM is capped at 600 nodes to prevent unbounded growth.
      "fingerprint": "aa:bb:cc:dd:ee:ff:00:11"
    }
    ```
-6. The message is stored in the local channel history and rendered
+6. There is no hard per-frame limit on the relay, but the panel rejects frames
+   larger than ~240 KB (oversized images) before sending.
+7. The message is stored in the local channel history and rendered
    immediately with `verifyStatus: 'self'`.
+
+Channel messages carry the message text in the `text` field and are
+authenticated by the ECDSA signature.  (DMs differ -- see below -- carrying
+AES-GCM `iv`/`ct` instead.)
 
 ### Message Flow (Receive)
 
-1. A broadcast arrives on the Supabase channel subscription.
-2. If `payload.userId === this.userId`, the message is dropped (self-echo
-   prevention).
-3. AutoMod filters run: keyword check on text and nickname, spam check
+1. An application frame (`k:"message"`) arrives via the channel's
+   `RoomConnection` `onAppFrame` handler.  (The relay never echoes a member's
+   own frames back, so self-echo cannot occur; the handler also drops any frame
+   whose `userId` equals the local user as a belt-and-braces check.)
+2. AutoMod filters run: keyword check on text and nickname, spam check
    (repeated character ratio, repeated identical messages), and per-user
    rate limiting.
-4. ECDSA signature verification is performed via `Identity.verify()` (IPC).
-5. The TOFU Trust Store checks whether the sender's fingerprint matches
+3. ECDSA signature verification is performed via `Identity.verify()` (IPC)
+   over the same canonical string `id|userId|nick|ts|text`.
+4. The TOFU Trust Store checks whether the sender's fingerprint matches
    previously-seen identity for that nickname.
-6. A verification badge is attached:
+5. A verification badge is attached:
    - Checkmark (verified): signature valid, TOFU trusted or new.
    - Warning (key-changed): signature valid but fingerprint differs from
      previously recorded -- possible impersonation.
    - Cross (invalid): signature verification failed.
    - Question mark (unverified): no signature present.
-7. The message is rendered and stored in the channel history.
+6. The message is rendered and stored in the channel history.
 
 ### Image Messages
 
@@ -159,8 +391,8 @@ as `<img>` elements with a click-to-lightbox viewer.
 
 ### Reactions
 
-Messages support emoji reactions.  Reactions are broadcast as a separate
-`reaction` event (unencrypted) with `{ msgId, emoji, userId, action }`.
+Messages support emoji reactions.  Reactions are sent as a separate frame
+(`k:"reaction"`) on the same Room, with `{ msgId, emoji, userId, action }`.
 A picker of 16 emoji is shown on hover.  Reactions are tracked per message
 in the local history and persisted across channel switches.
 
@@ -170,22 +402,28 @@ Users can open an end-to-end encrypted DM from the online users dropdown.
 The flow:
 
 1. User clicks a peer's "DM" button in the dropdown.
-2. An ECDH shared key is derived: `Identity.deriveSharedKey(otherDhPubkey)`.
+2. An ECDH shared key is derived: `Identity.deriveSharedKey(otherDhPubkey)`,
+   using the peer's `dhPubkey` learned from its presence frame.
 3. A deterministic DM channel name is computed from both fingerprints
    (sorted, concatenated with `jarvis-dm-` prefix).
-4. A new Supabase channel subscription is created for the DM.
+4. A new `RoomConnection` is opened for the DM (its `session_id` is that
+   deterministic channel name), so both peers meet in the same one-frame-fanned
+   Room.
 5. Outbound DM messages are encrypted with AES-256-GCM using the ECDH-derived
-   key via `Crypto.encrypt()`.  The payload contains `iv` and `ct` (base64)
-   instead of `text`.
+   key via `Crypto.encrypt()`.  The `k:"message"` frame carries `iv` and `ct`
+   (base64) instead of `text`.
 6. Inbound DM messages are decrypted via `Crypto.decrypt()`.
 7. Signatures are computed over `id|userId|nick|ts|iv|ct` (the ciphertext
    components, not plaintext) to prevent chosen-plaintext attacks on the
    signature oracle.
 
+The relay carries the DM ciphertext opaquely, exactly like any other Room
+frame -- it cannot read DM contents.
+
 ### Reconnection
 
-If the primary channel drops, an exponential backoff reconnect strategy
-engages:
+`RoomConnection` reconnects each channel independently with exponential
+backoff:
 
 | Parameter       | Value  |
 |-----------------|--------|
@@ -194,7 +432,7 @@ engages:
 | Max attempts    | 8      |
 | Jitter          | 75-125% |
 
-After max attempts, the user is prompted to reload.
+After max attempts on the primary channel, the user is prompted to reload.
 
 ---
 
@@ -212,19 +450,60 @@ status, and activity.  It is implemented across two layers:
 
 ### Rust-Side Presence Client
 
-Source: `jarvis-rs/crates/jarvis-social/src/presence/`
+Source: `jarvis-rs/crates/jarvis-social/src/presence/` and
+`jarvis-rs/crates/jarvis-social/src/room/`
 
-The `PresenceClient` connects to Supabase Realtime via the reusable
-`RealtimeClient`.  On start:
+Presence now rides the relay's **Room** transport (the old Supabase/Phoenix
+`realtime` client was deleted).  Every desktop joins a single, well-known
+**global presence Room** named `jarvis-presence-global`
+(`DEFAULT_PRESENCE_ROOM_ID`).
 
-1. A `RealtimeClient` is created with the configured `project_ref` and
-   `api_key`.
-2. The `jarvis-presence` channel is joined with presence tracking enabled
-   (keyed by `user_id`).
-3. The client tracks its presence with a payload containing:
-   `user_id`, `display_name`, `status`, `activity`, `online_at`.
-4. A background `event_translator` task converts low-level
-   `RealtimeEvent`s into high-level `PresenceEvent`s.
+The transport itself is `room::RoomClient` -- a generic, presence-agnostic
+WebSocket client (mirroring the desktop bridge's `relay_client.rs`):
+
+1. Connects to the relay (`RoomConfig.relay_url`, taken from `[relay].url`),
+   sends `{"type":"room_hello", session_id: "jarvis-presence-global",
+   member_id: <user_id>}`, and waits for `room_ready`.
+2. Surfaces relay control frames (`member_joined` / `member_left` /
+   `member_count`) and every opaque text frame as `RoomEvent`s, and accepts
+   opaque text frames to broadcast via `RoomClient::send`.
+3. Auto-reconnects with exponential backoff (1 s base, 30 s max, 15 s connect
+   timeout).  If `relay_url` is empty the client is a graceful no-op (presence
+   disabled).
+
+`PresenceClient` wraps `RoomClient` and maps presence semantics onto opaque
+Room frames (`PresenceFrame`, serialized as JSON).  Its public surface
+(`start` / `update_activity` / `send_invite` / `send_poke` / `send_chat` /
+`online_users` / `disconnect`) is unchanged from the old Supabase client, so
+the app layer needed no changes.  A background `event_translator` task converts
+`RoomEvent`s into high-level `PresenceEvent`s and maintains the online-user
+roster:
+
+- On `Ready` and on each `member_joined`, the client (re-)announces its own
+  `presence` frame so peers learn its roster entry.
+- `member_left` removes the member (keyed by `user_id == member_id`) and emits
+  `UserOffline`.
+- Incoming `presence` / `activity_update` frames insert/update roster entries
+  and emit `UserOnline` / `ActivityChanged`; `poke` frames are surfaced only
+  when targeted at this user; `game_invite` and `chat_message` frames are
+  surfaced as their respective events.  Frames whose `user_id` is our own are
+  ignored.
+
+### Presence Frame Types
+
+Presence application frames are tagged with a `type` field
+(`jarvis-social/src/protocol.rs`, `PresenceFrame`):
+
+| `type`             | Payload |
+|--------------------|---------|
+| `presence`         | `OnlineUser { user_id, display_name, status, activity }` |
+| `activity_update`  | `ActivityUpdatePayload` |
+| `poke`             | `PokePayload { user_id, display_name, target_user_id }` |
+| `game_invite`      | `GameInvitePayload` |
+| `chat_message`     | `ChatMessagePayload` |
+
+These are distinct from the relay's own `member_joined` / `member_left` /
+`member_count` control frames, which the relay generates itself.
 
 ### User Status Values
 
@@ -243,26 +522,15 @@ pub enum UserStatus {
 
 | Event              | Description |
 |--------------------|-------------|
-| `Connected`        | Channel joined; includes initial `online_count`. |
+| `Connected`        | Room joined (`room_ready`); includes initial `online_count`. |
 | `Disconnected`     | Connection lost; user list cleared. |
-| `UserOnline`       | Another user joined. |
-| `UserOffline`      | Another user left. |
+| `UserOnline`       | Another user joined / first presence frame seen. |
+| `UserOffline`      | Another user left (`member_left`). |
 | `ActivityChanged`  | A user's status or activity text changed. |
 | `GameInvite`       | A user broadcast a game invitation. |
 | `Poked`            | Someone poked this user (targeted by `target_user_id`). |
-| `ChatMessage`      | A chat message arrived on the presence channel. |
+| `ChatMessage`      | A chat message arrived on the presence Room. |
 | `Error`            | Connection or protocol error. |
-
-### Broadcast Events
-
-Four broadcast event types ride on the `jarvis-presence` channel:
-
-| Event Name         | Payload Type             |
-|--------------------|--------------------------|
-| `activity_update`  | `ActivityUpdatePayload`  |
-| `game_invite`      | `GameInvitePayload`      |
-| `poke`             | `PokePayload`            |
-| `chat_message`     | `ChatMessagePayload`     |
 
 ### App Integration
 
@@ -282,10 +550,8 @@ synchronous main thread.  `poll_presence()` drains events on every frame:
 Source: `jarvis-rs/crates/jarvis-social/src/identity.rs`
 
 Each Jarvis instance generates a UUID-based identity on startup.  The
-`display_name` defaults to the OS `USER`/`USERNAME` environment variable.
-Identities support optional Supabase Auth JWTs for authenticated connections.
-The access token is never serialized (`#[serde(skip)]`) and redacted in
-`Debug` output.
+`display_name` defaults to the OS `USER`/`USERNAME` environment variable.  The
+`user_id` doubles as the presence Room's `member_id`.
 
 ### Presence Panel (WebView)
 
@@ -313,107 +579,48 @@ IPC messages sent to Rust:
 
 ### Heartbeat and Reconnect
 
-The Supabase Realtime connection sends Phoenix heartbeat messages at a
-configurable interval:
+The presence `RoomClient` sends the relay's `{"type":"ping"}` keepalive and
+reconnects with exponential backoff:
 
 | Parameter                 | Default |
 |---------------------------|---------|
-| `heartbeat_interval_secs` | 25 s    |
 | `reconnect_delay_secs`    | 1 s     |
 | `max_reconnect_delay_secs`| 30 s    |
+| Connect timeout           | 15 s    |
 
-Reconnection uses exponential backoff: `delay = min(delay * 2, max_delay)`.
-On reconnect, previously-joined channels are automatically re-joined and
-presence is re-tracked.
+Reconnection uses exponential backoff: `delay = min(delay * 2, max_delay)`.  On
+reconnect, the client re-sends `room_hello`, re-announces its own presence, and
+re-seeds its roster from the `member_joined` burst the relay replays.
 
 ---
 
-## Relay System and Mobile Bridge
+## Mobile Relay Bridge
 
 ### Overview
 
-The relay system enables a mobile phone to connect to a desktop Jarvis
-instance and interact with its terminal sessions.  It consists of three
-components:
+The mobile bridge enables a phone to connect to a desktop Jarvis instance and
+interact with its terminal sessions.  It is a **Bridge** session on the relay
+(see [Relay Server](#relay-server-jarvis-relay) for the relay internals,
+hello/response protocol, session store, rate limiting, CLI, and deployment).
+It consists of:
 
-1. **`jarvis-relay`** -- a standalone WebSocket relay server (binary crate).
-2. **Relay client** -- outbound WebSocket connection from the desktop app.
-3. **Mobile client** -- connects from the phone to the relay.
+1. **Relay client** -- outbound WebSocket connection from the desktop app.
+2. **Mobile client** -- connects from the phone to the relay
+   (`jarvis-mobile/lib/relay-connection.ts`).
 
-The relay is a thin message forwarder that never inspects payload content.
-All PTY data is end-to-end encrypted between the desktop and mobile
-endpoints.
+The relay is a thin message forwarder that never inspects payload content.  All
+PTY data is end-to-end encrypted between the desktop and mobile endpoints.
 
-### Relay Server (`jarvis-relay`)
-
-Source: `jarvis-rs/crates/jarvis-relay/src/`
-
-The relay is a standalone Tokio application that:
-
-- Listens for TCP connections on a configurable port (default 8080).
-- Accepts WebSocket upgrades.
-- Pairs connections by session ID (one desktop + one mobile per session).
-- Forwards text frames bidirectionally between paired peers.
-
-#### Hello Protocol
-
-The first message from each client identifies its role:
-
-```json
-// Desktop
-{"type": "desktop_hello", "session_id": "abc123..."}
-
-// Mobile
-{"type": "mobile_hello", "session_id": "abc123..."}
-```
-
-Desktop clients **create** sessions; mobile clients **join** existing ones.
-After hello, all subsequent text frames are forwarded opaquely to the peer.
-
-#### Session Lifecycle
+#### Bridge Session Lifecycle
 
 ```
-Desktop connects  -->  Session created (desktop_tx = Some)
+Desktop connects  -->  Bridge session created (desktop_tx = Some)
                        Relay sends: session_ready
 Mobile connects   -->  mobile_tx = Some
                        Relay sends: peer_connected to both
 Mobile disconnects ->  mobile_tx = None
                        Relay sends: peer_disconnected to desktop
 Desktop disconnects -> Session removed if both sides gone
-```
-
-#### Session Store
-
-`SessionStore` (`session.rs`) maps session IDs to `Session` structs
-containing optional `mpsc::Sender<String>` handles for each role.  A stale
-session reaper runs every 60 seconds and removes sessions older than
-`session_ttl` (default 300 seconds) that have no mobile peer.
-
-#### Rate Limiting
-
-`RateLimiter` (`rate_limit.rs`) enforces:
-
-| Parameter                  | Default | Description |
-|----------------------------|---------|-------------|
-| `max_connections_per_ip`   | 10      | Concurrent WebSocket connections per IP |
-| `max_connect_rate_per_ip`  | 20      | New connections per IP per rate window |
-| `rate_window_secs`         | 60      | Sliding window for rate counting |
-| `max_total_sessions`       | 1000    | Global session cap |
-| `max_session_id_len`       | 64      | Maximum session ID length in bytes |
-
-Rate-limited connections are rejected before the WebSocket handshake
-completes.  Stale rate-limit entries are pruned on each connection attempt.
-
-#### CLI Arguments
-
-```
-jarvis-relay [OPTIONS]
-
-Options:
-  -p, --port <PORT>                    Port to listen on [default: 8080]
-      --session-ttl <SECONDS>          Max stale session age [default: 300]
-      --max-connections-per-ip <N>     Per-IP concurrent limit [default: 10]
-      --max-sessions <N>              Global session cap [default: 1000]
 ```
 
 ### Desktop Relay Client
@@ -493,6 +700,27 @@ pub enum RelayEnvelope {
   ciphertext.
 - `Plaintext` -- only accepted before encryption is established; rejected
   after a cipher is active to prevent downgrade attacks.
+
+### Mobile Client
+
+Source: `jarvis-mobile/lib/relay-connection.ts`
+
+The phone side is a TypeScript `RelayConnection` (React Native / Expo).  Given a
+scanned pairing string, it:
+
+1. Parses the pairing URL into `relayUrl`, `sessionId`, and the desktop's
+   `dhPubkey`.
+2. Opens a WebSocket to `relayUrl` and sends `mobile_hello`.
+3. On `peer_connected`, runs the ECDH key exchange: it builds a `RelayCipher`
+   from the desktop's DH pubkey and sends its own ephemeral pubkey back in a
+   `key_exchange` envelope, then marks the connection encrypted.
+4. Decrypts `encrypted` envelopes (rejecting `plaintext` once a cipher exists,
+   for downgrade protection) and dispatches the inner `pty_output` /
+   `pty_exit` / `pane_list` messages to the terminal UI; sends `pty_input` /
+   `pty_resize` as encrypted envelopes.
+5. Sends a `{"type":"ping"}` keepalive every 15 s, and auto-reconnects with
+   exponential backoff (1 s base, 30 s max).  On `peer_disconnected` it clears
+   its cipher and waits for the desktop to return.
 
 ---
 
@@ -751,20 +979,12 @@ loop iterations: 10.
 
 ## Chat Panel Features
 
-### Supabase SDK (SRI)
+### No External SDK
 
-The Supabase JavaScript SDK is loaded from a CDN with Subresource
-Integrity verification:
-
-```html
-<script
-  src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.97.0/dist/umd/supabase.min.js"
-  integrity="sha384-1+ItoWbWcmVSm+Y+dJaUt4SEWNA21/jxef+Z0TSHHVy/dEUxEUEnZ1bHn6GT5hj+"
-  crossorigin="anonymous">
-</script>
-```
-
-SRI ensures the loaded script has not been tampered with.
+The chat panel has **no third-party SDK dependency**.  The former Supabase
+JavaScript SDK (loaded from a CDN with Subresource Integrity) has been removed;
+the transport is now the plain-WebSocket `RoomConnection` against
+`jarvis-relay`.  This eliminates the CDN supply-chain surface entirely.
 
 ### AutoMod
 
@@ -905,11 +1125,13 @@ The emulator panel uses WebGL for rendering, which requires an opaque (non-trans
 
 Source: `jarvis-rs/crates/jarvis-config/src/schema/social.rs`
 
+Presence no longer has its own connection settings -- it reuses the relay URL
+from `[relay].url` and joins the global room named by `room_id`:
+
 ```toml
 [presence]
-enabled = true
-server_url = ""         # Supabase project ref
-heartbeat_interval = 30 # seconds
+# Session id of the global presence room every desktop joins.
+room_id = "jarvis-presence-global"
 ```
 
 ### Livechat Configuration
@@ -944,30 +1166,34 @@ spam_detection = true
 
 Source: `jarvis-rs/crates/jarvis-config/src/schema/relay.rs`
 
+This single URL is shared by the mobile bridge, presence, and chat.  The
+default points at the Railway deployment of `jarvis-relay`:
+
 ```toml
 [relay]
-url = "wss://jarvis-relay-363598788638.us-central1.run.app/ws"
+url = "wss://jarvis-relay-production-3eb6.up.railway.app/ws"
 auto_connect = false
 ```
 
-### Supabase Realtime Connection
+### Relay Room / Presence Client Defaults
+
+These apply to the desktop's presence `RoomClient` and (mirrored in JS) the
+chat `RoomConnection`:
 
 | Parameter                          | Value |
 |------------------------------------|-------|
-| WebSocket URL pattern              | `wss://<project_ref>.supabase.co/realtime/v1/websocket?apikey=<key>&vsn=1.0.0` |
-| Heartbeat interval                 | 25 seconds |
+| Keepalive ping                     | `{"type":"ping"}` (dropped by relay) |
 | Reconnect base delay               | 1 second |
 | Max reconnect delay                | 30 seconds |
 | WebSocket connect timeout          | 15 seconds |
-| Channel join / broadcast ack       | enabled |
-| Self-send on broadcasts            | disabled |
+| Own-frame echo                     | never (relay fans out all-but-sender) |
 
 ### Relay Server Defaults
 
 | Parameter                  | Default |
 |----------------------------|---------|
-| Port                       | 8080    |
-| Session TTL (no mobile)    | 300 s   |
+| Port                       | 8080 (overridable by `$PORT`) |
+| Session TTL (no live peers)| 300 s   |
 | Max connections per IP     | 10      |
 | Max total sessions         | 1000    |
 | Max session ID length      | 64 bytes |
@@ -979,18 +1205,22 @@ auto_connect = false
 
 ## Security Model
 
-### End-to-End Encryption
+### Message Authentication and Encryption
 
-Three encryption contexts exist in Jarvis:
+Jarvis's networked messaging has three protection contexts:
 
-1. **Livechat channel messages** -- encrypted with AES-256-GCM using a
-   room key derived via PBKDF2 from the channel name.  Since the room name
-   is known to all participants, this provides protection against relay
-   snooping but not against other channel members.
+1. **Livechat channel messages** -- carried as opaque application frames over
+   the relay Room and **signed** with the sender's ECDSA-P256 key.  The message
+   text rides in the `text` field.  Authentication (not confidentiality) is the
+   guarantee here: the relay forwards frames it cannot forge a valid signature
+   for, and receivers verify every signature.  (The `CryptoService` also exposes
+   a PBKDF2-derived per-channel room key via `derive_room_key`, used for
+   background channel-key caching.)
 
-2. **Direct messages (DMs)** -- encrypted with AES-256-GCM using a shared
-   key derived via ECDH between the two participants.  Only the two
-   endpoints can decrypt.
+2. **Direct messages (DMs)** -- end-to-end encrypted with AES-256-GCM using a
+   shared key derived via ECDH between the two participants.  The frame carries
+   `iv`/`ct` instead of `text`; only the two endpoints can decrypt, and the
+   relay sees only ciphertext.
 
 3. **Mobile relay bridge** -- all PTY data is encrypted with AES-256-GCM
    using a shared key derived via ECDH between desktop and mobile.  The
@@ -1035,11 +1265,11 @@ detection on both outgoing and incoming messages.  This is not a security
 boundary (clients could be modified), but it protects well-behaved users
 from spam and abuse in the shared chat environment.
 
-### SRI for External Dependencies
+### No External Script Dependencies
 
-The Supabase JavaScript SDK loaded in the chat panel is protected with a
-`sha384` Subresource Integrity hash and `crossorigin="anonymous"`, ensuring
-the script has not been tampered with in transit or at the CDN.
+The chat panel no longer loads any third-party JavaScript SDK from a CDN (the
+Supabase SDK is gone), removing that supply-chain surface entirely.  The
+transport is a plain WebSocket to the project's own relay.
 
 ### Rate Limiting (Relay)
 
@@ -1047,18 +1277,12 @@ The relay server implements per-IP connection limits and global session
 caps to prevent resource exhaustion.  Connection rate limiting uses a
 sliding window, and stale sessions are reaped automatically.
 
-### Experimental Collab Features
+### Collaboration Features
 
-Behind the `experimental-collab` feature flag, the `jarvis-social` crate
-includes additional modules for:
-
-- **Pair programming** (`pair/`) -- collaborative terminal sessions with
-  driver/navigator roles, remote cursor tracking, and terminal
-  input/output relay.
-- **Voice chat** (`voice/`) -- WebRTC voice rooms with SDP offer/answer
-  and ICE candidate signaling.
-- **Screen sharing** (`screen_share/`) -- WebRTC screen sharing with
-  configurable quality and SDP/ICE signaling.
-
-These features use the same Supabase Realtime transport for WebRTC
-signaling (SDP offers/answers and ICE candidates).
+The `jarvis-social` crate also includes collaboration modules (pair
+programming, and experimental voice / screen share).  **Pair programming**
+rides the relay's symmetric **Room** sessions (the same N:N transport that
+backs chat and presence), over an encrypted Room keyed by a capability secret.
+These features -- their roles, cursor tracking, and signaling -- are documented
+in detail in the collaboration chapter; this chapter only covers the relay
+Room transport they share.

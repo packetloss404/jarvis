@@ -1,7 +1,7 @@
 # Jarvis
 
 A programmable, GPU-rendered tiling desktop shell for vibe coding — an agentic
-multi-provider AI assistant, self-hosted encrypted chat & presence, collaborative
+multi-provider AI assistant, self-hosted chat & presence, collaborative
 terminals, and a `jarvis://` plugin system, all in one cross-platform Rust binary.
 
 ![Jarvis](screenshot.png)
@@ -21,9 +21,10 @@ shell. Everything load-bearing lives in the **`jarvis-rs/`** Rust workspace.
   Gemini · MiniMax**, switchable in-panel). Read-only filesystem tools by default;
   **write/exec tools are opt-in and gated behind a fail-closed human approval
   gate** (no-shell argv execution, sandbox-jailed paths, per-call approval).
-- **Live chat + presence** — end-to-end encrypted (ECDSA identities, AES-GCM),
-  running over Jarvis's **own relay** (the `jarvis-relay` crate) — no third-party
-  backend. Deployable anywhere (a Railway/Docker config is included).
+- **Live chat + presence** — runs over Jarvis's **own relay** (the `jarvis-relay`
+  crate), no third-party backend; channel messages are signed with per-user ECDSA
+  identities and direct messages are end-to-end encrypted (AES-GCM), with the relay
+  forwarding only opaque frames. Deployable anywhere (a Railway/Docker config is included).
 - **Collaborative terminal / pair programming** *(experimental, off by default)* —
   share a terminal over the relay with driver/navigator roles; sessions are
   **authenticated with signed frames** (see `collab.enabled` in config).
@@ -90,12 +91,34 @@ See **[ARCHITECTURE.md](ARCHITECTURE.md)** for boundaries and "where does this f
 |-----|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Repo map, crate boundaries |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Builds, tests, PR hints |
-| [docs/manual/README.md](docs/manual/README.md) | Full technical manual |
-| [dev/plans/c2-pair-programming.md](dev/plans/c2-pair-programming.md) | Collaborative-terminal design + security |
-| [CHANGELOG.md](CHANGELOG.md) | High-level history |
+| [docs/manual/README.md](docs/manual/README.md) | Full technical manual (12 chapters) |
+| ↳ [11 — AI Assistant](docs/manual/11-ai-assistant.md) | Multi-provider AI, the agentic tool loop, the approval gate |
+| ↳ [12 — Collaboration](docs/manual/12-collaboration.md) | Pair programming over the relay Room, signed-frame auth |
+| [dev/ROADMAP.md](dev/ROADMAP.md) | Remaining / incomplete work |
+| [dev/plans/c2-pair-programming.md](dev/plans/c2-pair-programming.md) | Collaborative-terminal design record |
+| [CHANGELOG.md](CHANGELOG.md) | History — including what changed vs the original version |
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## What was removed from the original version
+
+This is a heavy revival of an inherited project. Relative to the original (`dyoburon`)
+baseline, the rebuild **removed** (preserved at the `legacy-archive` git tag where applicable):
+
+- **The entire legacy macOS stack** — the Python orchestrator (`main.py`, skills, voice,
+  presence, connectors) and the Swift/Metal frontend (`metal-app/`), plus its test suite.
+- **The Supabase backend** — chat and presence were moved onto Jarvis's own relay.
+- **The built-in "games" subsystem** — the games are first-party plugins now instead.
+- **Legacy release tooling** — the macOS/Sparkle release workflow, the appcast template, the
+  shell scripts, and `pytest.ini`.
+- Assorted dead/orphaned code and a tool cache that was wrongly tracked in git.
+
+In its place: multi-provider agentic AI, a self-hosted relay backend, authenticated pair
+programming, games-as-plugins, Windows screen capture, a Railway deploy, and a rebuilt manual.
+The full breakdown — everything **removed, added, and changed** — is in [CHANGELOG.md](CHANGELOG.md).

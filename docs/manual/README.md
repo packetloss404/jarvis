@@ -14,8 +14,10 @@ Complete technical documentation for the Jarvis desktop environment.
 | [06](06-webview-ipc.md) | **WebView & IPC Bridge** | Custom protocol, content provider, IPC messages, theme injection, keyboard handling |
 | [07](07-input-palette.md) | **Input & Command Palette** | Actions, keybinds, input modes, palette filtering, dispatch table |
 | [08](08-plugins.md) | **Plugin System** | Bookmark and local plugins, IPC API, theming, examples, vibe coding guide |
-| [09](09-networking.md) | **Networking & Social** | Live chat, presence, relay, mobile pairing, E2E encryption, AI assistant |
+| [09](09-networking.md) | **Networking & Social** | Relay server (Bridge / Broadcast / Room), live chat & presence over the relay, mobile pairing, deployment |
 | [10](10-renderer.md) | **Renderer & Visual Effects** | GPU pipeline, shaders, backgrounds, effects, boot animation, performance tuning |
+| [11](11-ai-assistant.md) | **AI Assistant** | Multi-provider (Claude / GPT / Gemini / MiniMax), the agentic tool loop, and the approval-gated write/exec tools |
+| [12](12-collaboration.md) | **Collaborative Terminal** | Pair programming over the relay Room — roles, signed-frame authentication, configuration, usage |
 
 ## Single-Page HTML
 

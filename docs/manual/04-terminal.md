@@ -396,7 +396,7 @@ Shell writes to PTY slave
     --> pty-reader thread: reader.read(&mut buf)
       --> mpsc::channel tx.send(buf[..n].to_vec())
 
-[Every 8ms in poll loop]
+[Every 16ms in poll loop]
   --> poll_pty_output()
     --> ptys.drain_all_output()
       --> PtyHandle.drain_output() -- try_recv in loop, up to 64KB
@@ -413,8 +413,8 @@ Shell writes to PTY slave
 - The reader thread reads in 8 KB chunks (`PTY_READ_CHUNK = 8192`).
 - `drain_output()` accumulates chunks up to 64 KB per frame
   (`PTY_MAX_OUTPUT_PER_FRAME = 65536`), then truncates.
-- The main poll loop runs at ~125 Hz (`POLL_INTERVAL = 8ms`), so the
-  effective maximum throughput is roughly 64 KB * 125 = 8 MB/s.
+- The main poll loop runs at ~60 Hz (`POLL_INTERVAL = 16ms`), so the
+  effective maximum throughput is roughly 64 KB * 60 ≈ 3.9 MB/s.
 
 ### 6.4 Shell exit detection
 
