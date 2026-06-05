@@ -117,7 +117,7 @@ baseline, the rebuild **removed** (preserved at the `legacy-archive` git tag whe
 - **The built-in "games" subsystem** — the embedded games are first-party plugins now instead.
 - **The external ad-supported web games** — the "Bros" cart/sports family (KartBros, BasketBros,
   FootballBros, etc.) that loaded ad-laden third-party `.io`/`.gg` sites in a pane, which
-  dyoburon used to play on stream and had begun cutting. Only the embedded games remain.
+  dyoburon used to play on stream. Cut in this revival; only the embedded games remain.
 - **Legacy release tooling** — the macOS/Sparkle release workflow, the appcast template, the
   shell scripts, and `pytest.ini`.
 - Assorted dead/orphaned code and a tool cache that was wrongly tracked in git.

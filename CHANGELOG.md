@@ -37,7 +37,7 @@ ConPTY echo test). Built and adversarially reviewed via multi-agent build/review
 - **The external ad-supported web games** — the "Bros" / sports family that loaded third-party
   `.io`/`.gg` sites in a pane via `OpenURL` (KartBros, BasketBros, FootballBros, SoccerBros,
   WrestleBros, BaseballBros) — the ad-laden cart/sports web games dyoburon used to play on
-  stream and had already begun cutting. The `OpenURL` game-domain catalog entries and the
+  stream; cut in this revival. The `OpenURL` game-domain catalog entries and the
   game-domain navigation allowlist that served them are gone; only the embedded, first-party
   games survive (now as plugins). The generic `OpenURL`/bookmark mechanism itself remains.
 - **Legacy release & tooling** — the macOS/Sparkle GitHub release workflow (`release.yml`), the
