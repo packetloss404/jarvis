@@ -179,9 +179,11 @@ pub async fn handle_connection(
         }
     };
 
+    // For Room (pair) sessions the session_id is the room's CAPABILITY SECRET,
+    // so log only a truncated fingerprint; other roles keep the full id.
     tracing::info!(
         peer = %addr,
-        session = %session_id,
+        session = %log_session(&session_id, role),
         role = ?role,
         "Client registered"
     );
@@ -321,7 +323,7 @@ pub async fn handle_connection(
     // 6. Cleanup.
     tracing::info!(
         peer = %addr,
-        session = %session_id,
+        session = %log_session(&session_id, role),
         role = ?role,
         "Client disconnected"
     );
@@ -417,6 +419,18 @@ async fn read_hello(
             tracing::warn!(peer = %addr, "Hello timeout (10s)");
             None
         }
+    }
+}
+
+/// Render a session id for logging. For `Role::Member` (pair Room) the
+/// session_id is the room's capability secret, so emit only a non-reversible
+/// fingerprint (first 6 chars + length). Other roles keep the full id.
+fn log_session(session_id: &str, role: Role) -> String {
+    if role == Role::Member {
+        let prefix: String = session_id.chars().take(6).collect();
+        format!("{prefix}…(len={})", session_id.len())
+    } else {
+        session_id.to_string()
     }
 }
 

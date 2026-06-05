@@ -6,6 +6,7 @@
 mod assistant;
 mod auto_open;
 mod background;
+mod collab;
 mod effects;
 mod font;
 mod keybind_config;
@@ -29,6 +30,7 @@ mod window;
 pub use assistant::*;
 pub use auto_open::*;
 pub use background::*;
+pub use collab::*;
 pub use effects::*;
 pub use font::*;
 pub use keybind_config::*;
@@ -88,6 +90,7 @@ pub struct JarvisConfig {
     pub status_bar: StatusBarConfig,
     pub relay: RelayConfig,
     pub plugins: PluginsConfig,
+    pub collab: CollabConfig,
 }
 
 // =============================================================================
@@ -290,6 +293,15 @@ model = "gpt-4o-mini"
         let config = JarvisConfig::default();
         assert!(config.presence.enabled);
         assert_eq!(config.presence.room_id, "jarvis-presence-global");
+    }
+
+    #[test]
+    fn default_config_has_correct_collab() {
+        let config = JarvisConfig::default();
+        assert!(!config.collab.enabled);
+        assert_eq!(config.collab.max_participants, 4);
+        assert!(config.collab.allow_takeover);
+        assert!(config.collab.require_signed_join);
     }
 
     #[test]

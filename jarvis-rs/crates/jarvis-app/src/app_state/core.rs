@@ -101,6 +101,24 @@ pub struct JarvisApp {
     pub(super) relay_shutdown_tx: Option<tokio::sync::mpsc::Sender<()>>,
     pub(super) relay_key_tx: Option<tokio::sync::watch::Sender<Option<[u8; 32]>>>,
     pub(super) pairing_pane_id: Option<u32>,
+
+    // Pair programming (collaborative terminal) — C2.
+    pub(super) pair_manager: Option<Arc<jarvis_social::PairManager>>,
+    pub(super) pair_inbound_rx: Option<std::sync::mpsc::Receiver<super::pair::PairInbound>>,
+    pub(super) pair_cmd_tx: Option<tokio::sync::mpsc::Sender<super::pair::PairCommand>>,
+    pub(super) pair_session_id: Option<String>,
+    pub(super) pair_member_id: Option<String>,
+    /// The pane that hosts the pair *panel* (host or navigator). NOTE: this is
+    /// overloaded as both the panel-pane target AND the host-authority flag
+    /// (`is_pair_host` = this is set AND we own a live PairManager session). A
+    /// future cleanup should split panel-pane from host-authority; see
+    /// `JarvisApp::is_pair_host`.
+    pub(super) pair_host_pane_id: Option<u32>,
+    /// Our own sanitized display name for the current pair session, captured at
+    /// start/join so a navigator can announce it via a `Join` frame on connect.
+    pub(super) pair_display_name: Option<String>,
+    pub(super) pair_key_tx: Option<tokio::sync::watch::Sender<Option<[u8; 32]>>>,
+
     pub(super) chat_stream_host: Option<ChatStreamHostState>,
     pub(super) last_chat_stream_frame_at: Instant,
     pub(super) chat_stream_capture_tx: Option<SyncSender<ChatStreamCaptureRequest>>,
@@ -184,6 +202,14 @@ impl JarvisApp {
             relay_shutdown_tx: None,
             relay_key_tx: None,
             pairing_pane_id: None,
+            pair_manager: None,
+            pair_inbound_rx: None,
+            pair_cmd_tx: None,
+            pair_session_id: None,
+            pair_member_id: None,
+            pair_host_pane_id: None,
+            pair_display_name: None,
+            pair_key_tx: None,
             chat_stream_host: None,
             last_chat_stream_frame_at: Instant::now(),
             chat_stream_capture_tx: None,

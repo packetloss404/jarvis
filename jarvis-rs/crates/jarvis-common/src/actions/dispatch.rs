@@ -28,6 +28,7 @@ impl Action {
             Action::OpenURLPrompt => "Open URL",
             Action::OpenAssistant => "Open Assistant",
             Action::OpenChat => "Open Chat",
+            Action::OpenPair => "Open Pair Programming",
             Action::PushToTalk => "Push to Talk",
             Action::ReleasePushToTalk => "Release Push to Talk",
             Action::ScrollUp(_) => "Scroll Up",
@@ -70,6 +71,7 @@ impl Action {
             Action::OpenSettings
             | Action::OpenAssistant
             | Action::OpenChat
+            | Action::OpenPair
             | Action::OpenURLPrompt
             | Action::OpenCommandPalette
             | Action::CloseOverlay => "Apps",
@@ -107,6 +109,7 @@ impl Action {
             Action::ToggleBlankPane,
             Action::OpenSettings,
             Action::OpenChat,
+            Action::OpenPair,
             Action::OpenURLPrompt,
             Action::Copy,
             Action::Paste,

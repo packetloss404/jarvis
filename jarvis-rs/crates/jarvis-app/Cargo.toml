@@ -19,7 +19,7 @@ jarvis-config = { workspace = true }
 jarvis-platform = { workspace = true }
 jarvis-renderer = { workspace = true }
 jarvis-tiling = { workspace = true }
-jarvis-social = { workspace = true }
+jarvis-social = { workspace = true, features = ["experimental-collab"] }
 jarvis-webview = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Jarvis Pair</title>
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css"
+      integrity="sha384-tStR1zLfWgsiXCF3IgfB3lBa8KmBe/lG287CL9WCeKgQYcp1bjb4/+mwN6oti4Co"
+      crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"
+        integrity="sha384-J4qzUjBl1FxyLsl/kQPQIOeINsmp17OHYXDOMpMxlKX53ZfYsL+aWHpgArvOuof9"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"
+        integrity="sha384-XGqKrV8Jrukp1NITJbOEHwg01tNkuXr6uB6YEj69ebpYU3v7FvoGgEg23C1Gcehk"
+        crossorigin="anonymous"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { background: transparent !important; overflow: hidden; }
+
+body {
+  background: var(--color-panel-bg, #242936);
+  color: var(--color-text, #cccac2);
+  font-family: var(--font-ui, sans-serif);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--border-width, 0.5px) solid var(--color-border, rgba(255,255,255,0.06));
+  border-radius: var(--border-radius, 8px);
+}
+
+/* ================================================================ */
+/* TOP BAR                                                          */
+/* ================================================================ */
+
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: var(--border-width, 0.5px) solid var(--color-border, rgba(255,255,255,0.06));
+  min-height: 34px;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+#bar h1 {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted, #707a8c);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+#session-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+#session-code {
+  color: var(--color-text, #cccac2);
+  font-family: var(--font-mono, 'Menlo'), monospace;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border: var(--border-width, 0.5px) solid var(--color-border, rgba(255,255,255,0.06));
+  border-radius: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  transition: border-color 150ms ease;
+}
+#session-code:hover { border-color: var(--color-border-focused, rgba(255,204,102,0.3)); }
+#session-code.empty { cursor: default; opacity: 0.5; }
+
+#role-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: none;
+}
+#role-badge.host    { display: inline-block; color: #ffd580; background: rgba(255, 213, 128, 0.12); }
+#role-badge.driver  { display: inline-block; color: #bae67e; background: rgba(186, 230, 126, 0.12); }
+#role-badge.view    { display: inline-block; color: #73d0ff; background: rgba(115, 208, 255, 0.12); }
+
+#status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted, #707a8c);
+  display: inline-block;
+  flex-shrink: 0;
+  transition: background 150ms ease;
+}
+#status-dot.connected { background: var(--color-success, #bae67e); }
+#status-dot.connecting { background: var(--color-primary, #ffcc66); animation: pulse 1.4s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+#bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.bar-btn {
+  background: transparent;
+  border: var(--border-width, 0.5px) solid var(--color-border, rgba(255,255,255,0.06));
+  border-radius: var(--border-radius, 6px);
+  color: var(--color-text-muted, #707a8c);
+  font-family: var(--font-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  white-space: nowrap;
+}
+.bar-btn:hover {
+  color: var(--color-text, #cccac2);
+  border-color: var(--color-border-focused, rgba(255,204,102,0.3));
+}
+.bar-btn.danger:hover { color: var(--color-error, #f28779); border-color: rgba(242,135,121,0.4); }
+.bar-btn.primary { color: var(--color-primary, #ffcc66); border-color: rgba(255,204,102,0.25); }
+.bar-btn.hidden { display: none; }
+
+/* Participant list */
+#participants {
+  position: relative;
+  flex-shrink: 0;
+}
+#participant-toggle {
+  color: var(--color-text-muted, #707a8c);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  user-select: none;
+}
+#participant-toggle:hover { color: var(--color-text, #cccac2); }
+
+#participant-dropdown {
+  display: none;
+  position: absolute;
+  top: 26px;
+  right: 0;
+  background: rgba(13, 17, 23, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border, rgba(255,255,255,0.08));
+  border-radius: 6px;
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 30;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+}
+#participant-dropdown.open { display: block; }
+.pd-header {
+  font-size: 10px;
+  color: var(--color-text-muted, #707a8c);
+  padding: 8px 12px 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.06));
+}
+.participant-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.04));
+  font-size: 12px;
+}
+.participant-row:last-child { border-bottom: none; }
+.participant-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.participant-name {
+  color: var(--color-text, #cccac2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+.participant-role {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted, #707a8c);
+  flex-shrink: 0;
+}
+.grant-btn {
+  background: rgba(186, 230, 126, 0.08);
+  border: 1px solid rgba(186, 230, 126, 0.2);
+  color: #bae67e;
+  font-family: var(--font-ui, sans-serif);
+  font-size: 9px;
+  padding: 1px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.grant-btn:hover { background: rgba(186, 230, 126, 0.16); }
+.pd-empty {
+  padding: 14px 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-muted, #707a8c);
+  font-style: italic;
+}
+
+/* ================================================================ */
+/* TERMINAL                                                         */
+/* ================================================================ */
+
+#terminal-container {
+  flex: 1;
+  padding: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(200, 204, 212, 0.3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(200, 204, 212, 0.5); }
+
+/* Ghost cursor overlay layer (M3 cursors) */
+#ghost-layer {
+  position: absolute;
+  inset: 4px;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+.ghost-cursor {
+  position: absolute;
+  width: 1px;
+  height: 1em;
+  pointer-events: none;
+  transition: transform 80ms linear;
+}
+.ghost-cursor::after {
+  content: attr(data-name);
+  position: absolute;
+  top: -14px;
+  left: 0;
+  font-size: 9px;
+  padding: 0 3px;
+  border-radius: 3px 3px 3px 0;
+  white-space: nowrap;
+  color: #0d1117;
+  background: currentColor;
+}
+
+/* ================================================================ */
+/* REQUEST-CONTROL FLOATING BUTTON (view-only)                      */
+/* ================================================================ */
+
+#request-control-wrap {
+  display: none;
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+#request-control-wrap.visible { display: block; }
+#request-control-btn {
+  background: rgba(115, 208, 255, 0.1);
+  border: 1px solid rgba(115, 208, 255, 0.35);
+  color: #73d0ff;
+  font-family: var(--font-ui, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 18px;
+  border-radius: 18px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transition: all 150ms ease;
+}
+#request-control-btn:hover { background: rgba(115, 208, 255, 0.2); }
+#request-control-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ================================================================ */
+/* SETUP OVERLAY (no session yet)                                   */
+/* ================================================================ */
+
+#setup-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 17, 23, 0.6);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+#setup-overlay.hidden { display: none; }
+#setup-panel {
+  background: var(--color-panel-bg, #242936);
+  border: var(--border-width, 0.5px) solid var(--color-border-focused, rgba(255,204,102,0.25));
+  border-radius: var(--border-radius, 8px);
+  padding: 24px 22px;
+  width: 320px;
+  text-align: center;
+}
+#setup-panel h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, #cccac2);
+  margin-bottom: 4px;
+}
+#setup-panel p {
+  font-size: 11px;
+  color: var(--color-text-muted, #707a8c);
+  margin-bottom: 18px;
+}
+.setup-actions { display: flex; flex-direction: column; gap: 10px; }
+#join-row { display: flex; gap: 6px; }
+#join-input {
+  flex: 1;
+  background: transparent;
+  border: var(--border-width, 0.5px) solid var(--color-border, rgba(255,255,255,0.1));
+  border-radius: var(--border-radius, 6px);
+  color: var(--color-text, #cccac2);
+  font-family: var(--font-mono, 'Menlo'), monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  outline: none;
+}
+#join-input:focus { border-color: var(--color-border-focused, rgba(255,204,102,0.3)); }
+#setup-error {
+  color: var(--color-error, #f28779);
+  font-size: 10px;
+  margin-top: 8px;
+  min-height: 12px;
+}
+.big-btn {
+  width: 100%;
+  background: transparent;
+  border: var(--border-width, 0.5px) solid var(--color-border, rgba(255,255,255,0.1));
+  border-radius: var(--border-radius, 6px);
+  color: var(--color-text, #cccac2);
+  font-family: var(--font-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+.big-btn:hover { border-color: var(--color-border-focused, rgba(255,204,102,0.3)); background: rgba(255,255,255,0.03); }
+.big-btn.host-btn { color: var(--color-primary, #ffcc66); border-color: rgba(255,204,102,0.25); }
+
+/* ================================================================ */
+/* EXIT OVERLAY                                                     */
+/* ================================================================ */
+
+#exit-overlay {
+  display: none;
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  justify-content: center; align-items: center;
+  flex-direction: column; gap: 12px;
+  z-index: 50;
+}
+#exit-overlay.visible { display: flex; }
+#exit-overlay .exit-msg { color: var(--color-text-muted, #707a8c); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================== -->
+<!-- TOP BAR                                                        -->
+<!-- ============================================================== -->
+
+<div id="bar">
+  <h1>Pair</h1>
+  <div id="session-meta">
+    <span id="session-code" class="empty" title="Click to copy invite code">no session</span>
+    <span id="role-badge"></span>
+    <span id="status-dot"></span>
+  </div>
+  <div id="participants">
+    <span id="participant-toggle" title="Participants">&#128101; <span id="participant-count">0</span></span>
+    <div id="participant-dropdown">
+      <div class="pd-header">Participants</div>
+      <div id="participant-list"></div>
+    </div>
+  </div>
+  <div id="bar-actions">
+    <button id="leave-btn" class="bar-btn danger hidden" title="Leave the pair session">Leave</button>
+  </div>
+  <button id="close-btn" class="bar-btn" title="Close panel"
+          onclick="if(window.ipc&&window.ipc.postMessage)window.ipc.postMessage(JSON.stringify({kind:'panel_close',payload:{}}))"
+          style="padding:2px 8px;font-size:15px;line-height:1;">&times;</button>
+</div>
+
+<!-- ============================================================== -->
+<!-- TERMINAL                                                       -->
+<!-- ============================================================== -->
+
+<div id="terminal-container">
+  <div id="ghost-layer"></div>
+
+  <div id="request-control-wrap">
+    <button id="request-control-btn">Request control</button>
+  </div>
+
+  <div id="setup-overlay">
+    <div id="setup-panel">
+      <h2>Pair Programming</h2>
+      <p>Share this terminal, or join someone else's session.</p>
+      <div class="setup-actions">
+        <button id="host-btn" class="big-btn host-btn">Share my terminal</button>
+        <div id="join-row">
+          <input id="join-input" type="text" placeholder="Invite code" autocomplete="off" spellcheck="false">
+          <button id="join-btn" class="big-btn" style="width:auto;padding:9px 14px;">Join</button>
+        </div>
+      </div>
+      <div id="setup-error"></div>
+    </div>
+  </div>
+
+  <div id="exit-overlay">
+    <div class="exit-msg">Session ended</div>
+    <button id="exit-back-btn" class="big-btn host-btn" style="width:auto;padding:8px 20px;">Start new</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// =================================================================
+// Ayu Mirage xterm theme (used immediately; updated when theme IPC arrives)
+// =================================================================
+var AYU = {
+  background: '#242936',
+  foreground: '#cccac2',
+  cursor: '#ffcc66',
+  cursorAccent: '#1f2430',
+  selectionBackground: 'rgba(255, 204, 102, 0.25)',
+  selectionForeground: '#ffffff',
+  black: '#171b24',
+  red: '#f28779',
+  green: '#bae67e',
+  yellow: '#ffd580',
+  blue: '#73d0ff',
+  magenta: '#d4bfff',
+  cyan: '#95e6cb',
+  white: '#cccac2',
+  brightBlack: '#707a8c',
+  brightRed: '#f28779',
+  brightGreen: '#bae67e',
+  brightYellow: '#ffd580',
+  brightBlue: '#73d0ff',
+  brightMagenta: '#d4bfff',
+  brightCyan: '#95e6cb',
+  brightWhite: '#f3f4f5'
+};
+
+var $ = function (sel) { return document.querySelector(sel); };
+
+// =================================================================
+// CRYPTO + IDENTITY IPC WRAPPERS (forked from chat panel — Rust-side keys)
+// These match the `crypto` IPC handler used by the chat panel. The relay
+// socket itself stays in Rust; the panel only ever talks to Rust via IPC.
+// =================================================================
+
+var Crypto = {
+  _defaultKeyHandle: null,
+
+  /** Derive AES-GCM-256 room key (session_id is the shared secret). Rust-side. */
+  async deriveRoomKey(sessionId) {
+    var resp = await window.jarvis.ipc.request('crypto', {
+      op: 'derive_room_key', params: { room: sessionId }
+    });
+    this._defaultKeyHandle = resp.keyHandle;
+    return resp.keyHandle;
+  },
+};
+
+var Identity = {
+  fingerprint: null,
+  pubkeyBase64: null,
+  dhPubkeyBase64: null,
+
+  /** Load identity from Rust CryptoService (keys managed Rust-side). */
+  async init() {
+    var resp = await window.jarvis.ipc.request('crypto', { op: 'init', params: {} });
+    this.fingerprint = resp.fingerprint;
+    this.pubkeyBase64 = resp.pubkey;
+    this.dhPubkeyBase64 = resp.dhPubkey;
+  },
+
+  /** Sign data with ECDSA-P256-SHA256 (Rust-side). Returns base64 signature. */
+  async sign(dataString) {
+    var resp = await window.jarvis.ipc.request('crypto', {
+      op: 'sign', params: { data: dataString }
+    });
+    return resp.signature;
+  },
+};
+
+// =================================================================
+// STATE
+// =================================================================
+
+// role: 'host' (renders own PTY, never sends input), 'driver' (navigator with
+// the driver seat — sends pair_input), 'view' (view-only navigator — swallows
+// keystrokes, can request control). Defaults to 'view' until pair_status says.
+var State = {
+  sessionId: null,
+  memberId: null,        // our own member/user id in the room
+  role: 'view',
+  hostUserId: null,
+  driverUserId: null,
+  allowTakeover: true,
+  participants: {},      // user_id -> { user_id, display_name, role }
+  requestPending: false,
+  inSession: false,
+};
+
+// Deterministic color per member id (for ghost cursors / dots).
+var GHOST_COLORS = ['#73d0ff', '#bae67e', '#ffd580', '#d4bfff', '#95e6cb', '#f28779'];
+function colorForMember(id) {
+  if (!id) return '#73d0ff';
+  var h = 0;
+  for (var i = 0; i < id.length; i++) { h = (h * 31 + id.charCodeAt(i)) >>> 0; }
+  return GHOST_COLORS[h % GHOST_COLORS.length];
+}
+
+// =================================================================
+// XTERM SETUP (forked from terminal panel)
+// =================================================================
+
+var container = document.getElementById('terminal-container');
+var term = new Terminal({
+  cursorBlink: true,
+  cursorStyle: 'block',
+  scrollback: 10000,
+  fontSize: 13,
+  fontFamily: "'Menlo', monospace",
+  lineHeight: 1.6,
+  fontWeight: '400',
+  fontWeightBold: '700',
+  allowProposedApi: true,
+  theme: AYU
+});
+
+var fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(container);
+window._xtermInstance = term;
+fitAddon.fit();
+
+var ro = new ResizeObserver(function () {
+  try { fitAddon.fit(); } catch (e) { /* ignore */ }
+  // The host owns the shared PTY: keep it sized to the panel terminal so the
+  // shell (and the output fanned to navigators) matches what the host sees.
+  if (State.role === 'host') {
+    try { sendIpc('pty_resize', { cols: term.cols, rows: term.rows }); } catch (e) { /* ignore */ }
+  }
+});
+ro.observe(container);
+
+// -----------------------------------------------------------------
+// Role-gated input. The host never routes onData here (its PTY input
+// is handled by Rust directly). Driver sends pair_input. View-only
+// swallows keystrokes and surfaces the "Request control" button.
+// -----------------------------------------------------------------
+term.onData(function (data) {
+  if (State.role === 'host') {
+    // The host's pair panel is backed by a real PTY (spawned by Rust on
+    // pair_start). Drive it directly with pty_input; Rust's PTY tap then fans
+    // the resulting output to navigators and mirrors it back to this panel.
+    sendIpc('pty_input', { data: data });
+    return;
+  }
+  if (State.role === 'driver') {
+    sendIpc('pair_input', { data: data });
+    return;
+  }
+  // view-only: swallow. Nudge the request-control affordance.
+  flashRequestControl();
+});
+
+// =================================================================
+// IPC HELPERS
+// =================================================================
+
+function sendIpc(kind, payload) {
+  if (window.jarvis && window.jarvis.ipc && window.jarvis.ipc.send) {
+    window.jarvis.ipc.send(kind, payload || {});
+  } else if (window.ipc && window.ipc.postMessage) {
+    window.ipc.postMessage(JSON.stringify({ kind: kind, payload: payload || {} }));
+  }
+}
+
+// =================================================================
+// TERMINAL RENDERING — pty_output ONLY ever goes to term.write,
+// NEVER innerHTML.  (security requirement)
+// =================================================================
+
+function writePtyOutput(b64OrStr) {
+  if (b64OrStr == null) return;
+  // Rust may deliver either a base64 string (PairFrame pty_output) or a
+  // raw string. Try base64 decode first; on failure write as-is.
+  var data = b64OrStr;
+  if (typeof b64OrStr === 'string') {
+    try {
+      var bin = atob(b64OrStr);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      term.write(bytes);
+      return;
+    } catch (e) {
+      // not base64 — write the literal string
+      term.write(b64OrStr);
+      return;
+    }
+  }
+  if (Array.isArray(b64OrStr)) {
+    term.write(new Uint8Array(b64OrStr));
+    return;
+  }
+  term.write(String(data));
+}
+
+function applySnapshot(b64OrStr, cols, rows) {
+  term.reset();
+  if (cols && rows) {
+    try { term.resize(cols, rows); } catch (e) { /* ignore */ }
+  }
+  writePtyOutput(b64OrStr);
+}
+
+// =================================================================
+// TOP BAR / ROLE / PARTICIPANTS UI
+// All participant names are rendered with textContent ONLY. (security)
+// =================================================================
+
+var UI = {
+  sessionCodeEl: null,
+  roleBadgeEl: null,
+  statusDotEl: null,
+  participantCountEl: null,
+  participantListEl: null,
+  participantDropdownEl: null,
+  leaveBtnEl: null,
+  setupOverlayEl: null,
+  setupErrorEl: null,
+  requestWrapEl: null,
+  requestBtnEl: null,
+  exitOverlayEl: null,
+
+  init() {
+    this.sessionCodeEl = $('#session-code');
+    this.roleBadgeEl = $('#role-badge');
+    this.statusDotEl = $('#status-dot');
+    this.participantCountEl = $('#participant-count');
+    this.participantListEl = $('#participant-list');
+    this.participantDropdownEl = $('#participant-dropdown');
+    this.leaveBtnEl = $('#leave-btn');
+    this.setupOverlayEl = $('#setup-overlay');
+    this.setupErrorEl = $('#setup-error');
+    this.requestWrapEl = $('#request-control-wrap');
+    this.requestBtnEl = $('#request-control-btn');
+    this.exitOverlayEl = $('#exit-overlay');
+  },
+
+  setConnState(state) {
+    this.statusDotEl.className = state || ''; // 'connected' | 'connecting' | ''
+  },
+
+  setSessionCode(code) {
+    if (code) {
+      this.sessionCodeEl.textContent = code;        // textContent — XSS safe
+      this.sessionCodeEl.classList.remove('empty');
+      this.sessionCodeEl.title = 'Click to copy invite code';
+    } else {
+      this.sessionCodeEl.textContent = 'no session';
+      this.sessionCodeEl.classList.add('empty');
+    }
+  },
+
+  setRole(role) {
+    var el = this.roleBadgeEl;
+    el.className = '';
+    if (role === 'host') { el.classList.add('host'); el.textContent = 'Host'; }
+    else if (role === 'driver') { el.classList.add('driver'); el.textContent = 'Driver'; }
+    else if (role === 'view') { el.classList.add('view'); el.textContent = 'View only'; }
+    else { el.textContent = ''; }
+    // Request-control button only for view-only navigators.
+    this.requestWrapEl.classList.toggle('visible', role === 'view');
+  },
+
+  showSetup(show) {
+    this.setupOverlayEl.classList.toggle('hidden', !show);
+    this.leaveBtnEl.classList.toggle('hidden', show);
+  },
+
+  showExit(msg) {
+    if (msg) this.exitOverlayEl.querySelector('.exit-msg').textContent = msg;
+    this.exitOverlayEl.classList.add('visible');
+  },
+
+  hideExit() {
+    this.exitOverlayEl.classList.remove('visible');
+  },
+
+  setSetupError(msg) {
+    this.setupErrorEl.textContent = msg || ''; // textContent — XSS safe
+  },
+
+  renderParticipants() {
+    var ids = Object.keys(State.participants);
+    this.participantCountEl.textContent = String(ids.length);
+
+    var list = this.participantListEl;
+    while (list.firstChild) list.removeChild(list.firstChild);
+
+    if (ids.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'pd-empty';
+      empty.textContent = 'No one here yet.';
+      list.appendChild(empty);
+      return;
+    }
+
+    var iAmHost = State.role === 'host';
+
+    ids.forEach(function (uid) {
+      var p = State.participants[uid];
+      var row = document.createElement('div');
+      row.className = 'participant-row';
+
+      var dot = document.createElement('span');
+      dot.className = 'participant-dot';
+      dot.style.background = colorForMember(uid);
+      row.appendChild(dot);
+
+      var name = document.createElement('span');
+      name.className = 'participant-name';
+      // textContent ONLY — never innerHTML for participant names. (security)
+      var label = p.display_name || uid;
+      name.textContent = (uid === State.memberId) ? (label + ' (you)') : label;
+      row.appendChild(name);
+
+      var roleTag = document.createElement('span');
+      roleTag.className = 'participant-role';
+      var isHost = uid === State.hostUserId;
+      var isDriver = uid === State.driverUserId;
+      roleTag.textContent = isHost ? 'host' : (isDriver ? 'driver' : 'navigator');
+      row.appendChild(roleTag);
+
+      // Host can grant the driver seat to any non-host, non-driver navigator.
+      if (iAmHost && !isHost && !isDriver) {
+        var grant = document.createElement('button');
+        grant.className = 'grant-btn';
+        grant.textContent = 'Grant';
+        grant.title = 'Give the driver seat to this participant';
+        grant.addEventListener('click', function (e) {
+          e.stopPropagation();
+          sendIpc('pair_set_driver', { user_id: uid });
+        });
+        row.appendChild(grant);
+      }
+
+      list.appendChild(row);
+    });
+  },
+};
+
+// =================================================================
+// GHOST CURSORS (M3) — rendered as positioned divs, never innerHTML data
+// =================================================================
+
+var ghostCursors = {}; // member_id -> element
+function updateGhostCursor(memberId, row, col) {
+  if (memberId === State.memberId) return;
+  var layer = document.getElementById('ghost-layer');
+  var el = ghostCursors[memberId];
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'ghost-cursor';
+    el.style.color = colorForMember(memberId);
+    var nm = State.participants[memberId];
+    el.setAttribute('data-name', (nm && nm.display_name) ? nm.display_name : memberId);
+    layer.appendChild(el);
+    ghostCursors[memberId] = el;
+  }
+  // Approximate cell geometry from xterm's renderer dimensions.
+  var dims = (term._core && term._core._renderService && term._core._renderService.dimensions) || null;
+  var cw = 8, ch = 17;
+  if (dims && dims.css && dims.css.cell) { cw = dims.css.cell.width; ch = dims.css.cell.height; }
+  el.style.height = ch + 'px';
+  el.style.transform = 'translate(' + (col * cw) + 'px,' + (row * ch) + 'px)';
+}
+function removeGhostCursor(memberId) {
+  var el = ghostCursors[memberId];
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+  delete ghostCursors[memberId];
+}
+
+// =================================================================
+// REQUEST CONTROL affordance
+// =================================================================
+
+function flashRequestControl() {
+  var btn = UI.requestBtnEl;
+  btn.style.transition = 'none';
+  btn.style.background = 'rgba(115, 208, 255, 0.3)';
+  setTimeout(function () {
+    btn.style.transition = 'all 300ms ease';
+    btn.style.background = '';
+  }, 60);
+}
+
+// =================================================================
+// PAIR EVENT / STATUS DOWN-CHANNEL HANDLERS
+//
+// Rust → panel down kinds (must match pair_handlers.rs):
+//   'pair_status' : full session snapshot (see applyStatus)
+//   'pair_event'  : tagged incremental event { event: <type>, ... }
+// =================================================================
+
+function applyStatus(s) {
+  if (!s) return;
+  if (s.session_id !== undefined) {
+    State.sessionId = s.session_id;
+    UI.setSessionCode(s.session_id);
+  }
+  if (s.member_id !== undefined) State.memberId = s.member_id;
+  if (s.host_user_id !== undefined) State.hostUserId = s.host_user_id;
+  if (s.driver_user_id !== undefined) State.driverUserId = s.driver_user_id;
+  if (s.allow_takeover !== undefined) State.allowTakeover = !!s.allow_takeover;
+  if (s.role !== undefined) {
+    State.role = s.role; // 'host' | 'driver' | 'view'
+    UI.setRole(s.role);
+  }
+  if (Array.isArray(s.participants)) {
+    State.participants = {};
+    s.participants.forEach(function (p) {
+      if (p && p.user_id) State.participants[p.user_id] = p;
+    });
+  }
+  if (s.connected !== undefined) UI.setConnState(s.connected ? 'connected' : '');
+
+  State.inSession = !!s.session_id;
+  UI.showSetup(!State.inSession);
+  if (s.cols && s.rows) { try { term.resize(s.cols, s.rows); } catch (e) {} }
+  UI.renderParticipants();
+}
+
+function applyEvent(ev) {
+  if (!ev || !ev.event) return;
+  switch (ev.event) {
+
+    // ---- terminal stream (host-authoritative) ----
+    case 'pty_output':
+      writePtyOutput(ev.data);
+      break;
+
+    case 'snapshot':
+      applySnapshot(ev.data, ev.cols, ev.rows);
+      if (ev.driver !== undefined) {
+        State.driverUserId = ev.driver;
+        UI.renderParticipants();
+      }
+      break;
+
+    case 'resize':
+      if (ev.cols && ev.rows) { try { term.resize(ev.cols, ev.rows); } catch (e) {} }
+      break;
+
+    // ---- session lifecycle ----
+    case 'session_meta':
+      if (ev.host !== undefined) State.hostUserId = ev.host;
+      if (ev.allow_takeover !== undefined) State.allowTakeover = !!ev.allow_takeover;
+      if (ev.host !== undefined) {
+        State.participants[ev.host] = State.participants[ev.host] || {};
+        State.participants[ev.host].user_id = ev.host;
+        if (ev.host_name) State.participants[ev.host].display_name = ev.host_name;
+      }
+      // Roster: real display names + roles for every member, so late joiners
+      // render names instead of raw hex member ids. Rebuild from the roster
+      // (authoritative from the host) but keep our own member visible.
+      if (Array.isArray(ev.roster)) {
+        var next = {};
+        ev.roster.forEach(function (r) {
+          if (!r || !r.member_id) return;
+          next[r.member_id] = {
+            user_id: r.member_id,
+            display_name: r.name || r.member_id,
+            role: r.role || 'view'
+          };
+          if (r.role === 'driver') State.driverUserId = r.member_id;
+        });
+        State.participants = next;
+      }
+      UI.renderParticipants();
+      break;
+
+    case 'session_started':
+      State.inSession = true;
+      if (ev.session_id !== undefined) { State.sessionId = ev.session_id; UI.setSessionCode(ev.session_id); }
+      if (ev.role !== undefined) { State.role = ev.role; UI.setRole(ev.role); }
+      UI.setConnState('connected');
+      UI.showSetup(false);
+      UI.setSetupError('');
+      break;
+
+    case 'session_ended':
+      State.inSession = false;
+      UI.setConnState('');
+      UI.showExit(ev.reason ? ('Session ended: ' + ev.reason) : 'Session ended');
+      break;
+
+    case 'connecting':
+      UI.setConnState('connecting');
+      break;
+    case 'connected':
+      UI.setConnState('connected');
+      break;
+    case 'disconnected':
+      UI.setConnState('');
+      break;
+    case 'error':
+      UI.setSetupError(ev.message || 'Pair error');
+      break;
+
+    // ---- room presence (from relay member_joined/left/count) ----
+    case 'member_joined': {
+      var jid = ev.user_id || ev.member_id;
+      if (jid) {
+        State.participants[jid] = {
+          user_id: jid,
+          display_name: ev.display_name || jid,
+          role: ev.role || 'navigator'
+        };
+        UI.renderParticipants();
+      }
+      break;
+    }
+    case 'member_left': {
+      var lid = ev.user_id || ev.member_id;
+      if (lid) {
+        delete State.participants[lid];
+        removeGhostCursor(lid);
+        UI.renderParticipants();
+      }
+      break;
+    }
+    case 'member_count':
+      // Authoritative count is reflected via participants; ignore raw count UI.
+      break;
+
+    // ---- driver seat changes ----
+    case 'driver_changed': {
+      State.driverUserId = ev.new_driver;
+      // Re-derive our own role: host stays host; otherwise driver/view by seat.
+      if (State.role !== 'host') {
+        State.role = (ev.new_driver === State.memberId) ? 'driver' : 'view';
+        UI.setRole(State.role);
+      }
+      if (State.requestPending && ev.new_driver === State.memberId) {
+        State.requestPending = false;
+        UI.requestBtnEl.disabled = false;
+        UI.requestBtnEl.textContent = 'Request control';
+      }
+      UI.renderParticipants();
+      break;
+    }
+
+    // ---- a navigator asked the host for control (host sees this) ----
+    case 'request_control':
+      if (State.role === 'host') {
+        var who = State.participants[ev.from];
+        var nm = (who && who.display_name) ? who.display_name : ev.from;
+        // Surface as a transient note; host grants via the participant list.
+        UI.participantDropdownEl.classList.add('open');
+      }
+      break;
+
+    // ---- ghost cursors (M3) ----
+    case 'cursor':
+      updateGhostCursor(ev.from, ev.row, ev.col);
+      break;
+
+    default:
+      break;
+  }
+}
+
+// =================================================================
+// BOOTSTRAP — wait for window.jarvis.ipc, register down-channels,
+// derive identity/room key lazily.
+// =================================================================
+
+function initPairIpc() {
+  if (!window.jarvis || !window.jarvis.ipc || !window.jarvis.ipc.send) {
+    setTimeout(initPairIpc, 50);
+    return;
+  }
+
+  // Theme IPC — update xterm when config arrives/changes.
+  window.jarvis.ipc.on('theme', function (payload) {
+    if (!payload) return;
+    if (payload.xterm) term.options.theme = payload.xterm;
+    if (payload.fontSize) term.options.fontSize = payload.fontSize;
+    if (payload.fontFamily) term.options.fontFamily = payload.fontFamily;
+    if (payload.lineHeight) term.options.lineHeight = payload.lineHeight;
+    if (payload.fontWeight) term.options.fontWeight = String(payload.fontWeight);
+    if (payload.fontWeightBold) term.options.fontWeightBold = String(payload.fontWeightBold);
+    if (payload.cursorStyle) term.options.cursorStyle = payload.cursorStyle;
+    if (payload.cursorBlink !== undefined) term.options.cursorBlink = payload.cursorBlink;
+    if (payload.scrollback !== undefined) term.options.scrollback = payload.scrollback;
+    try { fitAddon.fit(); } catch (e) { /* ignore */ }
+  });
+
+  // Down-channel: full session status snapshot.
+  window.jarvis.ipc.on('pair_status', function (payload) {
+    applyStatus(payload);
+  });
+
+  // Down-channel: incremental session events (tagged by `event`).
+  window.jarvis.ipc.on('pair_event', function (payload) {
+    applyEvent(payload);
+  });
+
+  window.jarvis.ipc.on('focus_changed', function (payload) {
+    if (payload && payload.focused) term.focus();
+  });
+
+  // Ask Rust for current status (in case a session already exists for this pane).
+  sendIpc('pair_status', {});
+}
+
+// Apply any pre-page-load theme set via evaluate_script.
+if (window.__jarvis_theme) {
+  var p = window.__jarvis_theme;
+  if (p.xterm) term.options.theme = p.xterm;
+  if (p.fontSize) term.options.fontSize = p.fontSize;
+  if (p.fontFamily) term.options.fontFamily = p.fontFamily;
+  if (p.lineHeight) term.options.lineHeight = p.lineHeight;
+  try { fitAddon.fit(); } catch (e) { /* ignore */ }
+}
+
+// =================================================================
+// SETUP / BAR WIRING
+// =================================================================
+
+document.addEventListener('DOMContentLoaded', function () {
+  UI.init();
+
+  // Host: create a session. We derive the room key up front (best-effort) so
+  // Rust can use it; Rust ultimately owns keying via the watch channel. The
+  // panel passes display_name + identity for signed join (M3).
+  $('#host-btn').addEventListener('click', async function () {
+    UI.setSetupError('');
+    UI.setConnState('connecting');
+    var meta = { display_name: '', cols: term.cols, rows: term.rows };
+    try {
+      await Identity.init();
+      meta.fingerprint = Identity.fingerprint;
+      meta.pubkey = Identity.pubkeyBase64;
+      meta.dh_pubkey = Identity.dhPubkeyBase64;
+    } catch (e) { /* identity optional; unsigned host */ }
+    sendIpc('pair_start', meta);
+  });
+
+  function doJoin() {
+    var code = $('#join-input').value.trim();
+    if (!code) { UI.setSetupError('Enter an invite code.'); return; }
+    UI.setSetupError('');
+    UI.setConnState('connecting');
+    var meta = { session_id: code, invite_code: code, display_name: '' };
+    Identity.init().then(function () {
+      meta.fingerprint = Identity.fingerprint;
+      meta.pubkey = Identity.pubkeyBase64;
+      meta.dh_pubkey = Identity.dhPubkeyBase64;
+    }).catch(function () {}).finally(function () {
+      sendIpc('pair_join', meta);
+    });
+  }
+  $('#join-btn').addEventListener('click', doJoin);
+  $('#join-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') doJoin();
+  });
+
+  // Leave / end session.
+  $('#leave-btn').addEventListener('click', function () {
+    sendIpc('pair_leave', {});
+    State.inSession = false;
+    UI.setConnState('');
+    UI.showSetup(true);
+    UI.setSessionCode(null);
+    UI.setRole('');
+    State.participants = {};
+    UI.renderParticipants();
+  });
+
+  // Exit overlay "Start new" — clear ended state and return to setup so
+  // session_ended isn't a dead-end.
+  $('#exit-back-btn').addEventListener('click', function () {
+    UI.hideExit();
+    State.inSession = false;
+    State.participants = {};
+    UI.setConnState('');
+    UI.setSessionCode(null);
+    UI.setRole('');
+    UI.setSetupError('');
+    UI.showSetup(true);
+    UI.renderParticipants();
+    try { term.reset(); } catch (e) { /* ignore */ }
+  });
+
+  // Copy invite code.
+  UI.sessionCodeEl.addEventListener('click', function () {
+    if (!State.sessionId) return;
+    try {
+      navigator.clipboard.writeText(State.sessionId);
+      var old = UI.sessionCodeEl.textContent;
+      UI.sessionCodeEl.textContent = 'copied!';
+      setTimeout(function () { UI.sessionCodeEl.textContent = State.sessionId; }, 900);
+    } catch (e) { /* ignore */ }
+  });
+
+  // Participant dropdown toggle.
+  $('#participant-toggle').addEventListener('click', function (e) {
+    e.stopPropagation();
+    UI.participantDropdownEl.classList.toggle('open');
+  });
+  document.addEventListener('click', function () {
+    UI.participantDropdownEl.classList.remove('open');
+  });
+  UI.participantDropdownEl.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  // Request control (view-only navigator).
+  UI.requestBtnEl.addEventListener('click', function () {
+    if (State.requestPending) return;
+    if (!State.allowTakeover) {
+      UI.requestBtnEl.textContent = 'Takeover disabled';
+      setTimeout(function () { UI.requestBtnEl.textContent = 'Request control'; }, 1400);
+      return;
+    }
+    State.requestPending = true;
+    UI.requestBtnEl.disabled = true;
+    UI.requestBtnEl.textContent = 'Requested…';
+    sendIpc('pair_request_control', {});
+  });
+
+  UI.renderParticipants();
+});
+
+// Local cursor position → pair_cursor (ghost cursor for the other side).
+// xterm doesn't fire a dedicated cursor-move event, so report after writes
+// and on key activity, throttled to ~20Hz.
+var _lastCursor = { row: -1, col: -1 };
+var _cursorThrottle = 0;
+function reportCursor() {
+  if (!State.inSession) return;
+  var now = Date.now();
+  if (now - _cursorThrottle < 50) return;
+  var buf = term.buffer && term.buffer.active;
+  if (!buf) return;
+  var row = buf.cursorY + buf.baseY;
+  var col = buf.cursorX;
+  if (row === _lastCursor.row && col === _lastCursor.col) return;
+  _lastCursor.row = row;
+  _lastCursor.col = col;
+  _cursorThrottle = now;
+  sendIpc('pair_cursor', { row: row, col: col });
+}
+term.onCursorMove(function () { reportCursor(); });
+
+// Re-focus xterm on webview focus / click.
+window.addEventListener('focus', function () { term.focus(); });
+document.addEventListener('click', function () {
+  if (!UI.setupOverlayEl || UI.setupOverlayEl.classList.contains('hidden')) term.focus();
+});
+
+initPairIpc();
+setTimeout(function () { try { fitAddon.fit(); } catch (e) {} }, 120);
+</script>
+</body>
+</html>

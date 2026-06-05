@@ -170,6 +170,14 @@ name = "jarvis-dark"
 # Presence rides the relay Room transport; it reuses [relay].url.
 # room_id = "jarvis-presence-global"
 
+[collab]
+# Collaborative terminal / pair programming. Rides the relay Room transport.
+# EXPERIMENTAL: limited auth — do not enable in production yet.
+# enabled = false
+# max_participants = 4
+# allow_takeover = true
+# require_signed_join = true
+
 [performance]
 # preset = "high"        # low, medium, high, ultra
 # frame_rate = 60        # 30-120

@@ -176,6 +176,28 @@ impl JarvisApp {
                     self.needs_redraw = true;
                 }
             }
+            Action::OpenPair => {
+                // Open the collaborative pair-programming panel in a new split
+                // (models the chat-open path). The panel drives the session over
+                // pure IPC (pair_start/pair_join → pair_event/pair_status); the
+                // relay room socket and host-authoritative routing live in Rust
+                // (app_state::pair + ws_server::pair_room_client). The new pane is
+                // the panel target AND, for a host, its shared terminal pane id is
+                // seeded later by `pair_start` (handle_pair_start).
+                let kind = jarvis_common::types::PaneKind::WebView;
+                if let Some(new_id) = self.tiling.split_with(
+                    jarvis_tiling::tree::Direction::Horizontal,
+                    kind,
+                    "Pair",
+                ) {
+                    self.create_webview_for_pane_with_url(
+                        new_id,
+                        "jarvis://localhost/pair/index.html",
+                    );
+                    self.sync_webview_bounds();
+                    self.needs_redraw = true;
+                }
+            }
             Action::Copy => {
                 // Ask the focused webview to grab its selection and send it
                 // back via clipboard_copy IPC (handled in ipc_dispatch.rs).

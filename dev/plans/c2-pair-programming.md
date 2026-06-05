@@ -125,3 +125,39 @@ New `assets/panels/pair/index.html` (top-level panel, served `jarvis://localhost
    call `leave_session(host)` for a clean end.
 7. **Relay treats payloads opaque** → host is trust anchor; re-validate term_input/request_control;
    ignore pty_output/driver_changed/snapshot claimed by non-host members.
+
+## 6. Security status / M3 TODO (current limitations)
+
+The shipped M1/M2 slice is **experimental** and `collab.enabled` defaults
+**false**. The relay room key (derived from the session id, same scheme as chat
+channels) gives **confidentiality from the relay only** — it is a shared
+symmetric secret across all members and is **NOT a security boundary between
+members**. There is currently **no per-member authentication**: `from` /
+`member_id` are self-asserted. Concretely, today:
+
+- A member can **impersonate the driver** and inject keystrokes (host-only
+  re-validates that `from == driver`, but `from` itself is unauthenticated).
+- **Host-only frames** (`pty_output` / `driver_changed` / `snapshot` /
+  `session_meta`) are **not origin-checked**, so any member can forge them.
+- The **host `member_id` slot can be hijacked** (no ownership proof).
+- **`require_signed_join` (default true) is NOT enforced** — the config flag is
+  read but no signature is verified. Its doc comment is marked as an M3
+  placeholder.
+
+Mitigations already in place (this slice):
+- `collab.enabled` defaults **false**; a `tracing::warn!` fires when pair
+  starts (gated on `collab.enabled`) stating sessions are unauthenticated.
+- The session id is the room **capability secret** and is **no longer logged at
+  info** (truncated `first6…(len=N)` fingerprint at debug) in the app handlers,
+  `jarvis-social` `PairManager`, and the relay Room path.
+- `term_input` is length-capped (`MAX_TERM_INPUT_BYTES = 4096`) both on send and
+  on the host before `write_input`.
+- A `// SECURITY (M3):` block at the top of `app_state::pair::apply_pair_frame`
+  enumerates the missing host-authority / anti-impersonation checks.
+
+**Deferred to M3** (see §4 M3 + risks #2/#7): signed room join
+(`require_signed_join`: host verifies an ECDSA signature over the session id via
+the `crypto` sign/verify IPC), host-authority enforcement (drop host-only frames
+not actually from the host; authenticate `from` before honoring
+`term_input`/`request_control`), and optional per-member ECDH so each member has
+a distinct key rather than the shared room key.

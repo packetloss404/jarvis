@@ -8,6 +8,14 @@ use tracing::info;
 
 use super::types::{PairConfig, PairEvent, PairParticipant, PairRole, PairSession, PairState};
 
+/// Non-reversible fingerprint of a capability-secret pair `session_id`, safe to
+/// log: first 6 chars + length. The full session id is the room's bearer secret
+/// (anyone with it can join), so it MUST NOT be logged at info.
+fn sid_fp(session_id: &str) -> String {
+    let prefix: String = session_id.chars().take(6).collect();
+    format!("{prefix}…(len={})", session_id.len())
+}
+
 // ---------------------------------------------------------------------------
 // Pair Manager
 // ---------------------------------------------------------------------------
@@ -92,7 +100,7 @@ impl PairManager {
             })
             .await;
 
-        info!(session_id, user_id, "Pair session created");
+        info!(sid = %sid_fp(session_id), user_id, "Pair session created");
         Ok(())
     }
 
@@ -147,7 +155,7 @@ impl PairManager {
             })
             .await;
 
-        info!(session_id, user_id, "User joined pair session");
+        info!(sid = %sid_fp(session_id), user_id, "User joined pair session");
         Ok(())
     }
 
@@ -229,7 +237,7 @@ impl PairManager {
                     session_id: session_id.clone(),
                 })
                 .await;
-            info!(session_id, "Pair session ended");
+            info!(sid = %sid_fp(&session_id), "Pair session ended");
         }
     }
 
@@ -287,7 +295,7 @@ impl PairManager {
             })
             .await;
 
-        info!(session_id, new_driver = new_driver_id, "Driver changed");
+        info!(sid = %sid_fp(session_id), new_driver = new_driver_id, "Driver changed");
         Ok(())
     }
 
@@ -395,5 +403,57 @@ impl PairManager {
     /// Clean up when a user goes offline.
     pub async fn handle_user_offline(&self, user_id: &str) {
         self.leave_session(user_id).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn enabled_config() -> PairConfig {
+        PairConfig {
+            enabled: true,
+            max_participants: 4,
+            allow_takeover: true,
+        }
+    }
+
+    /// Regression for the M2 break: until the host calls `join_session` for a
+    /// navigator, that navigator is not in the roster, so `set_driver` (takeover)
+    /// and `relay_input` both fail closed. After join_session, takeover succeeds
+    /// and the navigator (now driver) can relay input.
+    #[tokio::test]
+    async fn join_session_enables_takeover_and_driver_input() {
+        let (mgr, mut rx) = PairManager::new(enabled_config());
+        mgr.create_session("sid", "host", "Host", 80, 24).await.unwrap();
+
+        // Before join: a navigator can neither take over nor relay input.
+        assert!(mgr.set_driver("sid", "nav", "nav").await.is_err());
+        assert!(mgr.relay_input("sid", "nav", b"x".to_vec()).await.is_err());
+
+        // Host registers the navigator (the fix: poll_pair calls join_session
+        // on member_joined / Join).
+        mgr.join_session("sid", "nav", "Nav").await.unwrap();
+
+        // Now the navigator can request control of itself (allow_takeover=true)
+        // and, once the driver, relay input.
+        mgr.set_driver("sid", "nav", "nav").await.unwrap();
+        mgr.relay_input("sid", "nav", b"ls\n".to_vec()).await.unwrap();
+
+        // The host (no longer driver) is now rejected for input.
+        assert!(mgr.relay_input("sid", "host", b"x".to_vec()).await.is_err());
+
+        // Drain events so the channel isn't reported as full in other contexts.
+        while rx.try_recv().is_ok() {}
+    }
+
+    /// `sid_fp` never reveals the full capability secret: it exposes only the
+    /// first 6 chars plus the length.
+    #[test]
+    fn sid_fingerprint_is_truncated() {
+        let fp = sid_fp("abcdefghijklmnop"); // 16 chars
+        assert!(fp.starts_with("abcdef"));
+        assert!(fp.contains("len=16"));
+        assert!(!fp.contains("ghijkl"), "must not leak the rest of the secret");
     }
 }
