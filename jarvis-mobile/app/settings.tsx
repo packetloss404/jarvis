@@ -2,19 +2,13 @@ import { View, Text, ScrollView, TouchableOpacity, Platform, Alert, Linking } fr
 import { useRouter } from 'expo-router';
 import { theme, scaledFont } from '../lib/theme';
 import { clearSessionToken } from '../lib/session-store';
-import {
-  getDefaultRelayHint,
-  getSupabaseUrlHint,
-  usesEmbeddedSupabaseDefaults,
-} from '../lib/env';
+import { getDefaultRelayHint } from '../lib/env';
 
 const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const relayHint = getDefaultRelayHint();
-  const supabaseHint = getSupabaseUrlHint();
-  const chatUsesDefaults = usesEmbeddedSupabaseDefaults();
 
   const clearPairing = () => {
     Alert.alert(
@@ -42,7 +36,7 @@ export default function SettingsScreen() {
     >
       <Text style={{ fontFamily: mono, fontSize: scaledFont(11), color: theme.colors.text, marginBottom: 12 }}>
         Transports: [code] = WebSocket relay + encrypted PTY to desktop. [chat] = embedded
-        livechat (Supabase) in WebView. [claude] = claude.ai in WebView (sign-in may require system
+        livechat (relay Room) in WebView. [claude] = claude.ai in WebView (sign-in may require system
         browser — see README).
       </Text>
 
@@ -66,8 +60,8 @@ export default function SettingsScreen() {
       </Text>
       <Text style={{ fontFamily: mono, fontSize: scaledFont(10), color: theme.colors.text, marginBottom: 16 }}>
         Relay pairing uses ECDH + AES-GCM between mobile and desktop after both join the relay session.
-        Livechat E2E is handled inside the chat WebView (Web Crypto). Do not paste pairing strings into
-        untrusted apps.
+        Livechat E2E is handled inside the chat WebView (Web Crypto) over the relay Room transport. Do not
+        paste pairing strings into untrusted apps.
       </Text>
 
       <View style={{ marginBottom: 16 }}>
@@ -78,18 +72,11 @@ export default function SettingsScreen() {
           <Text style={{ fontFamily: mono, fontSize: scaledFont(9), color: theme.colors.text }} selectable>
             DEFAULT_RELAY: {relayHint}
           </Text>
-        ) : null}
-        {supabaseHint ? (
-          <Text style={{ fontFamily: mono, fontSize: scaledFont(9), color: theme.colors.text }} selectable>
-            SUPABASE_URL (override): {supabaseHint}
-          </Text>
-        ) : null}
-        {chatUsesDefaults ? (
+        ) : (
           <Text style={{ fontFamily: mono, fontSize: scaledFont(9), color: theme.colors.tabInactive }}>
-            Chat: using embedded Supabase URL/anon key; set EXPO_PUBLIC_SUPABASE_URL and
-            EXPO_PUBLIC_SUPABASE_ANON_KEY to override.
+            Using the production relay default; set EXPO_PUBLIC_DEFAULT_RELAY_URL to override.
           </Text>
-        ) : null}
+        )}
       </View>
 
       <TouchableOpacity

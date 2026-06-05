@@ -60,7 +60,7 @@ export default function TabLayout() {
         name="chat"
         options={{
           title: '[ chat ]',
-          tabBarAccessibilityLabel: 'Livechat Supabase WebView',
+          tabBarAccessibilityLabel: 'Livechat relay Room WebView',
           tabBarLabel: ({ focused }) => <TabLabel label="[ chat ]" focused={focused} />,
           tabBarIcon: ({ focused }) => (
             <Text style={{

@@ -56,9 +56,9 @@ export default function HelpScreen() {
       <Section
         title="[ chat ] Livechat"
         body={
-          'Runs the livechat UI inside a WebView and talks to Supabase from the page. ' +
-          'If the panel shows a library or network error, you are offline or blocked from Supabase/CDN — unlike the relay, which only needs your relay host. ' +
-          'Override project with EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY at build time.'
+          'Runs the livechat UI inside a WebView and talks to the relay Room transport (one WebSocket per channel) from the page. ' +
+          'If the panel shows a connection error, you are offline or blocked from the relay host — the same host the relay terminal uses. ' +
+          'Override the relay with EXPO_PUBLIC_DEFAULT_RELAY_URL at build time (defaults to the production relay).'
         }
       />
 

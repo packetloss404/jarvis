@@ -6,14 +6,16 @@
  * - Crypto via Web Crypto API (not Rust IPC)
  * - Mobile-friendly CSS (touch targets, viewport, safe areas)
  * - No close button or file-path IPC
+ * - Relay URL is injected by the WebView host (window.__JARVIS_RELAY_URL__) instead
+ *   of being fetched from Rust via the chat_stream_control IPC.
+ *
+ * Transport: the relay Room (one RoomConnection WS per channel; room_hello/room_ready/
+ * member_joined; opaque k-tagged frames). supabase-js is no longer used. E2E crypto is
+ * unchanged (PBKDF2/AES-GCM for channels, ECDH for DMs, ECDSA signatures via Web Crypto).
  *
  * When the desktop panel changes, run `npm run sync:chat-html` to refresh
  * vendor/chat-index.from-jarvis-rs.html, then merge any HTML/JS/CSS updates into this bundle.
- *
- * Supabase URL/anon key are injected at runtime from EXPO_PUBLIC_* (see getEmbeddedSupabaseConfig).
  */
-
-import { getEmbeddedSupabaseConfig } from './env';
 
 const CHAT_HTML_TEMPLATE = `<!DOCTYPE html>
 <html>
@@ -521,7 +523,7 @@ body {
   </div>
 </div>
 
-<!-- SUPABASE CDN (loaded on demand at join time) -->
+<!-- Transport: relay Room WebSocket (no external CDN; relay URL injected by host) -->
 
 <script>
 'use strict';
@@ -544,8 +546,6 @@ if (typeof crypto.randomUUID !== 'function') {
 // =================================================================
 
 var CONFIG = {
-  SUPABASE_URL: "__JARVIS_MOBILE_SUPABASE_URL__",
-  SUPABASE_KEY: "__JARVIS_MOBILE_SUPABASE_ANON_KEY__",
   ROOM: 'jarvis-livechat',
   CHANNELS: [
     { id: 'jarvis-livechat', name: 'general', type: 'channel' },
@@ -1112,13 +1112,197 @@ function compressImage(blob) {
 }
 
 // =================================================================
+// ROOM CONNECTION — one relay Room WebSocket per chat channel
+// =================================================================
+//
+// Replaces the Supabase Realtime channel as the transport. Each chat channel
+// (or DM) maps to one relay Room whose session_id == channelId. The relay
+// fans out any opaque text frame a member sends to all OTHER members, and
+// emits member_joined / member_left / member_count / room_ready control frames
+// (distinguished by their \`type\` field). Application frames we send are opaque
+// JSON objects tagged with a \`k\` field (k:"message" | "reaction" | "presence").
+// The encryption/signing performed by the caller is unchanged — RoomConnection
+// only carries already-built envelopes.
+
+var RELAY_PING_INTERVAL = 25000; // keepalive; relay drops {"type":"ping"}
+
+function RoomConnection(channelId, memberId, handlers) {
+  this.channelId = channelId;
+  this.memberId = memberId;
+  this.handlers = handlers || {};
+  this.ws = null;
+  this.relayUrl = '';
+  this.ready = false;
+  this.closedByUser = false;
+  this._reconnectAttempts = 0;
+  this._reconnectTimer = null;
+  this._pingTimer = null;
+}
+
+RoomConnection.prototype.connect = function(relayUrl) {
+  if (relayUrl) this.relayUrl = relayUrl;
+  if (!this.relayUrl) return;
+  this.closedByUser = false;
+  this._open();
+};
+
+RoomConnection.prototype._open = function() {
+  var self = this;
+  this._teardownSocket();
+
+  var ws;
+  try {
+    ws = new WebSocket(this.relayUrl);
+  } catch (_) {
+    this._scheduleReconnect();
+    return;
+  }
+  this.ws = ws;
+  this.ready = false;
+
+  ws.onopen = function() {
+    if (self.ws !== ws) return;
+    ws.send(JSON.stringify({
+      type: 'room_hello',
+      session_id: self.channelId,
+      member_id: self.memberId,
+    }));
+    self._startPing();
+    if (self.handlers.onOpen) self.handlers.onOpen();
+  };
+
+  ws.onmessage = function(event) {
+    if (self.ws !== ws) return;
+    self._onFrame(event.data);
+  };
+
+  ws.onclose = function() {
+    if (self.ws !== ws) return;
+    self.ws = null;
+    self.ready = false;
+    self._stopPing();
+    if (self.handlers.onClose) self.handlers.onClose();
+    if (!self.closedByUser) self._scheduleReconnect();
+  };
+
+  ws.onerror = function() {
+    // onclose will follow and drive reconnect.
+  };
+};
+
+RoomConnection.prototype._onFrame = function(data) {
+  var msg = null;
+  try { msg = JSON.parse(data); } catch (_) { return; }
+  if (!msg || typeof msg !== 'object') return;
+
+  // Relay control frames are tagged with \`type\`.
+  if (typeof msg.type === 'string') {
+    switch (msg.type) {
+      case 'room_ready':
+        this.ready = true;
+        this._reconnectAttempts = 0;
+        if (this.handlers.onReady) this.handlers.onReady();
+        return;
+      case 'member_joined':
+        if (this.handlers.onMemberJoined) this.handlers.onMemberJoined(msg.member_id);
+        return;
+      case 'member_left':
+        if (this.handlers.onMemberLeft) this.handlers.onMemberLeft(msg.member_id);
+        return;
+      case 'member_count':
+        if (this.handlers.onMemberCount) this.handlers.onMemberCount(msg.count || 0);
+        return;
+      case 'error':
+        if (this.handlers.onError) this.handlers.onError(msg.message || 'relay error');
+        return;
+      default:
+        return;
+    }
+  }
+
+  // Application frames from other members are tagged with \`k\`.
+  if (typeof msg.k === 'string' && this.handlers.onAppFrame) {
+    this.handlers.onAppFrame(msg);
+  }
+};
+
+/** Send an opaque application frame (object). Returns true if dispatched. */
+RoomConnection.prototype.sendFrame = function(obj) {
+  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+  try {
+    this.ws.send(JSON.stringify(obj));
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
+RoomConnection.prototype.isConnected = function() {
+  return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+};
+
+RoomConnection.prototype._startPing = function() {
+  var self = this;
+  this._stopPing();
+  this._pingTimer = setInterval(function() {
+    if (self.ws && self.ws.readyState === WebSocket.OPEN) {
+      try { self.ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+    }
+  }, RELAY_PING_INTERVAL);
+};
+
+RoomConnection.prototype._stopPing = function() {
+  if (this._pingTimer) { clearInterval(this._pingTimer); this._pingTimer = null; }
+};
+
+RoomConnection.prototype._scheduleReconnect = function() {
+  var self = this;
+  var MAX_ATTEMPTS = 8;
+  if (this._reconnectAttempts >= MAX_ATTEMPTS) {
+    if (this.handlers.onReconnectFailed) this.handlers.onReconnectFailed();
+    return;
+  }
+  this._reconnectAttempts++;
+  var baseDelay = 2000;
+  var maxDelay = 30000;
+  var delay = Math.min(baseDelay * Math.pow(2, this._reconnectAttempts - 1), maxDelay);
+  var jitter = delay * (0.75 + Math.random() * 0.5);
+  if (this.handlers.onReconnecting) {
+    this.handlers.onReconnecting(Math.round(jitter / 1000), this._reconnectAttempts, MAX_ATTEMPTS);
+  }
+  if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+  this._reconnectTimer = setTimeout(function() {
+    if (self.closedByUser) return;
+    self._open();
+  }, jitter);
+};
+
+RoomConnection.prototype._teardownSocket = function() {
+  this._stopPing();
+  if (this.ws) {
+    var ws = this.ws;
+    this.ws = null;
+    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+    try { ws.close(); } catch (_) {}
+  }
+};
+
+RoomConnection.prototype.close = function() {
+  this.closedByUser = true;
+  this.ready = false;
+  if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+  this._teardownSocket();
+};
+
+// =================================================================
 // CHAT APP
 // =================================================================
 
 var Chat = {
   userId: null,
   nick: null,
-  client: null,
+  memberId: null,
+  relayUrl: '',
   automod: null,
   _senderRateBucket: [],
   _activeChannelId: null,
@@ -1126,18 +1310,72 @@ var Chat = {
   _dmList: [],
   _unreadCounts: new Map(),
   _keyCache: new Map(),
+  // Presence roster (replaces Supabase presenceState): memberId -> { nick, fingerprint, pubkey, dhPubkey, userId }.
+  // Built from primary-room member_joined/member_left + received {k:"presence"} frames.
+  _roster: new Map(),
   _dmMode: false,
   _dmKey: null,
   _dmTargetNick: null,
   _dmTargetFp: null,
   _switching: false,
   _signingDisabled: false,
-  _reconnectAttempts: 0,
-  _reconnectTimeout: null,
 
   get _primaryChannel() {
     var data = this._channels.get(CONFIG.DEFAULT_CHANNEL);
     return data ? data.sub : null;
+  },
+
+  /** Stable member identity for the relay Room (one per WebView session). */
+  _ensureMemberId: function() {
+    if (!this.memberId) {
+      var fp = (Identity && Identity.fingerprint) ? Identity.fingerprint.replace(/:/g, '') : '';
+      this.memberId = (fp ? fp + '.' : '') + this.userId;
+    }
+    return this.memberId;
+  },
+
+  /**
+   * Resolve the relay URL. On mobile the WebView host injects it as a window
+   * global (window.__JARVIS_RELAY_URL__) before content loads; this mirrors the
+   * desktop, which fetches it from Rust via the chat_stream_control IPC.
+   */
+  _ensureRelayUrl: function() {
+    if (this.relayUrl) return this.relayUrl;
+    try {
+      if (typeof window.__JARVIS_RELAY_URL__ === 'string' && window.__JARVIS_RELAY_URL__) {
+        this.relayUrl = window.__JARVIS_RELAY_URL__;
+      }
+    } catch (_) {}
+    return this.relayUrl;
+  },
+
+  /** Build the opaque presence frame announcing this member's identity. */
+  _presenceFrame: function() {
+    return {
+      k: 'presence',
+      memberId: this._ensureMemberId(),
+      userId: this.userId,
+      nick: this.nick,
+      pubkey: Identity.pubkeyBase64 || null,
+      fingerprint: Identity.fingerprint || null,
+      dhPubkey: Identity.dhPubkeyBase64 || null,
+      online_at: new Date().toISOString(),
+    };
+  },
+
+  /** Record/refresh a roster entry from a received presence frame. */
+  _updateRoster: function(frame) {
+    if (!frame || !frame.memberId) return;
+    if (frame.memberId === this._ensureMemberId()) return;
+    this._roster.set(frame.memberId, {
+      memberId: frame.memberId,
+      userId: frame.userId || frame.memberId,
+      nick: (typeof frame.nick === 'string') ? frame.nick.slice(0, 20) : 'Unknown',
+      pubkey: frame.pubkey || null,
+      fingerprint: frame.fingerprint || null,
+      dhPubkey: frame.dhPubkey || null,
+    });
+    UI.setUserCount(this._roster.size + 1);
   },
 
   _getChannelDisplayName: function(channelId) {
@@ -1148,34 +1386,9 @@ var Chat = {
     return channelId;
   },
 
-  _loadSupabase: function() {
-    if (this._supabasePromise) return this._supabasePromise;
-    this._supabasePromise = new Promise(function(resolve, reject) {
-      if (typeof supabase !== 'undefined' && supabase.createClient) { resolve(); return; }
-      var script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.97.0/dist/umd/supabase.min.js';
-      script.integrity = 'sha384-1+ItoWbWcmVSm+Y+dJaUt4SEWNA21/jxef+Z0TSHHVy/dEUxEUEnZ1bHn6GT5hj+';
-      script.crossOrigin = 'anonymous';
-      script.onload = resolve;
-      script.onerror = function() { reject(new Error('Failed to load Supabase library')); };
-      document.head.appendChild(script);
-    });
-    return this._supabasePromise;
-  },
-
   start: async function(nickname) {
-    try {
-      UI.setStatus('connecting');
-      await this._loadSupabase();
-    } catch (_) {
-      var errEl = _$('#nick-panel p');
-      errEl.textContent = 'Supabase library failed to load. Check connection & retry.';
-      errEl.style.color = 'var(--color-error)';
-      UI.setStatus('');
-      return;
-    }
-
     this.userId = crypto.randomUUID();
+    this.memberId = null;
     this.nick = nickname.trim().slice(0, 20);
     if (!this.automod) this.automod = new AutoMod();
     this._signingDisabled = false;
@@ -1199,17 +1412,23 @@ var Chat = {
     UI.setMyNick(this.nick);
     try { localStorage.setItem('jarvis-chat-nick', this.nick); } catch (_) {}
 
-    var createClient = supabase.createClient;
-    this.client = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY, {
-      realtime: { params: { eventsPerSecond: 10 } },
-    });
+    // Establish stable member identity and obtain the relay URL (injected by host).
+    this._ensureMemberId();
+    this._ensureRelayUrl();
+    if (!this.relayUrl) {
+      UI.addSystemMessage('Relay URL is not configured. Chat transport unavailable.', 'leave');
+      UI.showNickOverlay();
+      return;
+    }
 
+    UI.setStatus('connecting');
     UI.hideNickOverlay();
 
     this._channels = new Map();
     this._unreadCounts = new Map();
     this._keyCache = new Map();
     this._dmList = [];
+    this._roster = new Map();
 
     for (var i = 0; i < CONFIG.CHANNELS.length; i++) {
       var ch = CONFIG.CHANNELS[i];
@@ -1217,97 +1436,94 @@ var Chat = {
       this._unreadCounts.set(ch.id, 0);
     }
 
+    // Open a relay Room for ALL channels at startup (general carries presence).
     this._activeChannelId = CONFIG.DEFAULT_CHANNEL;
-    this._reconnectAttempts = 0;
     for (var i = 0; i < CONFIG.CHANNELS.length; i++) {
       var ch = CONFIG.CHANNELS[i];
       var isPrimary = (ch.id === CONFIG.DEFAULT_CHANNEL);
-      await this._subscribeChannel(ch.id, isPrimary);
+      this._subscribeChannel(ch.id, isPrimary);
     }
 
     UI.updateChannelName(this._getChannelDisplayName(this._activeChannelId));
   },
 
-  _subscribeChannel: async function(channelId, isPrimary) {
-    var channelConfig = { config: { broadcast: { self: false, ack: true } } };
-    if (isPrimary) channelConfig.config.presence = { key: this.userId };
-
-    var sub = this.client.channel(channelId, channelConfig);
+  /** Open a relay Room for a channel. isPrimary=true for the general channel (carries presence). */
+  _subscribeChannel: function(channelId, isPrimary) {
     var self = this;
 
-    sub.on('broadcast', { event: 'message' }, function(payload) {
-      console.log('[chat-debug] broadcast received on', channelId, 'payload keys:', payload ? Object.keys(payload) : 'null');
-      self._onChannelMessage(channelId, payload.payload);
-    });
-
-    sub.on('broadcast', { event: 'reaction' }, function(payload) {
-      self._onReaction(channelId, payload.payload);
-    });
-
-    if (isPrimary) {
-      sub.on('presence', { event: 'sync' }, function() {
-        var state = sub.presenceState();
-        UI.setUserCount(Object.keys(state).length);
-      });
-      sub.on('presence', { event: 'join' }, function(data) {
-        if (data.key !== self.userId && data.newPresences.length > 0) {
-          var joiner = data.newPresences[0].nick || 'Unknown';
-          self._addSystemToChannel(self._activeChannelId, joiner + ' joined', 'join');
+    var conn = new RoomConnection(channelId, this._ensureMemberId(), {
+      // Opaque application frames fanned out by the relay from other members.
+      onAppFrame: function(frame) {
+        if (frame.k === 'message') {
+          self._onChannelMessage(channelId, frame);
+        } else if (frame.k === 'reaction') {
+          self._onReaction(channelId, frame);
+        } else if (frame.k === 'presence' && isPrimary) {
+          self._updateRoster(frame);
         }
-      });
-      sub.on('presence', { event: 'leave' }, function(data) {
-        if (data.leftPresences.length > 0) {
-          var leaver = data.leftPresences[0].nick || 'Unknown';
-          self._addSystemToChannel(self._activeChannelId, leaver + ' left', 'leave');
-        }
-      });
-    }
-
-    var channelData = this._channels.get(channelId);
-    if (channelData) { channelData.sub = sub; }
-    else { this._channels.set(channelId, { sub: sub, messages: [] }); }
-
-    var connected = false;
-    var connectTimeout = setTimeout(function() {
-      if (!connected) {
-        UI.setStatus('');
-        self._addSystemToChannel(channelId, 'Connection timed out. Tap RETRY.', 'leave');
-        UI.showRetryButton(function() {
-          UI.hideRetryButton();
-          self.client.removeChannel(sub);
-          self.client = null;
-          Chat.start(self.nick);
-        });
-      }
-    }, 10000);
-
-    sub.subscribe(async function(status) {
-      console.log('[chat-debug] channel', channelId, 'subscribe status:', status);
-      if (status === 'SUBSCRIBED') {
-        connected = true;
-        clearTimeout(connectTimeout);
+      },
+      onReady: function() {
         UI.setStatus('connected');
         UI.enableInput();
-        self._reconnectAttempts = 0;
-        if (isPrimary) {
-          await sub.track({
-            nick: self.nick,
-            online_at: new Date().toISOString(),
-            pubkey: Identity.pubkeyBase64 || null,
-            fingerprint: Identity.fingerprint || null,
-            dhPubkey: Identity.dhPubkeyBase64 || null,
-          });
-        }
         self._addSystemToChannel(channelId, 'Connected as ' + self.nick, 'join');
-      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+        if (isPrimary) {
+          // Announce our identity so existing members learn it.
+          conn.sendFrame(self._presenceFrame());
+        }
+      },
+      onMemberJoined: function(memberId) {
+        if (!isPrimary) return;
+        if (memberId === self._ensureMemberId()) return;
+        // Re-announce our presence so the newcomer learns our identity.
+        conn.sendFrame(self._presenceFrame());
+      },
+      onMemberLeft: function(memberId) {
+        if (!isPrimary) return;
+        var entry = self._roster.get(memberId);
+        self._roster.delete(memberId);
+        UI.setUserCount(self._roster.size + 1);
+        if (entry) {
+          self._addSystemToChannel(self._activeChannelId, (entry.nick || 'Someone') + ' left', 'leave');
+        }
+      },
+      onMemberCount: function(count) {
+        if (isPrimary) UI.setUserCount(count);
+      },
+      onClose: function() {
         if (isPrimary) {
           UI.setStatus('');
           UI.disableInput();
-          self._addSystemToChannel(channelId, 'Disconnected from server.', 'leave');
-          self._scheduleReconnect();
         }
-      }
+      },
+      onReconnecting: function(secs, attempt, max) {
+        if (isPrimary) {
+          UI.setStatus('connecting');
+          self._addSystemToChannel(channelId,
+            'Reconnecting in ' + secs + 's (attempt ' + attempt + '/' + max + ')...', 'leave');
+        }
+      },
+      onReconnectFailed: function() {
+        if (isPrimary) {
+          self._addSystemToChannel(channelId, 'Max reconnect attempts reached. Tap RETRY.', 'leave');
+          UI.showRetryButton(function() {
+            UI.hideRetryButton();
+            Chat.start(self.nick);
+          });
+        }
+      },
+      onError: function(message) {
+        self._addSystemToChannel(channelId, 'Relay error: ' + message, 'leave');
+      },
     });
+
+    var channelData = this._channels.get(channelId);
+    if (channelData) {
+      channelData.sub = conn;
+    } else {
+      this._channels.set(channelId, { sub: conn, messages: [] });
+    }
+
+    conn.connect(this.relayUrl);
   },
 
   _deriveKeyForChannel: async function(channelId) {
@@ -1410,42 +1626,6 @@ var Chat = {
     } finally { this._switching = false; }
   },
 
-  _scheduleReconnect: function() {
-    var MAX_ATTEMPTS = 8;
-    if (this._reconnectAttempts >= MAX_ATTEMPTS) {
-      UI.addSystemMessage('Max reconnect attempts reached. Restart the app.', 'leave');
-      return;
-    }
-    this._reconnectAttempts++;
-    var baseDelay = 2000, maxDelay = 30000;
-    var delay = Math.min(baseDelay * Math.pow(2, this._reconnectAttempts - 1), maxDelay);
-    var jitter = delay * (0.75 + Math.random() * 0.5);
-    var self = this;
-    UI.addSystemMessage('Reconnecting in ' + Math.round(jitter / 1000) + 's (attempt ' + this._reconnectAttempts + '/' + MAX_ATTEMPTS + ')...');
-    this._reconnectTimeout = setTimeout(async function() {
-      UI.setStatus('connecting');
-      try {
-        var primaryData = self._channels.get(CONFIG.DEFAULT_CHANNEL);
-        if (primaryData && primaryData.sub) {
-          self.client.removeChannel(primaryData.sub);
-          primaryData.sub = null;
-        }
-        await self._subscribeChannel(CONFIG.DEFAULT_CHANNEL, true);
-        if (self._activeChannelId !== CONFIG.DEFAULT_CHANNEL) {
-          var activeData = self._channels.get(self._activeChannelId);
-          if (activeData && activeData.sub) {
-            self.client.removeChannel(activeData.sub);
-            activeData.sub = null;
-          }
-          await self._subscribeChannel(self._activeChannelId, false);
-        }
-      } catch (err) {
-        UI.addSystemMessage('Reconnect failed.', 'leave');
-        self._scheduleReconnect();
-      }
-    }, jitter);
-  },
-
   send: async function(text) {
     if (this._dmMode) return this.sendDM(text);
     text = text.trim();
@@ -1475,6 +1655,7 @@ var Chat = {
     }
 
     var payload = {
+      k: 'message',
       id: msgId, userId: this.userId, nick: this.nick, ts: ts,
       text: text, sig: sig,
       pubkey: Identity.pubkeyBase64 || null,
@@ -1482,22 +1663,19 @@ var Chat = {
     };
 
     var payloadSize = JSON.stringify(payload).length;
-    console.log('[chat-debug] broadcast payload size:', payloadSize, 'bytes');
     if (payloadSize > 240000) {
       UI.addSystemMessage('Message too large (' + Math.round(payloadSize / 1024) + 'KB). Try a smaller image.', 'leave');
       return;
     }
 
     var activeSub = this._channels.get(this._activeChannelId);
-    if (!activeSub || !activeSub.sub) { UI.addSystemMessage('Not connected to channel.', 'leave'); return; }
+    if (!activeSub || !activeSub.sub || !activeSub.sub.isConnected()) {
+      UI.addSystemMessage('Not connected to channel.', 'leave');
+      return;
+    }
 
-    console.log('[chat-debug] sending broadcast on', this._activeChannelId, 'size:', payloadSize);
-    try {
-      var sendResult = await activeSub.sub.send({ type: 'broadcast', event: 'message', payload: payload });
-      console.log('[chat-debug] send result:', sendResult);
-    } catch (sendErr) {
-      console.error('[chat-debug] send FAILED:', sendErr.message || sendErr);
-      UI.addSystemMessage('Send failed: ' + (sendErr.message || 'unknown error'), 'leave');
+    if (!activeSub.sub.sendFrame(payload)) {
+      UI.addSystemMessage('Send failed: not connected.', 'leave');
       return;
     }
 
@@ -1536,14 +1714,10 @@ var Chat = {
     UI.hideNickOverlay();
     UI.enableInput();
     try { localStorage.setItem('jarvis-chat-nick', newNick); } catch (_) {}
+    // Re-announce presence on the primary room so others see the new nick.
     var primary = this._primaryChannel;
-    if (primary) {
-      await primary.track({
-        nick: this.nick, online_at: new Date().toISOString(),
-        pubkey: Identity.pubkeyBase64 || null,
-        fingerprint: Identity.fingerprint || null,
-        dhPubkey: Identity.dhPubkeyBase64 || null,
-      });
+    if (primary && primary.isConnected()) {
+      primary.sendFrame(this._presenceFrame());
     }
     if (Identity.fingerprint) TrustStore.check(newNick, Identity.fingerprint);
     this._addSystemToChannel(this._activeChannelId, oldNick + ' is now ' + newNick, 'join');
@@ -1573,25 +1747,29 @@ var Chat = {
     if (!this._channels.has(channelId)) this._channels.set(channelId, { sub: null, messages: [] });
     this._unreadCounts.set(channelId, 0);
 
-    var sub = this.client.channel(channelId, { config: { broadcast: { self: false, ack: true } } });
+    // Open a relay Room for the DM (session_id == deterministic DM channel id).
+    // The DM ciphertext envelopes are carried opaquely, same as channel messages.
     var self = this;
-    sub.on('broadcast', { event: 'message' }, function(payload) {
-      self._onReceiveDM(channelId, payload.payload);
+    var conn = new RoomConnection(channelId, this._ensureMemberId(), {
+      onAppFrame: function(frame) {
+        if (frame.k === 'message') {
+          self._onReceiveDM(channelId, frame);
+        } else if (frame.k === 'reaction') {
+          self._onReaction(channelId, frame);
+        }
+      },
+      onReady: function() {
+        self._addSystemToChannel(channelId, 'Secure DM with ' + nick + ' established.', 'join');
+      },
+      onClose: function() {
+        self._addSystemToChannel(channelId, 'DM connection lost.', 'leave');
+      },
+      onError: function(message) {
+        self._addSystemToChannel(channelId, 'DM relay error: ' + message, 'leave');
+      },
     });
-    sub.on('broadcast', { event: 'reaction' }, function(payload) {
-      self._onReaction(channelId, payload.payload);
-    });
-    sub.subscribe(function(status) {
-      if (status === 'SUBSCRIBED') self._addSystemToChannel(channelId, 'Secure DM with ' + nick + ' established.', 'join');
-      else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') self._addSystemToChannel(channelId, 'DM connection lost.', 'leave');
-    });
-    this._channels.get(channelId).sub = sub;
-
-    var prevId = this._activeChannelId;
-    if (prevId !== CONFIG.DEFAULT_CHANNEL) {
-      var prevData = this._channels.get(prevId);
-      if (prevData && prevData.sub) { this.client.removeChannel(prevData.sub); prevData.sub = null; }
-    }
+    this._channels.get(channelId).sub = conn;
+    conn.connect(this.relayUrl);
 
     this._activeChannelId = channelId;
     UI.clearMessages();
@@ -1638,6 +1816,7 @@ var Chat = {
     }
 
     var payload = {
+      k: 'message',
       id: msgId, userId: this.userId, nick: this.nick, ts: ts,
       iv: encrypted.iv, ct: encrypted.ct, sig: sig,
       pubkey: Identity.pubkeyBase64 || null,
@@ -1645,9 +1824,12 @@ var Chat = {
     };
 
     var activeSub = this._channels.get(this._activeChannelId);
-    if (!activeSub || !activeSub.sub) { UI.addSystemMessage('DM not connected.', 'leave'); return; }
+    if (!activeSub || !activeSub.sub || !activeSub.sub.isConnected()) {
+      UI.addSystemMessage('DM not connected.', 'leave');
+      return;
+    }
 
-    await activeSub.sub.send({ type: 'broadcast', event: 'message', payload: payload });
+    activeSub.sub.sendFrame(payload);
 
     var dmMsgType = isImage ? 'image' : 'msg';
     var msgObj = { id: msgId, nick: this.nick, text: text, time: formatTime(ts), color: nickColor(this.nick), verifyStatus: 'self', type: dmMsgType, reactions: {} };
@@ -1715,7 +1897,7 @@ var Chat = {
     if (!this._dmMode) return;
     var dmChannelId = this._activeChannelId;
     var dmData = this._channels.get(dmChannelId);
-    if (dmData && dmData.sub) { this.client.removeChannel(dmData.sub); dmData.sub = null; }
+    if (dmData && dmData.sub) { dmData.sub.close(); dmData.sub = null; }
     this._dmMode = false;
     this._dmKey = null;
     this._dmTargetNick = null;
@@ -1785,10 +1967,10 @@ var Chat = {
     }
     this._renderReactions(msgId, msg.reactions);
     var activeSub = channelData.sub;
-    if (!activeSub) return;
-    await activeSub.send({
-      type: 'broadcast', event: 'reaction',
-      payload: { msgId: msgId, emoji: emoji, userId: this.userId, nick: this.nick, action: action },
+    if (!activeSub || !activeSub.isConnected()) return;
+    activeSub.sendFrame({
+      k: 'reaction',
+      msgId: msgId, emoji: emoji, userId: this.userId, nick: this.nick, action: action,
     });
   },
 
@@ -1853,14 +2035,10 @@ var Chat = {
   },
 
   destroy: function() {
-    if (this._reconnectTimeout) { clearTimeout(this._reconnectTimeout); this._reconnectTimeout = null; }
     if (this.automod) this.automod.destroy();
-    if (this._channels && this.client) {
-      this._channels.forEach(function(data, id) {
-        if (data.sub) {
-          if (id === CONFIG.DEFAULT_CHANNEL) data.sub.untrack();
-          Chat.client.removeChannel(data.sub);
-        }
+    if (this._channels) {
+      this._channels.forEach(function(data) {
+        if (data.sub) data.sub.close();
       });
     }
   },
@@ -2093,22 +2271,35 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    var state = Chat._primaryChannel.presenceState();
-    var keys = Object.keys(state);
+    // Build the roster from the relay presence frames plus ourselves.
+    var entries = [];
+    entries.push({
+      userId: Chat.userId,
+      nick: (Chat.nick || 'You').slice(0, 20),
+      fingerprint: Identity.fingerprint || null,
+      dhPubkey: Identity.dhPubkeyBase64 || null,
+      isSelf: true,
+    });
+    Chat._roster.forEach(function(entry) {
+      entries.push({
+        userId: entry.userId,
+        nick: (entry.nick || 'Unknown').slice(0, 20),
+        fingerprint: entry.fingerprint || null,
+        dhPubkey: entry.dhPubkey || null,
+        isSelf: false,
+      });
+    });
 
-    if (keys.length === 0) {
-      var emptyDiv = document.createElement('div');
-      emptyDiv.className = 'dd-empty'; emptyDiv.textContent = 'No users online';
-      list.appendChild(emptyDiv);
+    if (entries.length === 0) {
+      var emptyDiv2 = document.createElement('div');
+      emptyDiv2.className = 'dd-empty'; emptyDiv2.textContent = 'No users online';
+      list.appendChild(emptyDiv2);
       return;
     }
 
-    keys.forEach(function(key) {
-      var presences = state[key];
-      if (!presences || presences.length === 0) return;
-      var p = presences[0];
-      var nick = (p.nick || 'Unknown').slice(0, 20);
-      var fp = p.fingerprint || null;
+    entries.forEach(function(p) {
+      var nick = p.nick;
+      var fp = p.fingerprint;
 
       var row = document.createElement('div');
       row.className = 'user-row';
@@ -2136,13 +2327,13 @@ document.addEventListener('DOMContentLoaded', function() {
       var nameText = document.createTextNode(nick);
       nameEl.appendChild(nameText);
 
-      if (key === Chat.userId) {
+      if (p.isSelf) {
         nameEl.style.opacity = '1'; nameEl.style.fontWeight = 'bold';
       }
 
       row.appendChild(nameEl);
 
-      if (key !== Chat.userId && fp && Identity.fingerprint && p.dhPubkey) {
+      if (!p.isSelf && fp && Identity.fingerprint && p.dhPubkey) {
         var dmBtn = document.createElement('button');
         dmBtn.className = 'dm-btn'; dmBtn.textContent = 'DM';
         dmBtn.title = 'Direct message ' + nick;
@@ -2173,9 +2364,8 @@ document.addEventListener('DOMContentLoaded', function() {
 </html>`;
 
 export function buildChatHTML(): string {
-  const { supabaseUrl, supabaseAnonKey } = getEmbeddedSupabaseConfig();
-  return CHAT_HTML_TEMPLATE.replace(/__JARVIS_MOBILE_SUPABASE_URL__/g, supabaseUrl).replace(
-    /__JARVIS_MOBILE_SUPABASE_ANON_KEY__/g,
-    supabaseAnonKey
-  );
+  // The relay URL is injected at runtime by the WebView host
+  // (window.__JARVIS_RELAY_URL__ via injectedJavaScriptBeforeContentLoaded),
+  // so the HTML bundle itself carries no transport config.
+  return CHAT_HTML_TEMPLATE;
 }

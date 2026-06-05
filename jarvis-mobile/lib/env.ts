@@ -1,28 +1,20 @@
 /**
- * Build-time public env (Expo). Supabase anon key is public by design; still prefer env over hardcoding.
+ * Build-time public env (Expo). Only EXPO_PUBLIC_* values are embedded in the client.
  */
-const DEFAULT_SUPABASE_URL = 'https://ojmqzagktzkualzgpcbq.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbXF6YWdrdHprdWFsemdwY2JxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5ODY1ODIsImV4cCI6MjA4NzU2MjU4Mn0.WkDiksXkye-YyL1RSbAYv1iVW_Sv5zwST0RcloN_0jQ';
-
-export function getEmbeddedSupabaseConfig(): { supabaseUrl: string; supabaseAnonKey: string } {
-  const url = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || DEFAULT_SUPABASE_URL;
-  const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() || DEFAULT_SUPABASE_ANON_KEY;
-  return { supabaseUrl: url, supabaseAnonKey: key };
-}
-
 export function getDefaultRelayHint(): string | undefined {
   const v = process.env.EXPO_PUBLIC_DEFAULT_RELAY_URL;
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
-export function getSupabaseUrlHint(): string | undefined {
-  const v = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
-  return v || undefined;
-}
+/** Production relay WebSocket endpoint (chat Room transport). */
+const DEFAULT_CHAT_RELAY_URL = 'wss://jarvis-relay-production-3eb6.up.railway.app/ws';
 
-export function usesEmbeddedSupabaseDefaults(): boolean {
-  return !process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() && !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
+/**
+ * Relay URL the chat WebView connects to. Defaults to the production relay,
+ * overridable via EXPO_PUBLIC_DEFAULT_RELAY_URL (the same env the terminal uses).
+ */
+export function getChatRelayUrl(): string {
+  return getDefaultRelayHint() || DEFAULT_CHAT_RELAY_URL;
 }
 
 export function isRelayDebugEnabled(): boolean {
