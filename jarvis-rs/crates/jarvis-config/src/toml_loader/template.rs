@@ -180,8 +180,9 @@ name = "jarvis-dark"
 
 [collab]
 # Collaborative terminal / pair programming. Rides the relay Room transport.
-# EXPERIMENTAL: limited auth — do not enable in production yet.
-# enabled = false
+# Authenticated: M3 signed pair frames + the relay's signed-room_hello slot
+# binding. Enabled by default; set `enabled = false` to turn it off.
+# enabled = true
 # max_participants = 4
 # allow_takeover = true
 # require_signed_join = true

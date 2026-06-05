@@ -298,7 +298,7 @@ model = "gpt-4o-mini"
     #[test]
     fn default_config_has_correct_collab() {
         let config = JarvisConfig::default();
-        assert!(!config.collab.enabled);
+        assert!(config.collab.enabled);
         assert_eq!(config.collab.max_participants, 4);
         assert!(config.collab.allow_takeover);
         assert!(config.collab.require_signed_join);

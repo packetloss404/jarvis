@@ -1,8 +1,9 @@
 //! Collaborative terminal / pair-programming configuration types.
 //!
 //! Pair programming rides the project's relay Room transport (the same
-//! transport as presence and chat). It is **disabled by default**. As of the
-//! M3 hardening it uses END-TO-END SIGNED FRAMES (per-app ECDSA identity) so
+//! transport as presence and chat). It is **enabled by default** as of the
+//! signed-`room_hello` slot binding (the relay binds each Room slot to its key).
+//! As of the M3 hardening it uses END-TO-END SIGNED FRAMES (per-app ECDSA identity) so
 //! each member is authenticated and `require_signed_join` is now ENFORCED — the
 //! shared room key is confidentiality-only, and the signatures are the security
 //! boundary between members. See the C2 spec.
@@ -35,7 +36,11 @@ pub struct CollabConfig {
 impl Default for CollabConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            // Enabled by default as of the signed-`room_hello` slot binding +
+            // M3 signed pair frames: members are authenticated and the relay
+            // binds each Room slot to its key, so the experimental gate is
+            // lifted. Still feature-flagged here so it can be turned off.
+            enabled: true,
             max_participants: 4,
             allow_takeover: true,
             require_signed_join: true,

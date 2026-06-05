@@ -22,9 +22,13 @@ by the final code/dev review and the design docs.
   deriving their `member_id` from the pubkey (changing the pair/presence id formats and the
   `member_id ↔ user_id` linkage rosters/DM-channels depend on) and is deferred. The
   exposure is denial-only — pair frames are E2E-signed, so content can't be forged.
-- **Enable collaboration by default.** `collab.enabled` stays `false` until the slot
-  binding above lands and a real multi-user test passes. Pair sessions are authenticated
-  (M3), but the feature is experimental.
+- **Enable collaboration by default** *(DONE)*. `collab.enabled` now defaults to `true`:
+  the slot binding above landed + deployed (relay redeployed to Railway 2026-06-05) and a
+  live signed-hello smoke test confirmed the relay accepts signed / rejects unsigned + bogus
+  hellos. Pair sessions are authenticated (M3 signed frames). Still feature-flagged (set
+  `collab.enabled = false` to disable). A full 2-user / multi-machine pair-programming run
+  (see Testing) is still pending — the transport + auth are verified, the end-to-end driver/
+  navigator flow across two real machines is not yet exercised live.
 - **macOS native notifier.** `jarvis-platform/src/notifications.rs` shells out to
   `osascript` (argument-escaped, but) — swap to a native crate (`notify-rust`).
 
