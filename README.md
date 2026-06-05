@@ -1,70 +1,86 @@
 # Jarvis
 
-A multiplayer vibe coding experience — games, chats, and vibes.
+A programmable, GPU-rendered tiling desktop shell for vibe coding — an agentic
+multi-provider AI assistant, self-hosted encrypted chat & presence, collaborative
+terminals, and a `jarvis://` plugin system, all in one cross-platform Rust binary.
 
 ![Jarvis](screenshot.png)
 
-Jarvis is a shared desktop environment where multiple AI assistants, retro arcade games, live chat, and a reactive visual shell coexist on one screen. This repository is organized so **one codebase is obviously “the product”** and everything else is supporting or historical.
+Jarvis is a tiling window environment that hosts embedded WebView panels — a
+terminal, an AI assistant, live chat, presence, games — over a wgpu-rendered
+shell. Everything load-bearing lives in the **`jarvis-rs/`** Rust workspace.
 
 ---
 
-## TL;DR: what to open first
+## What's implemented
 
-| If you want to… | Go here |
-|-----------------|--------|
-| **Build the app most people should run** | [`jarvis-rs/`](jarvis-rs/) — cross-platform Rust desktop (Windows, macOS, Linux). |
-| **Understand the folder layout** | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
-| **Contribute code or run tests** | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| **Work on the mobile companion** | [`jarvis-mobile/`](jarvis-mobile/) |
-
-**Developed app:** the **`jarvis-rs`** workspace (wgpu + embedded WebViews) is where all feature work belongs. The original macOS Python + Swift/Metal prototype has been removed from the working tree; it is preserved at the **`legacy-archive`** git tag for historical reference.
+- **Tiling shell + terminal** — wgpu (Vulkan/Metal/DX12) renderer, binary-split
+  tiling window manager, PTY-backed terminal (xterm.js), command palette, and a
+  `jarvis://` plugin protocol with embedded first-party plugins (games, music).
+- **Agentic AI assistant** — multi-provider (**Claude · OpenAI GPT · Google
+  Gemini · MiniMax**, switchable in-panel). Read-only filesystem tools by default;
+  **write/exec tools are opt-in and gated behind a fail-closed human approval
+  gate** (no-shell argv execution, sandbox-jailed paths, per-call approval).
+- **Live chat + presence** — end-to-end encrypted (ECDSA identities, AES-GCM),
+  running over Jarvis's **own relay** (the `jarvis-relay` crate) — no third-party
+  backend. Deployable anywhere (a Railway/Docker config is included).
+- **Collaborative terminal / pair programming** *(experimental, off by default)* —
+  share a terminal over the relay with driver/navigator roles; sessions are
+  **authenticated with signed frames** (see `collab.enabled` in config).
+- **Mobile companion** — `jarvis-mobile/` (React Native / Expo): pair to the
+  desktop for a remote terminal, the same relay chat, and a `claude.ai` view.
+- **Cross-platform** — Windows, macOS, Linux (incl. Windows workspace screen
+  capture for live sharing).
 
 ---
 
-## Primary application — `jarvis-rs/` (Rust)
-
-This is the **default** development target: one binary, embedded panel assets, relay/mobile pairing, terminal, chat, games, and assistants.
+## Build & run — `jarvis-rs/` (Rust)
 
 ```bash
 cd jarvis-rs
-cargo build --release
-# Output: jarvis-rs/target/release/jarvis   (or jarvis.exe on Windows)
-cargo test --workspace
+cargo run                    # debug
+cargo build --release        # release → target/release/jarvis(.exe)
+cargo test --workspace       # full test suite
 ```
 
-Panel HTML/CSS/JS is canonical under **`jarvis-rs/assets/panels/`** (bundled via `include_dir` at compile time). Do not add parallel copies at the repository root.
-
-**Relay server** (optional, for mobile / pairing):
+Panel HTML/CSS/JS is canonical under **`jarvis-rs/assets/panels/`** (bundled via
+`include_dir` at compile time). The **relay server** builds separately:
 
 ```bash
-cd jarvis-rs
-cargo build --release --bin jarvis-relay
+cargo build --release --bin jarvis-relay   # then deploy (see relay/, railway.json)
 ```
 
-Further detail: **[docs/manual/README.md](docs/manual/README.md)** (full technical manual).
+Configuration lives in the OS config dir (`<config>/jarvis/config.toml`). AI
+provider keys are read from the environment (`OPENAI_API_KEY`, `GEMINI_API_KEY` /
+`GOOGLE_API_KEY`, `MINIMAX_API_KEY`; Claude via `claude auth login` or
+`CLAUDE_CODE_OAUTH_TOKEN`). The relay URL defaults to the project's deployment and
+is overridable in config.
+
+Full detail: **[docs/manual/README.md](docs/manual/README.md)**.
 
 ---
 
-## Repository layout (high level)
+## Repository layout
 
 ```
 jarvis/
-  jarvis-rs/           # PRIMARY: Rust desktop app (develop here)
-    testdata/          # Shared wire-protocol JSON fixtures (relay ↔ desktop tests)
-  jarvis-mobile/       # React Native companion (thin client)
-  docs/                # Website + published manual; built HTML is gitignored
-  dev/                 # Development docs only (pathforward analysis, etc.)
-    pathforward/       # Strategic / model-sourced codebase write-ups
-    _archive/          # Dated internal plans (kept for history; not the live manual)
-  relay/               # Deployment helpers (separate from app crates)
-  resources/           # Built-in theme assets (resources/themes/, loaded by jarvis-rs)
+  jarvis-rs/           # PRIMARY: Rust desktop app + relay (develop here)
+    crates/            # app, renderer, tiling, webview, ai, social, relay, config, platform, common
+    assets/panels/     # embedded panel + plugin HTML/CSS/JS
+    testdata/          # shared wire-protocol fixtures (relay ↔ desktop)
+  jarvis-mobile/       # React Native / Expo companion (thin client)
+  relay/               # relay deployment helpers (Dockerfile, etc.)
+  railway.json         # relay deploy config (Railway)
+  resources/themes/    # built-in theme assets (loaded by jarvis-rs)
+  docs/                # technical manual + site
+  dev/                 # development notes, plans, analysis
 ```
 
-> The original macOS Python + Swift/Metal prototype (formerly `legacy/`, with its
-> `scripts/` and packaging assets) has been removed from the working tree. It is
-> preserved in history at the **`legacy-archive`** git tag.
+> The original macOS Python + Swift/Metal prototype (formerly `legacy/`) has been
+> removed from the working tree; it is preserved at the **`legacy-archive`** git tag
+> (`git checkout legacy-archive` to run it).
 
-See **[ARCHITECTURE.md](ARCHITECTURE.md)** for intent, boundaries, and “where does this feature live?”
+See **[ARCHITECTURE.md](ARCHITECTURE.md)** for boundaries and "where does this feature live?"
 
 ---
 
@@ -72,15 +88,14 @@ See **[ARCHITECTURE.md](ARCHITECTURE.md)** for intent, boundaries, and “where 
 
 | Doc | Purpose |
 |-----|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Repo map, primary app, mobile |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Repo map, crate boundaries |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Builds, tests, PR hints |
-| [docs/manual/README.md](docs/manual/README.md) | Full Jarvis technical manual (lives under **`docs/`** with the site) |
-| [dev/_archive/plugins/plugins.md](dev/_archive/plugins/plugins.md) | Plugin system (Rust app; archived notes) |
-| [dev/pathforward/finalfindings.md](dev/pathforward/finalfindings.md) | Strategic codebase analysis (under **`dev/`**; see also **`dev/_archive/`** for older plans) |
-| [CHANGELOG.md](CHANGELOG.md) | High-level history from git (themes over time) |
+| [docs/manual/README.md](docs/manual/README.md) | Full technical manual |
+| [dev/plans/c2-pair-programming.md](dev/plans/c2-pair-programming.md) | Collaborative-terminal design + security |
+| [CHANGELOG.md](CHANGELOG.md) | High-level history |
 
 ---
 
 ## License
 
-See repository license file (if present) or package metadata in `jarvis-rs/Cargo.toml`.
+MIT — see [LICENSE](LICENSE).
