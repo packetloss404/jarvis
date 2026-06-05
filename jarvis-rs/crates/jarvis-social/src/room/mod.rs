@@ -12,6 +12,11 @@
 
 mod client;
 mod protocol;
+mod signed_hello;
 
 pub use client::RoomClient;
 pub use protocol::{RoomConfig, RoomControl, RoomEvent};
+pub use signed_hello::{
+    build_signed_room_hello, room_hello_canonical_bytes, signed_hello_payload, RoomHelloSigner,
+    ROOM_HELLO_SIG_DOMAIN,
+};

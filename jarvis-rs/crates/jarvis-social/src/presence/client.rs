@@ -16,7 +16,7 @@ use crate::protocol::{
     ActivityUpdatePayload, ChatMessagePayload, GameInvitePayload, OnlineUser, PokePayload,
     PresenceFrame, UserStatus,
 };
-use crate::room::{RoomClient, RoomConfig};
+use crate::room::{RoomClient, RoomConfig, RoomHelloSigner};
 
 use super::event_translator::event_translator;
 use super::types::{PresenceConfig, PresenceEvent};
@@ -37,6 +37,10 @@ pub struct PresenceClient {
     room: Option<RoomClient>,
     /// Whether we're currently connected (registered in the room).
     connected: Arc<RwLock<bool>>,
+    /// ECDSA signer for the signed `room_hello` (member-id slot DoS fix). The
+    /// app injects the `CryptoService` identity via [`PresenceClient::with_signer`]
+    /// before `start`. `None` → the relay rejects our (unsigned) hello.
+    signer: Option<Arc<RoomHelloSigner>>,
 }
 
 impl PresenceClient {
@@ -48,7 +52,17 @@ impl PresenceClient {
             self_activity: Arc::new(RwLock::new((UserStatus::Online, None))),
             room: None,
             connected: Arc::new(RwLock::new(false)),
+            signer: None,
         }
+    }
+
+    /// Inject the ECDSA signer used to sign the `room_hello`. The app builds this
+    /// from its `CryptoService` identity (pubkey + a `sign(payload)` closure) so
+    /// the presence hello carries a valid signature the relay accepts. Must be
+    /// called before [`start`](Self::start).
+    pub fn with_signer(mut self, signer: Arc<RoomHelloSigner>) -> Self {
+        self.signer = Some(signer);
+        self
     }
 
     /// Our own roster entry as a presence frame, reflecting current activity.
@@ -75,6 +89,10 @@ impl PresenceClient {
             member_id: self.identity.user_id.clone(),
             reconnect_delay_secs: self.config.reconnect_delay,
             max_reconnect_delay_secs: self.config.max_reconnect_delay,
+            // SIGNER SEAM: the build agent plumbs the app's ECDSA identity here
+            // (via PresenceClient::new / PresenceConfig) so the signed room_hello
+            // can be produced. Until then this is None and the relay rejects.
+            signer: self.signer.clone(),
         };
 
         let (room, room_event_rx) = RoomClient::connect(room_config);

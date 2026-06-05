@@ -149,13 +149,27 @@ async fn session(
 ) -> SessionResult {
     let (mut sink, mut stream) = ws.split();
 
-    // 1. Send room_hello.
-    let hello = serde_json::json!({
-        "type": "room_hello",
-        "session_id": config.session_id,
-        "member_id": config.member_id,
-    })
-    .to_string();
+    // 1. Send the SIGNED room_hello. The relay REQUIRES a valid signature +
+    //    `member_id → pubkey` binding (member-id slot DoS fix); without a signer
+    //    the relay rejects us, so this is a hard dependency once cut over.
+    let hello = match &config.signer {
+        Some(signer) => super::signed_hello::build_signed_room_hello(
+            signer,
+            &config.session_id,
+            &config.member_id,
+        ),
+        None => {
+            // No signer plumbed yet: still emit a hello so the worker stays
+            // structurally intact, but the relay will reject it. Logged loudly.
+            warn!("Presence room: no room_hello signer; relay will reject this hello");
+            serde_json::json!({
+                "type": "room_hello",
+                "session_id": config.session_id,
+                "member_id": config.member_id,
+            })
+            .to_string()
+        }
+    };
     if sink.send(Message::Text(hello.into())).await.is_err() {
         return SessionResult::Disconnected("failed to send room_hello".into());
     }

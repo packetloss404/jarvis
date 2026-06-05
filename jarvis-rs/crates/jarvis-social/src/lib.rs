@@ -20,7 +20,10 @@ pub use protocol::{
     ActivityUpdatePayload, ChatMessagePayload, GameInvitePayload, OnlineUser, PokePayload,
     PresenceFrame, PresencePayload, UserStatus,
 };
-pub use room::{RoomClient, RoomConfig, RoomEvent};
+pub use room::{
+    build_signed_room_hello, room_hello_canonical_bytes, signed_hello_payload, RoomClient,
+    RoomConfig, RoomEvent, RoomHelloSigner,
+};
 
 #[cfg(feature = "experimental-collab")]
 pub use pair::{PairConfig, PairEvent, PairManager, PairRole, PairSession};

@@ -186,12 +186,29 @@ async fn room_session(
 ) -> SessionResult {
     let (mut sink, mut stream) = ws.split();
 
-    // 1. Send room_hello{session_id, member_id}.
-    let hello = serde_json::to_string(&RoomHello::new(
-        config.session_id.clone(),
-        config.member_id.clone(),
-    ))
-    .unwrap();
+    // 1. Send the SIGNED room_hello{session_id, member_id, pubkey, nonce, sig}.
+    //    The relay REQUIRES a valid signature + `member_id → pubkey` TOFU
+    //    binding (member-id slot DoS fix). The same identity signer that signs
+    //    outbound SignedPairFrames signs the hello, so the slot is bound to our
+    //    identity. Without a signer (no CryptoService) the relay rejects us.
+    let hello = match config.signer.as_ref() {
+        Some(signer) => serde_json::to_string(&RoomHello::signed(
+            config.session_id.clone(),
+            config.member_id.clone(),
+            signer,
+        ))
+        .unwrap(),
+        None => {
+            tracing::warn!("Pair room: no room_hello signer; relay will reject this hello");
+            // Structurally still emit a (bare) hello; the relay refuses it.
+            serde_json::json!({
+                "type": "room_hello",
+                "session_id": config.session_id,
+                "member_id": config.member_id,
+            })
+            .to_string()
+        }
+    };
     if sink.send(Message::Text(hello.into())).await.is_err() {
         return SessionResult::Disconnected("failed to send room_hello".into());
     }

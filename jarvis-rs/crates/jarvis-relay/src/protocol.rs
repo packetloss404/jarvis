@@ -3,6 +3,73 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Crypto domain separator for the SIGNED `room_hello`. A fixed, versioned tag
+/// prepended to the canonical signing bytes so a room-hello signature can never
+/// be cross-presented to any other signer that shares the same ECDSA identity
+/// key (pair frames use `jarvis-pair-sig-v1`; these spaces are disjoint).
+///
+/// This EXACT string must be reproduced byte-for-byte by all four Room clients
+/// (desktop pair, desktop presence, desktop chat JS, mobile chat JS).
+pub const ROOM_HELLO_SIG_DOMAIN: &str = "jarvis-room-hello-v1";
+
+/// Field separator inside the canonical signing bytes (ASCII Unit Separator).
+/// Disjoint from base64 / hostnames / member-id charsets, so the delimited
+/// fields are unambiguous. Mirrors the pair-frame canonicalization (`0x1F`).
+pub const ROOM_HELLO_SEP: u8 = 0x1F;
+
+/// Build the CANONICAL, deterministic byte string a Room member signs in its
+/// `room_hello`:
+///
+/// ```text
+/// ROOM_HELLO_SIG_DOMAIN ‹0x1F› session_id ‹0x1F› member_id ‹0x1F› pubkey ‹0x1F› nonce(decimal)
+/// ```
+///
+/// - `ROOM_HELLO_SIG_DOMAIN` — fixed crypto domain separator (see above).
+/// - `session_id` — binds the signature to THIS room, so a captured hello can't
+///   be replayed into a different session.
+/// - `member_id` AND `pubkey` — bound together, so the slot the signature claims
+///   (`member_id`) is cryptographically tied to the signing key (`pubkey`); the
+///   relay then enforces TOFU `member_id → pubkey` pinning on top.
+/// - `nonce` — a freshness value (unix-epoch MILLISECONDS as a decimal u64) the
+///   relay range-checks against its own clock, so a hello captured off the wire
+///   cannot be replayed outside a short window.
+///
+/// The four clients and the relay verifier MUST produce identical bytes. The
+/// signature is taken over `base64(canonical_bytes)` (see [`signed_hello_payload`])
+/// so it passes unchanged through the project's `&str`-based ECDSA sign/verify
+/// surface (`CryptoService::{sign,verify}` desktop, Web Crypto mobile), matching
+/// the `SignedPairFrame` precedent.
+pub fn room_hello_canonical_bytes(
+    session_id: &str,
+    member_id: &str,
+    pubkey: &str,
+    nonce: u64,
+) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(
+        ROOM_HELLO_SIG_DOMAIN.len() + session_id.len() + member_id.len() + pubkey.len() + 32,
+    );
+    buf.extend_from_slice(ROOM_HELLO_SIG_DOMAIN.as_bytes());
+    buf.push(ROOM_HELLO_SEP);
+    buf.extend_from_slice(session_id.as_bytes());
+    buf.push(ROOM_HELLO_SEP);
+    buf.extend_from_slice(member_id.as_bytes());
+    buf.push(ROOM_HELLO_SEP);
+    buf.extend_from_slice(pubkey.as_bytes());
+    buf.push(ROOM_HELLO_SEP);
+    buf.extend_from_slice(nonce.to_string().as_bytes());
+    buf
+}
+
+/// The exact ASCII string that is actually fed to ECDSA sign/verify: the
+/// standard-base64 encoding of [`room_hello_canonical_bytes`]. Both the four
+/// clients and the relay sign/verify over THIS string (not the raw bytes), so
+/// the canonical bytes round-trip losslessly through the `&str` crypto APIs.
+pub fn signed_hello_payload(session_id: &str, member_id: &str, pubkey: &str, nonce: u64) -> String {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    B64.encode(room_hello_canonical_bytes(session_id, member_id, pubkey, nonce))
+}
+
 /// First message a client sends to identify itself.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -23,6 +90,18 @@ pub enum RelayHello {
     RoomHello {
         session_id: String,
         member_id: String,
+        /// Signer's ECDSA P-256 identity public key, SPKI DER, base64. Same
+        /// encoding as `CryptoService::pubkey_base64` / Web Crypto
+        /// `exportKey('spki')`. The relay verifies `sig` against this key and
+        /// TOFU-pins `member_id → pubkey`.
+        pubkey: String,
+        /// Freshness value: unix-epoch MILLISECONDS as a u64. The relay rejects
+        /// a hello whose nonce is outside its accept window (anti-replay).
+        nonce: u64,
+        /// Base64 IEEE-P1363 (r||s, 64-byte) ECDSA-P256 signature over
+        /// `base64(room_hello_canonical_bytes(session_id, member_id, pubkey, nonce))`
+        /// — see [`signed_hello_payload`].
+        sig: String,
     },
 }
 

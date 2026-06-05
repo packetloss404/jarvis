@@ -8,19 +8,27 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::protocol::{RelayHello, RelayResponse};
 use crate::rate_limit::RateLimiter;
+use crate::room_auth::RoomAuthStore;
 use crate::session::{Role, SessionKind, SessionStore};
+
+/// The signed-`room_hello` credential carried alongside a Room member's hello:
+/// `(pubkey, nonce, sig)`. The relay verifies this and TOFU-pins
+/// `member_id → pubkey` before admitting the slot. Only Room hellos carry it.
+type RoomCredential = (String, u64, String);
 
 /// Handle a single WebSocket connection.
 pub async fn handle_connection(
     ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     addr: SocketAddr,
     store: SessionStore,
+    room_auth: RoomAuthStore,
     limiter: &RateLimiter,
 ) {
     let (mut sink, mut stream) = ws.split();
 
-    // 1. Read the hello message to identify this client.
-    let (session_id, role, member_id) = match read_hello(&mut stream, addr).await {
+    // 1. Read the hello message to identify this client. Room hellos also carry
+    //    a signed credential (`pubkey`, `nonce`, `sig`) in `credential`.
+    let (session_id, role, member_id, credential) = match read_hello(&mut stream, addr).await {
         Some(v) => v,
         None => return,
     };
@@ -120,6 +128,54 @@ pub async fn handle_connection(
             }
         }
         SessionKind::Room => {
+            // SIGNED room_hello gate: verify the ECDSA signature over the
+            // canonical bytes against the carried pubkey, check nonce freshness,
+            // and enforce the TOFU `member_id → pubkey` binding BEFORE the slot
+            // can be created/joined/replaced. This is the member-id slot DoS
+            // fix: a self-asserted member_id can no longer squat/evict a slot
+            // without the matching identity key. A forged hello is refused here,
+            // before `ensure_session` can even auto-create the room.
+            let mid = member_id.as_deref().unwrap_or_default();
+            match &credential {
+                Some((pubkey, nonce, sig)) => {
+                    // PURE verify only — the TOFU pin / nonce high-water is
+                    // committed LATER, after `register_room` succeeds, so an
+                    // early return (capacity / ensure_session / register / first
+                    // send) below never leaves an orphan pin or advances the
+                    // nonce. See `RoomAuthStore::{verify, commit}`.
+                    if let Err(reason) =
+                        room_auth.verify(&session_id, mid, pubkey, *nonce, sig).await
+                    {
+                        tracing::warn!(
+                            peer = %addr,
+                            reason = ?reason,
+                            "Rejected signed room_hello",
+                        );
+                        let _ = send_response(
+                            &mut sink,
+                            &RelayResponse::Error {
+                                message: reason.message().into(),
+                            },
+                        )
+                        .await;
+                        return;
+                    }
+                }
+                None => {
+                    // BREAKING cutover: an unsigned room_hello is no longer
+                    // admitted. All four clients sign; the relay requires it.
+                    tracing::warn!(peer = %addr, "Rejected unsigned room_hello");
+                    let _ = send_response(
+                        &mut sink,
+                        &RelayResponse::Error {
+                            message: "signed room hello required".into(),
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+
             // Enforce the global session cap when a member would create a new
             // room. Joining an existing room never trips the cap.
             if !store.exists(&session_id).await
@@ -183,7 +239,7 @@ pub async fn handle_connection(
         SessionKind::Room => {
             // `member_id` is always Some for Room hellos (see read_hello).
             let mid = member_id.clone().unwrap_or_default();
-            if let Err(e) = store.register_room(&session_id, mid, tx).await {
+            if let Err(e) = store.register_room(&session_id, mid.clone(), tx).await {
                 let _ = send_response(
                     &mut sink,
                     &RelayResponse::Error {
@@ -192,6 +248,35 @@ pub async fn handle_connection(
                 )
                 .await;
                 return;
+            }
+            // The slot is now actually registered — COMMIT the TOFU pin + nonce
+            // high-water. `credential` is always Some for an admitted Room hello
+            // (an unsigned/forged one returned above). The commit re-checks the
+            // pubkey + monotonic nonce under the write lock; if a concurrent
+            // hello raced the pin, tear our just-registered slot back down so we
+            // never hold a slot we couldn't pin.
+            if let Some((pubkey, nonce, _sig)) = &credential {
+                if let Err(reason) = room_auth
+                    .commit(&session_id, &mid, pubkey, *nonce)
+                    .await
+                {
+                    tracing::warn!(
+                        peer = %addr,
+                        reason = ?reason,
+                        "Signed room_hello lost pin commit race; refusing slot",
+                    );
+                    if store.unregister_member(&session_id, &mid, &my_tx).await {
+                        room_auth.forget_session(&session_id).await;
+                    }
+                    let _ = send_response(
+                        &mut sink,
+                        &RelayResponse::Error {
+                            message: reason.message().into(),
+                        },
+                    )
+                    .await;
+                    return;
+                }
             }
             None
         }
@@ -372,7 +457,13 @@ pub async fn handle_connection(
         }
         SessionKind::Room => {
             let me = member_id.as_deref().unwrap_or_default();
-            store.unregister_member(&session_id, me, &my_tx).await;
+            // `unregister_member` returns true when it removed the now-empty
+            // room; drop that room's TOFU pins so the pin map tracks live
+            // sessions (the same `(session_id, member_id)` can later be re-pinned
+            // by a fresh signed join).
+            if store.unregister_member(&session_id, me, &my_tx).await {
+                room_auth.forget_session(&session_id).await;
+            }
 
             // Fan out the departure + an updated count to whoever is left.
             let left = serde_json::to_string(&RelayResponse::MemberLeft {
@@ -416,22 +507,34 @@ async fn read_hello(
         tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     >,
     addr: SocketAddr,
-) -> Option<(String, Role, Option<String>)> {
+) -> Option<(String, Role, Option<String>, Option<RoomCredential>)> {
     // Wait up to 10 seconds for the hello message.
     let frame = tokio::time::timeout(std::time::Duration::from_secs(10), stream.next()).await;
 
     match frame {
         Ok(Some(Ok(Message::Text(text)))) => match serde_json::from_str::<RelayHello>(&text) {
-            Ok(RelayHello::DesktopHello { session_id }) => Some((session_id, Role::Desktop, None)),
-            Ok(RelayHello::MobileHello { session_id }) => Some((session_id, Role::Mobile, None)),
-            Ok(RelayHello::HostHello { session_id }) => Some((session_id, Role::Host, None)),
+            Ok(RelayHello::DesktopHello { session_id }) => {
+                Some((session_id, Role::Desktop, None, None))
+            }
+            Ok(RelayHello::MobileHello { session_id }) => {
+                Some((session_id, Role::Mobile, None, None))
+            }
+            Ok(RelayHello::HostHello { session_id }) => Some((session_id, Role::Host, None, None)),
             Ok(RelayHello::SpectatorHello { session_id }) => {
-                Some((session_id, Role::Spectator, None))
+                Some((session_id, Role::Spectator, None, None))
             }
             Ok(RelayHello::RoomHello {
                 session_id,
                 member_id,
-            }) => Some((session_id, Role::Member, Some(member_id))),
+                pubkey,
+                nonce,
+                sig,
+            }) => Some((
+                session_id,
+                Role::Member,
+                Some(member_id),
+                Some((pubkey, nonce, sig)),
+            )),
             Err(e) => {
                 tracing::warn!(peer = %addr, error = %e, "Invalid hello message");
                 None

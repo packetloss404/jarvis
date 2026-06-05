@@ -1,6 +1,10 @@
 //! Relay Room wire types and the transport-level config/event enums.
 
+use std::sync::Arc;
+
 use serde::Deserialize;
+
+use super::signed_hello::RoomHelloSigner;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -19,6 +23,12 @@ pub struct RoomConfig {
     pub reconnect_delay_secs: u64,
     /// Maximum reconnect delay in seconds.
     pub max_reconnect_delay_secs: u64,
+    /// ECDSA signer for the SIGNED `room_hello` (member-id slot DoS fix). The
+    /// relay now REQUIRES a signed hello; the owner (jarvis-app, which holds the
+    /// `CryptoService` identity) injects this. `None` means the hello is sent
+    /// unsigned and the relay will reject it — a deliberate hard failure until
+    /// the signer is plumbed.
+    pub signer: Option<Arc<RoomHelloSigner>>,
 }
 
 impl Default for RoomConfig {
@@ -29,6 +39,7 @@ impl Default for RoomConfig {
             member_id: String::new(),
             reconnect_delay_secs: 1,
             max_reconnect_delay_secs: 30,
+            signer: None,
         }
     }
 }

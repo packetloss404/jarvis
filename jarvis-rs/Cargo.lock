@@ -2748,10 +2748,14 @@ dependencies = [
 name = "jarvis-relay"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "clap",
  "futures-util",
+ "p256",
+ "rand 0.8.5",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -2780,8 +2784,10 @@ dependencies = [
 name = "jarvis-social"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "futures-util",
  "jarvis-common",
+ "jarvis-platform",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

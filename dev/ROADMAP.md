@@ -6,13 +6,22 @@ by the final code/dev review and the design docs.
 
 ## Security hardening
 
-- **Relay member-id slot binding** *(documented residual — denial-only)*. The relay's
-  in-room `member_id` is client-asserted; a session-id holder can hijack/flood a slot
-  (DoS, **not** impersonation — pair frames are E2E-signed so content can't be forged).
-  Basic mitigations landed (member-id length/charset validation + a per-room member cap).
-  The full fix — binding the relay slot to a signed identity in `room_hello` — is deferred
-  because it's a cross-cutting protocol change touching every Room client (chat, presence,
-  pair) plus a redeploy. (`jarvis-relay/src/{connection,session}.rs`.)
+- **Relay member-id slot binding** *(LANDED — residual: first-mover pin on
+  non-fingerprinted ids)*. Every Room client now SIGNS its `room_hello` (ECDSA P-256 over
+  domain-tagged canonical bytes); the relay verifies the signature, enforces a per-slot
+  strictly-monotonic nonce (anti-replay), and TOFU-pins `(session_id, member_id) → pubkey`,
+  so a self-asserted `member_id` can no longer squat or evict a slot without the matching
+  key. (`jarvis-relay/src/{room_auth,connection,protocol}.rs`.)
+  **Residual (first-mover pins):** the pair (`random_alnum`) and presence (raw UUID)
+  `member_id` formats embed NO pubkey relationship, so the first valid signer to present
+  such an id PINS it for the room's lifetime — a later, differently-keyed claimant is then
+  refused, but a malicious *first* mover could pre-pin an id it doesn't "own". For the chat
+  clients, whose id is `fingerprint(pubkey).hex + "." + userId`, the relay additionally
+  checks the fingerprint prefix against `fingerprint(carried_pubkey)`, closing first-mover
+  squatting for those ids. Fully closing it for the non-fingerprinted formats would require
+  deriving their `member_id` from the pubkey (changing the pair/presence id formats and the
+  `member_id ↔ user_id` linkage rosters/DM-channels depend on) and is deferred. The
+  exposure is denial-only — pair frames are E2E-signed, so content can't be forged.
 - **Enable collaboration by default.** `collab.enabled` stays `false` until the slot
   binding above lands and a real multi-user test passes. Pair sessions are authenticated
   (M3), but the feature is experimental.

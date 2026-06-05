@@ -7,6 +7,7 @@
 mod connection;
 mod protocol;
 mod rate_limit;
+mod room_auth;
 mod session;
 
 use std::time::Duration;
@@ -17,6 +18,7 @@ use tokio_tungstenite::accept_async;
 
 use crate::connection::handle_connection;
 use crate::rate_limit::{RateLimitConfig, RateLimiter};
+use crate::room_auth::RoomAuthStore;
 use crate::session::SessionStore;
 
 #[derive(Parser)]
@@ -53,6 +55,9 @@ async fn main() {
 
     let args = Args::parse();
     let store = SessionStore::new();
+    // TOFU `member_id → pubkey` pins for signed `room_hello` (member-id slot DoS
+    // defence). Shares lifetime with the session store.
+    let room_auth = RoomAuthStore::new();
     let limiter = RateLimiter::new(RateLimitConfig {
         max_connections_per_ip: args.max_connections_per_ip,
         max_total_sessions: args.max_sessions,
@@ -99,9 +104,10 @@ async fn main() {
                 }
 
                 let store = store.clone();
+                let room_auth = room_auth.clone();
                 tokio::spawn(async move {
                     match accept_async(stream).await {
-                        Ok(ws) => handle_connection(ws, addr, store, &limiter).await,
+                        Ok(ws) => handle_connection(ws, addr, store, room_auth, &limiter).await,
                         Err(e) => {
                             tracing::warn!(peer = %addr, error = %e, "WS handshake failed");
                         }

@@ -1,6 +1,9 @@
 //! Social presence: connecting to the presence server and polling events.
 
+use std::sync::Arc;
+
 use jarvis_social::presence::{PresenceConfig, PresenceEvent};
+use jarvis_social::room::RoomHelloSigner;
 use jarvis_social::{Identity, UserStatus};
 
 use super::core::JarvisApp;
@@ -97,6 +100,29 @@ impl JarvisApp {
             .unwrap_or_else(|_| "jarvis-user".to_string());
         let identity = Identity::generate(&hostname);
 
+        // The relay now REQUIRES a signed `room_hello`. Build the ECDSA signer
+        // from the app's CryptoService identity (mirrors the pair path in
+        // pair.rs: `self.crypto.as_ref()...pair_frame_signer()`). If no crypto
+        // identity is present, hard-fail like the pair path rather than send an
+        // unsigned hello the relay will reject.
+        let signer = match self.crypto.as_ref() {
+            Some(crypto) => {
+                let pfs = crypto.pair_frame_signer();
+                let pubkey = pfs.pubkey_base64.clone();
+                Arc::new(RoomHelloSigner::new(
+                    pubkey,
+                    Box::new(move |payload: &str| pfs.sign_bytes(payload.as_bytes())),
+                ))
+            }
+            None => {
+                tracing::warn!(
+                    "Presence skipped: no CryptoService identity to sign room_hello \
+                     (relay requires a signed hello)"
+                );
+                return;
+            }
+        };
+
         let presence_config = PresenceConfig {
             relay_url: self.config.relay.url.clone(),
             room_id: self.config.presence.room_id.clone(),
@@ -114,7 +140,8 @@ impl JarvisApp {
         match rt {
             Ok(rt) => {
                 rt.spawn(async move {
-                    let mut client = jarvis_social::PresenceClient::new(identity, presence_config);
+                    let mut client = jarvis_social::PresenceClient::new(identity, presence_config)
+                        .with_signer(signer);
                     let mut event_rx = client.start();
 
                     loop {

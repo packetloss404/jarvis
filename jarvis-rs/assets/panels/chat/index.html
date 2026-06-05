@@ -1335,6 +1335,49 @@ const Identity = {
 };
 
 // =================================================================
+// SIGNED room_hello (member-id slot DoS fix)
+// =================================================================
+//
+// The relay REQUIRES every Room client to sign its room_hello with its ECDSA
+// identity. This builder reproduces the EXACT canonical bytes / payload the
+// relay's `room_auth` verifier (and the Rust clients) expect, so all four
+// clients emit a byte-identical signed hello.
+//
+//   canonical = "jarvis-room-hello-v1" 0x1F session_id 0x1F member_id 0x1F
+//               pubkey 0x1F nonce(decimal)
+//   payload   = base64(canonical)            // the string actually signed
+//   sig       = ECDSA-P256(payload)          // base64 P1363 (Identity.sign)
+//
+// The hello wire object is { type, session_id, member_id, pubkey, nonce, sig }.
+const RoomHelloSig = {
+  DOMAIN: 'jarvis-room-hello-v1',
+  SEP: '\x1F',
+
+  /** base64(canonical_bytes). All fields are ASCII; SEP is a single 0x1F byte,
+   * so a Latin-1 string + btoa reproduces the relay's base64 exactly. */
+  payload: function(sessionId, memberId, pubkey, nonce) {
+    var canonical = this.DOMAIN + this.SEP + sessionId + this.SEP + memberId +
+      this.SEP + pubkey + this.SEP + String(nonce);
+    return btoa(canonical);
+  },
+
+  /** Build the signed room_hello wire JSON (async: Identity.sign is IPC). */
+  build: async function(sessionId, memberId) {
+    var pubkey = Identity.pubkeyBase64 || '';
+    var nonce = Date.now(); // unix-epoch MILLISECONDS
+    var sig = await Identity.sign(this.payload(sessionId, memberId, pubkey, nonce));
+    return JSON.stringify({
+      type: 'room_hello',
+      session_id: sessionId,
+      member_id: memberId,
+      pubkey: pubkey,
+      nonce: nonce,
+      sig: sig,
+    });
+  },
+};
+
+// =================================================================
 // TOFU TRUST STORE
 // =================================================================
 
@@ -2103,13 +2146,18 @@ RoomConnection.prototype._open = function() {
 
   ws.onopen = function() {
     if (self.ws !== ws) return;
-    ws.send(JSON.stringify({
-      type: 'room_hello',
-      session_id: self.channelId,
-      member_id: self.memberId,
-    }));
-    self._startPing();
-    if (self.handlers.onOpen) self.handlers.onOpen();
+    // SIGNED room_hello: the relay rejects an unsigned/forged hello. Signing is
+    // async (crypto IPC), so build the hello then send if the socket is still
+    // current.
+    RoomHelloSig.build(self.channelId, self.memberId).then(function(hello) {
+      if (self.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(hello);
+      self._startPing();
+      if (self.handlers.onOpen) self.handlers.onOpen();
+    }).catch(function(e) {
+      try { console.error('room_hello signing failed', e); } catch (_) {}
+      try { ws.close(); } catch (_) {}
+    });
   };
 
   ws.onmessage = function(event) {
