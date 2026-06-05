@@ -16,6 +16,13 @@
 //! never call `create_session`, so every `relay_input`/`set_driver` they might
 //! attempt fails closed. Navigators emit `term_input`/`cursor`/`request_control`
 //! frames; the host re-validates each one in `app_state::pair::apply_pair_frame`.
+//!
+//! M3 (ENFORCED): every inbound frame is end-to-end ECDSA-signed and verified in
+//! `verify_signed_frame` BEFORE `apply_pair_frame` honors it. Under
+//! `require_signed_join` (the default) unsigned/unverifiable frames are dropped
+//! fail-closed, the host registers a navigator (`join_session`) only after its
+//! VERIFIED signed `Join`, host-only frames are accepted only from the pinned
+//! host, and `term_input` only from the verified current driver.
 
 #![allow(unused_variables)]
 
@@ -111,6 +118,24 @@ impl JarvisApp {
             return;
         };
 
+        // SECURITY (M3 — THE host-authority binding): the host created this
+        // session and KNOWS its own identity, so pin the host `(member_id,
+        // pubkey)` immediately — before any frame is processed. The shareable
+        // invite carries the host pubkey, and a navigator pins from it, so only
+        // this identity can ever drive host-only frames (closes the SessionMeta
+        // host-claim race). With no crypto the pubkey is empty and the host stays
+        // unpinned (host-only frames then fail closed under require_signed_join).
+        let host_pubkey = self
+            .crypto
+            .as_ref()
+            .map(|c| c.pubkey_base64.clone())
+            .unwrap_or_default();
+        self.pair_pin_host(Some(&member_id), &host_pubkey);
+
+        // The shareable invite carries BOTH the session id and the host pubkey
+        // (base64url) so the navigator can pin the host before processing frames.
+        let invite = crate::app_state::pair::make_invite(&session_id, &host_pubkey);
+
         // Register the session in the host's PairManager. The host is the initial
         // driver; member_id is the in-room user id (matches relay member id).
         if let (Some(manager), Some(rt)) =
@@ -139,11 +164,14 @@ impl JarvisApp {
         tracing::info!(pane_id, member = %member_id, "Pair session hosted");
 
         // Confirm to the host panel: hides the setup overlay, sets role/badge.
+        // `invite` is the shareable code (session_id + host pubkey); the panel
+        // shows/copies it. `session_id` is still sent for status correlation.
         self.send_pair_event_to_pane(
             pane_id,
             &serde_json::json!({
                 "event": "session_started",
                 "session_id": session_id,
+                "invite": invite,
                 "role": "host",
             }),
         );
@@ -175,10 +203,14 @@ impl JarvisApp {
             return;
         }
 
-        let session_id = match extract_string(payload, "session_id")
-            .or_else(|| extract_string(payload, "invite_code"))
+        // The panel sends the INVITE (base64url of session_id + host pubkey) as
+        // `invite_code`/`session_id`. Parse out BOTH the session id and the host
+        // pubkey so we can pin the host identity from the invite (the critical
+        // host-authority binding) before any frame is processed.
+        let raw_invite = match extract_string(payload, "invite_code")
+            .or_else(|| extract_string(payload, "session_id"))
         {
-            Some(s) if !s.is_empty() && s.len() <= 128 => s,
+            Some(s) if !s.is_empty() && s.len() <= 512 => s,
             _ => {
                 self.send_pair_event_to_pane(
                     pane_id,
@@ -187,6 +219,17 @@ impl JarvisApp {
                 return;
             }
         };
+        let (session_id, host_pubkey) =
+            match crate::app_state::pair::parse_invite(&raw_invite) {
+                Some((sid, pk)) if !sid.is_empty() && sid.len() <= 128 => (sid, pk),
+                _ => {
+                    self.send_pair_event_to_pane(
+                        pane_id,
+                        &serde_json::json!({ "event": "error", "message": "Invalid invite code." }),
+                    );
+                    return;
+                }
+            };
 
         let display_name = self.resolve_display_name(payload);
         self.pair_display_name = Some(display_name.clone());
@@ -203,6 +246,16 @@ impl JarvisApp {
         self.pair_member_id = None;
 
         self.start_pair();
+
+        // SECURITY (M3 — THE host-authority binding, navigator side): pin the
+        // host pubkey FROM THE INVITE now (after start_pair, which reset the auth
+        // roster) — before any frame is processed. The host member_id is learned
+        // from the first host-only frame that verifies against this pubkey.
+        // Without a host pubkey in the invite (bare/manual code) the navigator
+        // stays unpinned and host-only frames fail closed (the safe default).
+        if !host_pubkey.is_empty() {
+            self.pair_pin_host(None, &host_pubkey);
+        }
 
         let member_id = self.pair_member_id.clone().unwrap_or_default();
 
@@ -433,6 +486,20 @@ impl JarvisApp {
             } else {
                 "view"
             };
+            // The shareable invite (session id + host pubkey). Only meaningful
+            // for the actual host (who is the host_user_id); for a navigator on
+            // this authoritative branch it would be wrong, but a navigator never
+            // owns a live PairManager session, so this branch is the host's.
+            let invite = if session.host_user_id == member_id {
+                let host_pubkey = self
+                    .crypto
+                    .as_ref()
+                    .map(|c| c.pubkey_base64.clone())
+                    .unwrap_or_default();
+                crate::app_state::pair::make_invite(&session.session_id, &host_pubkey)
+            } else {
+                session.session_id.clone()
+            };
             let participants: Vec<serde_json::Value> = session
                 .participants
                 .values()
@@ -446,6 +513,7 @@ impl JarvisApp {
                 .collect();
             serde_json::json!({
                 "session_id": session.session_id,
+                "invite": invite,
                 "member_id": member_id,
                 "role": role,
                 "host_user_id": session.host_user_id,

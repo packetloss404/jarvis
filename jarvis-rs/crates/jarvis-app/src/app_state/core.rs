@@ -118,6 +118,22 @@ pub struct JarvisApp {
     /// start/join so a navigator can announce it via a `Join` frame on connect.
     pub(super) pair_display_name: Option<String>,
     pub(super) pair_key_tx: Option<tokio::sync::watch::Sender<Option<[u8; 32]>>>,
+    /// M3 mid-join replay: a bounded ring buffer of the HOST's recent raw PTY
+    /// output. On `MemberJoined` the host replays it as a `Snapshot` frame so a
+    /// late joiner's terminal starts populated instead of blank. Empty / unused
+    /// on navigators. Reset on each `start_pair`.
+    pub(super) pair_snapshot_buf: super::pair::PairSnapshotBuffer,
+    /// M3 snapshot-on-join dedup: the host's MONOTONIC cumulative count of PTY
+    /// output bytes fanned to the room. Stamped onto each `pty_output` frame and
+    /// onto the join `Snapshot`, so a late joiner can drop live chunks the
+    /// snapshot already covers (`offset <= snapshot offset`). Reset on each
+    /// `start_pair`; unused on navigators.
+    pub(super) pair_output_offset: u64,
+    /// M3 per-session authentication roster: member→identity pubkey (TOFU),
+    /// per-sender anti-replay seq counters, and the pinned host. Consulted by
+    /// `verify_signed_frame` before any inbound frame is applied. Reset on each
+    /// `start_pair`.
+    pub(super) pair_auth: super::pair::PairAuthState,
 
     pub(super) chat_stream_host: Option<ChatStreamHostState>,
     pub(super) last_chat_stream_frame_at: Instant,
@@ -210,6 +226,9 @@ impl JarvisApp {
             pair_host_pane_id: None,
             pair_display_name: None,
             pair_key_tx: None,
+            pair_snapshot_buf: super::pair::PairSnapshotBuffer::default(),
+            pair_output_offset: 0,
+            pair_auth: super::pair::PairAuthState::default(),
             chat_stream_host: None,
             last_chat_stream_frame_at: Instant::now(),
             chat_stream_capture_tx: None,

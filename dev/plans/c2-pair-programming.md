@@ -126,38 +126,75 @@ New `assets/panels/pair/index.html` (top-level panel, served `jarvis://localhost
 7. **Relay treats payloads opaque** → host is trust anchor; re-validate term_input/request_control;
    ignore pty_output/driver_changed/snapshot claimed by non-host members.
 
-## 6. Security status / M3 TODO (current limitations)
+## 6. Security status (M3 ENFORCED)
 
-The shipped M1/M2 slice is **experimental** and `collab.enabled` defaults
-**false**. The relay room key (derived from the session id, same scheme as chat
-channels) gives **confidentiality from the relay only** — it is a shared
-symmetric secret across all members and is **NOT a security boundary between
-members**. There is currently **no per-member authentication**: `from` /
-`member_id` are self-asserted. Concretely, today:
+`collab.enabled` still defaults **false** and the feature remains
+**experimental**, but the M3 hardening is now **implemented and enforced**.
+Every pair frame is an **end-to-end ECDSA-signed `SignedPairFrame`** (per-app
+identity key), verified client-side in
+`app_state::pair::PairAuthState::verify_signed_frame` BEFORE any frame is
+honored. With `require_signed_join` (the default) the room key is
+**confidentiality-only** and the **signatures are the security boundary between
+members**.
 
-- A member can **impersonate the driver** and inject keystrokes (host-only
-  re-validates that `from == driver`, but `from` itself is unauthenticated).
-- **Host-only frames** (`pty_output` / `driver_changed` / `snapshot` /
-  `session_meta`) are **not origin-checked**, so any member can forge them.
-- The **host `member_id` slot can be hijacked** (no ownership proof).
-- **`require_signed_join` (default true) is NOT enforced** — the config flag is
-  read but no signature is verified. Its doc comment is marked as an M3
-  placeholder.
+What is now ENFORCED:
 
-Mitigations already in place (this slice):
-- `collab.enabled` defaults **false**; a `tracing::warn!` fires when pair
-  starts (gated on `collab.enabled`) stating sessions are unauthenticated.
-- The session id is the room **capability secret** and is **no longer logged at
-  info** (truncated `first6…(len=N)` fingerprint at debug) in the app handlers,
-  `jarvis-social` `PairManager`, and the relay Room path.
-- `term_input` is length-capped (`MAX_TERM_INPUT_BYTES = 4096`) both on send and
-  on the host before `write_input`.
-- A `// SECURITY (M3):` block at the top of `app_state::pair::apply_pair_frame`
-  enumerates the missing host-authority / anti-impersonation checks.
+- **Per-member authentication (TOFU).** First verified frame from a `member_id`
+  pins `member_id → pubkey`; a later frame from that id with a different pubkey
+  is dropped (`PubkeyMismatch`). The pin is `Option<String>` — an empty pubkey
+  is never stored as an identity, so a legacy-empty member is unclaimable.
+- **member_id + pubkey bound into the signature.** The canonical signing bytes
+  now include the `member_id` and `pubkey` (plus a fixed crypto domain tag
+  `jarvis-pair-sig-v1`, the `session_id`, `frame_type`, `epoch`, `seq`, and the
+  inner frame JSON). A frame can no longer be relabeled to a different
+  `member_id` to dodge the per-member seq tracker, and the pair signature can
+  never be cross-presented to the relay/pairing/theme signers that share the
+  identity key.
+- **Driver-spoofing rejected.** A navigator frame's inner `from` is bound to the
+  verified signer (`term_input` from a non-signer `from` is dropped); the
+  `term_input` driver-gate is re-checked against the host's `PairManager`.
+- **Host-authority bound to the INVITE capability (the critical fix).** The host
+  identity is pinned **out of band** — the HOST pins its own `(member_id,
+  pubkey)` at `pair_start`; the NAVIGATOR pins the host **pubkey from the
+  invite** (the shareable invite is `base64url(session_id ":" host_pubkey)`)
+  before any frame is processed. Host-only frames
+  (`pty_output`/`resize`/`driver_changed`/`snapshot`/`session_meta`) are honored
+  ONLY when the verified signer's pubkey matches the pinned host pubkey; while no
+  host is pinned they **fail closed**. This closes the prior
+  first-`SessionMeta`-wins race where any member could forge a `SessionMeta` to
+  claim the host slot.
+- **Anti-replay via a signed per-connection `epoch`.** Each (re)connect picks a
+  strictly-greater `epoch`; recipients track per-member `(epoch, last_seq)` and
+  accept iff `epoch > stored.epoch` (reset seq) OR `epoch == stored.epoch && seq
+  > stored.last_seq`. A lower epoch or non-increasing seq is dropped. The old
+  `RECONNECT_SEQ_RESET_WINDOW` downward-reset window (a replay vector) is
+  **removed**, and the `seq==1` reconnect-drop edge is gone.
+- **`deny_unknown_fields`** on `SignedPairFrame` and `PairFrame` so a peer can't
+  append/reorder fields and keep a valid signature.
+- **Single signing seam.** Outbound frames are signed exactly once in the
+  worker (`pair_room_client::sign_frame`); the dead main-thread
+  `sign_pair_frame` + `PairRoomCommand::SendSigned` + the duplicate
+  `outbound_seq` were removed.
 
-**Deferred to M3** (see §4 M3 + risks #2/#7): signed room join
-(`require_signed_join`: host verifies an ECDSA signature over the session id via
-the `crypto` sign/verify IPC), host-authority enforcement (drop host-only frames
-not actually from the host; authenticate `from` before honoring
-`term_input`/`request_control`), and optional per-member ECDH so each member has
-a distinct key rather than the shared room key.
+Other mitigations retained: `collab.enabled` defaults false (a `warn!` fires if
+`require_signed_join` is off); the `session_id` is a capability secret never
+logged at info (only a `first6…(len=N)` fingerprint at debug); `term_input` is
+length-capped (`MAX_TERM_INPUT_BYTES = 4096`) on send and on the host.
+
+### RESIDUAL (deferred — needs a relay change + redeploy)
+
+**Relay member_id slot DoS.** The relay assigns the in-room slot from a
+**self-asserted** `member_id` and **reconnect-replaces** it, and that layer is
+unsigned. A peer who knows the `session_id` can therefore claim or churn a
+member_id slot — disrupting or hijacking the SLOT for **DENIAL only**. It cannot
+forge CONTENT: signed frames make the host identity (pinned from the invite
+pubkey) and every member identity non-forgeable, so the attacker can deny/disrupt
+but never impersonate. Fully closing this requires the **relay** to bind slots to
+identities (a relay protocol change + redeploy). The relay (`jarvis-relay`) is
+intentionally **left UNCHANGED** for this M3 slice. See the `RESIDUAL` note in
+the `// SECURITY (M3 — ENFORCED)` block atop
+`app_state::pair::apply_pair_frame`.
+
+Possible future work: optional per-member ECDH so each member has a distinct key
+rather than the shared room key (confidentiality between members, not just from
+the relay).

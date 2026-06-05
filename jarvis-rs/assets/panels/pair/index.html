@@ -245,10 +245,24 @@ body {
 }
 .ghost-cursor {
   position: absolute;
-  width: 1px;
+  width: 1ch;
   height: 1em;
   pointer-events: none;
+  /* The member's color is carried by `color` (set inline via style.color); the
+     caret block fill + label both reference it via currentColor. A 2px left
+     edge keeps a crisp caret even when the translucent block is faint. */
+  border-left: 2px solid currentColor;
+  box-sizing: border-box;
   transition: transform 80ms linear;
+}
+/* Translucent fill on a pseudo-element so element-level opacity does NOT fade
+   the name label below. */
+.ghost-cursor::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0.4;
 }
 .ghost-cursor::after {
   content: attr(data-name);
@@ -521,6 +535,7 @@ var Identity = {
 // keystrokes, can request control). Defaults to 'view' until pair_status says.
 var State = {
   sessionId: null,
+  invite: null,          // shareable invite (session_id + host pubkey); host only
   memberId: null,        // our own member/user id in the room
   role: 'view',
   hostUserId: null,
@@ -529,6 +544,11 @@ var State = {
   participants: {},      // user_id -> { user_id, display_name, role }
   requestPending: false,
   inSession: false,
+  // Snapshot-on-join dedup: after replaying a join snapshot taken at the host's
+  // monotonic byte `offset`, drop any live pty_output chunk whose `offset` is
+  // at/below it (the snapshot already contains those bytes). 0 = no snapshot
+  // applied yet (dedup disabled — apply everything).
+  snapshotOffset: 0,
 };
 
 // Deterministic color per member id (for ghost cursors / dots).
@@ -574,6 +594,10 @@ var ro = new ResizeObserver(function () {
 });
 ro.observe(container);
 
+// Hide/show ghost carets as the user scrolls into / out of scrollback
+// (viewport-relative ghost geometry is only valid at the live bottom).
+term.onScroll(function () { syncGhostLayerVisibility(); });
+
 // -----------------------------------------------------------------
 // Role-gated input. The host never routes onData here (its PTY input
 // is handled by Rust directly). Driver sends pair_input. View-only
@@ -612,29 +636,26 @@ function sendIpc(kind, payload) {
 // NEVER innerHTML.  (security requirement)
 // =================================================================
 
-function writePtyOutput(b64OrStr) {
-  if (b64OrStr == null) return;
-  // Rust may deliver either a base64 string (PairFrame pty_output) or a
-  // raw string. Try base64 decode first; on failure write as-is.
-  var data = b64OrStr;
-  if (typeof b64OrStr === 'string') {
-    try {
-      var bin = atob(b64OrStr);
-      var bytes = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      term.write(bytes);
-      return;
-    } catch (e) {
-      // not base64 — write the literal string
-      term.write(b64OrStr);
-      return;
-    }
+// Decode a base64 string into raw bytes. pty_output / snapshot `data` is ALWAYS
+// base64 from Rust (PTY output is arbitrary bytes — escape sequences, partial
+// UTF-8 — so it is base64-encoded losslessly across the IPC boundary). No
+// "looks like base64" heuristic: a heuristic could mis-handle a chunk that
+// happens to be valid UTF-8 base64-looking text and corrupt the stream.
+function b64ToBytes(b64) {
+  var bin = atob(b64);
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function writePtyOutput(b64) {
+  if (b64 == null) return;
+  if (typeof b64 !== 'string') return; // frames always carry a base64 string
+  try {
+    term.write(b64ToBytes(b64));
+  } catch (e) {
+    // Malformed base64 — drop the chunk rather than write garbage.
   }
-  if (Array.isArray(b64OrStr)) {
-    term.write(new Uint8Array(b64OrStr));
-    return;
-  }
-  term.write(String(data));
 }
 
 function applySnapshot(b64OrStr, cols, rows) {
@@ -642,6 +663,9 @@ function applySnapshot(b64OrStr, cols, rows) {
   if (cols && rows) {
     try { term.resize(cols, rows); } catch (e) { /* ignore */ }
   }
+  // The grid was reset; drop any ghost carets parked at now-stale cells. Live
+  // cursor frames re-create them at their current positions.
+  clearGhostCursors();
   writePtyOutput(b64OrStr);
 }
 
@@ -703,6 +727,13 @@ var UI = {
     else { el.textContent = ''; }
     // Request-control button only for view-only navigators.
     this.requestWrapEl.classList.toggle('visible', role === 'view');
+    // Hide the LOCAL xterm caret for a view-only navigator: it can't type, so
+    // its caret only tracks the host's output and would be a misleading second
+    // cursor alongside the host's ghost. Host/driver keep their caret.
+    try {
+      term.options.cursorStyle = (role === 'view') ? 'underline' : 'block';
+      term.options.cursorBlink = (role !== 'view');
+    } catch (e) { /* ignore */ }
   },
 
   showSetup(show) {
@@ -787,30 +818,71 @@ var UI = {
 // =================================================================
 
 var ghostCursors = {}; // member_id -> element
-function updateGhostCursor(memberId, row, col) {
-  if (memberId === State.memberId) return;
+// Best-effort xterm cell geometry (CSS px) for positioning ghost carets.
+function cellGeometry() {
+  var dims = (term._core && term._core._renderService && term._core._renderService.dimensions) || null;
+  var cw = 8, ch = 17;
+  if (dims && dims.css && dims.css.cell) {
+    if (dims.css.cell.width) cw = dims.css.cell.width;
+    if (dims.css.cell.height) ch = dims.css.cell.height;
+  }
+  return { cw: cw, ch: ch };
+}
+function ghostLabel(memberId) {
+  var nm = State.participants[memberId];
+  return (nm && nm.display_name) ? nm.display_name : memberId;
+}
+// True when the viewport is scrolled up into scrollback. Ghost carets are
+// positioned against the VISIBLE grid (viewport-relative rows), so while the
+// user is scrolled the geometry drifts and a ghost would point at the wrong
+// cell — hide the whole ghost layer until they return to the live bottom.
+function isScrolledBack() {
+  var buf = term.buffer && term.buffer.active;
+  if (!buf) return false;
+  // viewportY < baseY means the viewport top is above the live region.
+  return buf.viewportY < buf.baseY;
+}
+function syncGhostLayerVisibility() {
   var layer = document.getElementById('ghost-layer');
+  if (layer) layer.style.display = isScrolledBack() ? 'none' : '';
+}
+
+function updateGhostCursor(memberId, row, col) {
+  if (memberId === State.memberId) return;   // never draw our own caret
+  var layer = document.getElementById('ghost-layer');
+  if (!layer) return;
+  // Don't position ghosts while scrolled back (geometry would be wrong).
+  if (isScrolledBack()) { layer.style.display = 'none'; return; }
+  layer.style.display = '';
   var el = ghostCursors[memberId];
   if (!el) {
     el = document.createElement('div');
     el.className = 'ghost-cursor';
     el.style.color = colorForMember(memberId);
-    var nm = State.participants[memberId];
-    el.setAttribute('data-name', (nm && nm.display_name) ? nm.display_name : memberId);
     layer.appendChild(el);
     ghostCursors[memberId] = el;
   }
-  // Approximate cell geometry from xterm's renderer dimensions.
-  var dims = (term._core && term._core._renderService && term._core._renderService.dimensions) || null;
-  var cw = 8, ch = 17;
-  if (dims && dims.css && dims.css.cell) { cw = dims.css.cell.width; ch = dims.css.cell.height; }
-  el.style.height = ch + 'px';
-  el.style.transform = 'translate(' + (col * cw) + 'px,' + (row * ch) + 'px)';
+  // Refresh the label each update — a member's real display name may arrive
+  // (session_meta / member_joined) AFTER its first cursor frame. setAttribute +
+  // CSS attr(data-name) keeps this XSS-safe (never innerHTML).
+  el.setAttribute('data-name', ghostLabel(memberId));
+
+  var g = cellGeometry();
+  // Clamp into the visible grid so a stale/relative position can't park the
+  // caret outside the terminal.
+  var c = Math.max(0, Math.min(col, term.cols - 1));
+  var r = Math.max(0, Math.min(row, term.rows - 1));
+  el.style.width = g.cw + 'px';          // caret spans one cell
+  el.style.height = g.ch + 'px';
+  el.style.transform = 'translate(' + (c * g.cw) + 'px,' + (r * g.ch) + 'px)';
 }
 function removeGhostCursor(memberId) {
   var el = ghostCursors[memberId];
   if (el && el.parentNode) el.parentNode.removeChild(el);
   delete ghostCursors[memberId];
+}
+function clearGhostCursors() {
+  Object.keys(ghostCursors).forEach(removeGhostCursor);
 }
 
 // =================================================================
@@ -837,9 +909,11 @@ function flashRequestControl() {
 
 function applyStatus(s) {
   if (!s) return;
-  if (s.session_id !== undefined) {
-    State.sessionId = s.session_id;
-    UI.setSessionCode(s.session_id);
+  if (s.session_id !== undefined) State.sessionId = s.session_id;
+  if (s.invite !== undefined) State.invite = s.invite;
+  // Show the shareable invite (host) when present, else the session id.
+  if (s.invite !== undefined || s.session_id !== undefined) {
+    UI.setSessionCode(State.invite || State.sessionId);
   }
   if (s.member_id !== undefined) State.memberId = s.member_id;
   if (s.host_user_id !== undefined) State.hostUserId = s.host_user_id;
@@ -869,11 +943,24 @@ function applyEvent(ev) {
 
     // ---- terminal stream (host-authoritative) ----
     case 'pty_output':
+      // Dedup against the join snapshot: a chunk whose monotonic `offset` is
+      // at/below the applied snapshot offset is already on screen (the snapshot
+      // replayed it), so drop it to avoid garbling the terminal with overlapping
+      // writes. offset 0 (legacy / no snapshot) disables dedup.
+      if (ev.offset && State.snapshotOffset && ev.offset <= State.snapshotOffset) break;
       writePtyOutput(ev.data);
       break;
 
     case 'snapshot':
+      // The host fans a mid-join snapshot to every member (the relay has no
+      // per-member addressing), but only the late joiner it is addressed to
+      // should reset + replay. An empty `target` is a legacy broadcast snapshot
+      // (apply it); a non-empty `target` must match our own member id.
+      if (ev.target && ev.target !== State.memberId) break;
       applySnapshot(ev.data, ev.cols, ev.rows);
+      // Remember the snapshot's byte offset so subsequent live pty_output chunks
+      // the snapshot already covers are deduped (dropped) above.
+      State.snapshotOffset = ev.offset || 0;
       if (ev.driver !== undefined) {
         State.driverUserId = ev.driver;
         UI.renderParticipants();
@@ -914,7 +1001,11 @@ function applyEvent(ev) {
 
     case 'session_started':
       State.inSession = true;
-      if (ev.session_id !== undefined) { State.sessionId = ev.session_id; UI.setSessionCode(ev.session_id); }
+      if (ev.session_id !== undefined) State.sessionId = ev.session_id;
+      if (ev.invite !== undefined) State.invite = ev.invite;
+      if (ev.invite !== undefined || ev.session_id !== undefined) {
+        UI.setSessionCode(State.invite || State.sessionId);
+      }
       if (ev.role !== undefined) { State.role = ev.role; UI.setRole(ev.role); }
       UI.setConnState('connected');
       UI.showSetup(false);
@@ -1126,14 +1217,14 @@ document.addEventListener('DOMContentLoaded', function () {
     try { term.reset(); } catch (e) { /* ignore */ }
   });
 
-  // Copy invite code.
+  // Copy invite code (the shareable invite if present, else the session id).
   UI.sessionCodeEl.addEventListener('click', function () {
-    if (!State.sessionId) return;
+    var code = State.invite || State.sessionId;
+    if (!code) return;
     try {
-      navigator.clipboard.writeText(State.sessionId);
-      var old = UI.sessionCodeEl.textContent;
+      navigator.clipboard.writeText(code);
       UI.sessionCodeEl.textContent = 'copied!';
-      setTimeout(function () { UI.sessionCodeEl.textContent = State.sessionId; }, 900);
+      setTimeout(function () { UI.sessionCodeEl.textContent = code; }, 900);
     } catch (e) { /* ignore */ }
   });
 
@@ -1165,17 +1256,28 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // Local cursor position → pair_cursor (ghost cursor for the other side).
-// xterm doesn't fire a dedicated cursor-move event, so report after writes
-// and on key activity, throttled to ~20Hz.
+// xterm doesn't fire a dedicated cursor-move event, so report on its
+// onCursorMove, throttled to ~20Hz.
+//
+// Only the HOST and DRIVER emit: their cursor is the authoritative terminal
+// caret that navigators benefit from seeing. A view-only navigator's local
+// xterm caret merely tracks the host's output, so reporting it would be noise
+// (and it can't move the shared terminal anyway).
+//
+// The reported `row` is VIEWPORT-RELATIVE (`cursorY`, not `cursorY + baseY`) so
+// it lines up with the receiver's visible grid regardless of either side's
+// scrollback offset; `updateGhostCursor` renders against the viewport-relative
+// ghost layer.
 var _lastCursor = { row: -1, col: -1 };
 var _cursorThrottle = 0;
 function reportCursor() {
   if (!State.inSession) return;
+  if (State.role !== 'host' && State.role !== 'driver') return;
   var now = Date.now();
   if (now - _cursorThrottle < 50) return;
   var buf = term.buffer && term.buffer.active;
   if (!buf) return;
-  var row = buf.cursorY + buf.baseY;
+  var row = buf.cursorY;   // viewport-relative
   var col = buf.cursorX;
   if (row === _lastCursor.row && col === _lastCursor.col) return;
   _lastCursor.row = row;

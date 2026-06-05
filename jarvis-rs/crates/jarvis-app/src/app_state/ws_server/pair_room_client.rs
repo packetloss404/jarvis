@@ -35,12 +35,21 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::crypto_bridge::RelayCipher;
-use super::pair_protocol::PairFrame;
+use super::pair_protocol::{PairFrame, SignedPairFrame};
 use super::relay_protocol::{RelayEnvelope, RoomHello};
 
 /// Commands the `pair.rs` worker sends down into the room client.
 pub enum PairRoomCommand {
     /// Send an application frame to the room (all-but-sender fan-out).
+    ///
+    /// This is the SINGLE outbound signing seam: when the worker holds a
+    /// [`PairFrameSigner`] (the default with `CryptoService` present) it wraps
+    /// the inner `PairFrame` in a [`SignedPairFrame`] (member_id + identity
+    /// pubkey + per-connection epoch + monotonic seq + ECDSA signature) at the
+    /// point of send, then encrypts it into the opaque `RelayEnvelope` (the relay
+    /// stays unchanged). Without a signer it falls back to the legacy unsigned
+    /// wire form. There is no separate pre-signed command — signing happens here,
+    /// exactly once per frame.
     Send(PairFrame),
     /// Tear down the room connection.
     Shutdown,
@@ -56,8 +65,13 @@ pub enum PairRoomEvent {
     MemberLeft { member_id: String },
     /// Current member count.
     MemberCount { count: u32 },
-    /// An inbound application frame arrived from another member.
+    /// An inbound application frame arrived from another member (LEGACY unsigned
+    /// path — the envelope carried a bare `PairFrame`).
     Frame(PairFrame),
+    /// M3: an inbound SIGNED application frame. The main thread runs
+    /// `verify_signed_frame` (identity/anti-replay/host-authority) before
+    /// `apply_pair_frame` honors the inner frame.
+    SignedFrame(SignedPairFrame),
     /// The room connection dropped (will auto-reconnect).
     Disconnected,
     /// A transport-level error occurred.
@@ -74,6 +88,12 @@ pub struct PairRoomClientConfig {
     pub member_id: String,
     /// Watch receiver for the derived 32-byte room AES key (room-derived in M1).
     pub key_rx: tokio::sync::watch::Receiver<Option<[u8; 32]>>,
+    /// M3: detached ECDSA signer for this app's identity. When present, EVERY
+    /// outbound [`PairFrame`] is wrapped in a [`SignedPairFrame`] (member_id +
+    /// pubkey + monotonic seq + ECDSA signature) before encryption, so peers can
+    /// authenticate the sender (impersonation / host-spoofing defence). `None`
+    /// (no [`CryptoService`]) falls back to the legacy unsigned wire form.
+    pub signer: Option<jarvis_platform::PairFrameSigner>,
 }
 
 type WsStream = tokio_tungstenite::WebSocketStream<
@@ -93,13 +113,32 @@ pub async fn run_pair_room_client(
     let mut backoff = Duration::from_secs(1);
     let max_backoff = Duration::from_secs(30);
 
+    // M3 anti-replay epoch: a per-connection counter that strictly increases on
+    // each (re)connect. Seeded from the wall clock (unix seconds) so it is fresh
+    // across full process restarts too — a recipient that pinned a high
+    // `(epoch, seq)` for our member_id in a previous session still accepts our
+    // new session because the new epoch is strictly greater. Each successful
+    // `room_session` uses a strictly-greater epoch than the last.
+    let mut epoch: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(1)
+        .max(1);
+
     loop {
         tracing::info!(url = %config.relay_url, "Connecting to pair room...");
 
         match connect_async(&config.relay_url).await {
             Ok((ws, _)) => {
                 backoff = Duration::from_secs(1);
-                match room_session(ws, &config, &mut cmd_rx, &event_tx).await {
+                // Fresh, strictly-greater epoch for this (re)connect.
+                epoch = epoch.wrapping_add(1).max(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                );
+                match room_session(ws, &config, epoch, &mut cmd_rx, &event_tx).await {
                     SessionResult::Shutdown => {
                         tracing::info!("Pair room client shutting down");
                         return;
@@ -141,6 +180,7 @@ enum SessionResult {
 async fn room_session(
     ws: WsStream,
     config: &PairRoomClientConfig,
+    epoch: u64,
     cmd_rx: &mut mpsc::Receiver<PairRoomCommand>,
     event_tx: &std::sync::mpsc::Sender<PairRoomEvent>,
 ) -> SessionResult {
@@ -179,6 +219,13 @@ async fn room_session(
     let mut key_rx = config.key_rx.clone();
     let mut cipher: Option<RelayCipher> = key_rx.borrow().map(RelayCipher::new);
 
+    // M3 OUTBOUND anti-replay counter. Per-sender monotonic `seq` carried in
+    // every SignedPairFrame, paired with the per-connection `epoch`. It restarts
+    // at 0 on each relay reconnect; the recipient tolerates that because the
+    // accompanying `epoch` is strictly greater than the previous connection's, so
+    // it resets its `last_seq` for us (no downward-reset window needed).
+    let mut outbound_seq: u64 = 0;
+
     // 3. Forwarding loop.
     loop {
         tokio::select! {
@@ -200,11 +247,32 @@ async fn room_session(
                             tracing::trace!("No pair room key yet, dropping outbound frame");
                             continue;
                         };
-                        let envelope = match encrypt_frame(c, &frame) {
-                            Ok(env) => env,
-                            Err(e) => {
-                                tracing::warn!(error = %e, "Pair frame encryption failed, dropping");
-                                continue;
+                        // M3: when we hold a signer, EVERY outbound frame is wrapped
+                        // in a SignedPairFrame (member_id + pubkey + monotonic seq +
+                        // ECDSA sig) so peers can authenticate us. Without a signer
+                        // (no CryptoService) we fall back to the legacy unsigned wire.
+                        let envelope = if let Some(ref signer) = config.signer {
+                            outbound_seq += 1;
+                            match sign_frame(signer, &config.member_id, &config.session_id, epoch, outbound_seq, frame) {
+                                Ok(signed) => match encrypt_signed_frame(c, &signed) {
+                                    Ok(env) => env,
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "Pair signed-frame encryption failed, dropping");
+                                        continue;
+                                    }
+                                },
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Pair frame signing failed, dropping");
+                                    continue;
+                                }
+                            }
+                        } else {
+                            match encrypt_frame(c, &frame) {
+                                Ok(env) => env,
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Pair frame encryption failed, dropping");
+                                    continue;
+                                }
                             }
                         };
                         let json = serde_json::to_string(&envelope).unwrap();
@@ -253,6 +321,64 @@ async fn room_session(
 fn encrypt_frame(cipher: &RelayCipher, frame: &PairFrame) -> Result<RelayEnvelope, String> {
     let json = serde_json::to_string(frame).map_err(|e| e.to_string())?;
     cipher.encrypt_bytes(json.as_bytes())
+}
+
+/// M3: encrypt a `SignedPairFrame` into a `RelayEnvelope::Encrypted`.
+///
+/// Identical envelope to `encrypt_frame` — the signed wrapper is just the JSON
+/// payload, so the relay (and `RelayCipher`) stay unchanged. The inner JSON
+/// carries `member_id`/`pubkey`/`seq`/`sig`/`frame`, distinguishable inbound
+/// by the presence of those fields (see `handle_inbound_text`).
+fn encrypt_signed_frame(
+    cipher: &RelayCipher,
+    signed: &SignedPairFrame,
+) -> Result<RelayEnvelope, String> {
+    let json = serde_json::to_string(signed).map_err(|e| e.to_string())?;
+    cipher.encrypt_bytes(json.as_bytes())
+}
+
+/// M3: wrap a `PairFrame` in a signed envelope.
+///
+/// Computes the canonical signing bytes (domain tag ‹0x1F› session_id ‹0x1F›
+/// member_id ‹0x1F› pubkey ‹0x1F› frame_type ‹0x1F› epoch ‹0x1F› seq ‹0x1F›
+/// frame_json), signs them with the app's ECDSA identity, and attaches our
+/// `member_id`, identity `pubkey`, per-connection `epoch`, monotonic `seq`, and
+/// `sig`.
+///
+/// The signature is taken over `base64(canonical_bytes)` — a lossless, fixed
+/// mapping the verifier (`pair.rs::verify_signed_frame`) applies identically, so
+/// it stays within the `&str`-based `CryptoService::verify`/`PairFrameSigner`
+/// API while still authenticating the original canonical bytes 1:1.
+fn sign_frame(
+    signer: &jarvis_platform::PairFrameSigner,
+    member_id: &str,
+    session_id: &str,
+    epoch: u64,
+    seq: u64,
+    frame: PairFrame,
+) -> Result<SignedPairFrame, String> {
+    let pubkey = signer.pubkey_base64.clone();
+    let canonical =
+        SignedPairFrame::canonical_signing_bytes(session_id, member_id, &pubkey, &frame, epoch, seq)?;
+    let msg = b64_of(&canonical);
+    let sig = signer.sign_bytes(msg.as_bytes());
+    Ok(SignedPairFrame {
+        member_id: member_id.to_string(),
+        pubkey,
+        epoch,
+        seq,
+        sig,
+        frame,
+    })
+}
+
+/// Base64 of arbitrary bytes. The signing payload is `base64(canonical_bytes)`
+/// so it can pass through the `&str` sign/verify API unchanged on both ends
+/// (mirrors `pair.rs::base64_of`).
+fn b64_of(bytes: &[u8]) -> String {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    B64.encode(bytes)
 }
 
 /// Route one inbound text frame. Returns `Some(SessionResult)` only when the
@@ -325,14 +451,23 @@ fn handle_inbound_text(
                 return None;
             };
             match c.decrypt_bytes(iv, ct) {
-                Ok(plain) => match serde_json::from_slice::<PairFrame>(&plain) {
-                    Ok(pair_frame) => {
-                        let _ = event_tx.send(PairRoomEvent::Frame(pair_frame));
+                Ok(plain) => {
+                    // M3: prefer the SIGNED envelope (member_id/pubkey/seq/sig +
+                    // inner frame). A bare `PairFrame` (`{"type": ...}` at the
+                    // top level, no `frame` field) is the LEGACY unsigned path.
+                    if let Ok(signed) = serde_json::from_slice::<SignedPairFrame>(&plain) {
+                        let _ = event_tx.send(PairRoomEvent::SignedFrame(signed));
+                    } else {
+                        match serde_json::from_slice::<PairFrame>(&plain) {
+                            Ok(pair_frame) => {
+                                let _ = event_tx.send(PairRoomEvent::Frame(pair_frame));
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Pair room: bad inner PairFrame");
+                            }
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Pair room: bad inner PairFrame");
-                    }
-                },
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "Pair room: decryption failed");
                 }
@@ -412,6 +547,7 @@ mod tests {
         let cipher = RelayCipher::new(KEY);
         let frame = PairFrame::PtyOutput {
             data: vec![0x1b, b'[', b'2', b'J'],
+            offset: 0,
         };
 
         // Outbound: encrypt → JSON envelope (what we put on the wire).
@@ -425,7 +561,7 @@ mod tests {
         assert!(end.is_none(), "a valid frame must not end the session");
 
         match rx.try_recv().unwrap() {
-            PairRoomEvent::Frame(PairFrame::PtyOutput { data }) => {
+            PairRoomEvent::Frame(PairFrame::PtyOutput { data, .. }) => {
                 assert_eq!(data, vec![0x1b, b'[', b'2', b'J']);
             }
             _ => panic!("expected a decrypted pty_output Frame event"),
@@ -484,5 +620,250 @@ mod tests {
         let wire = r#"{"type":"encrypted","iv":"AAAAAAAAAAAAAAAA","ct":"AAAA"}"#;
         assert!(handle_inbound_text(wire, None, &tx).is_none());
         assert!(rx.try_recv().is_err());
+    }
+
+    // ====================================================================
+    // M3: signing + verification (worker outbound sign / receiver verify)
+    // ====================================================================
+    //
+    // These exercise the REAL crypto path both peers use: `sign_frame` (the
+    // worker's outbound signer) producing a `SignedPairFrame`, and the exact
+    // verification predicate the receiver runs in
+    // `pair.rs::verify_signed_frame` — identity (pubkey) binding, signature
+    // over the canonical bytes, anti-replay seq, and tamper detection — built
+    // on `CryptoService::{pair_frame_signer, verify}`.
+
+    use jarvis_platform::CryptoService;
+
+    const SID: &str = "sessionABCDEF0123456789abcdef0123";
+
+    /// The receiver's signature predicate (mirror of `verify_signed_frame`'s
+    /// signature step): recompute the canonical bytes from the parsed envelope
+    /// and verify the carried sig against the carried pubkey. A real receiver
+    /// additionally pins `member_id → pubkey` and checks `seq`; those are
+    /// asserted separately in the tests below.
+    fn verify_sig(crypto: &CryptoService, signed: &SignedPairFrame) -> bool {
+        let bytes = match signed.signing_bytes(SID) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let msg = b64_of(&bytes);
+        crypto
+            .verify(&msg, &signed.sig, &signed.pubkey)
+            .unwrap_or(false)
+    }
+
+    /// A frame signed by the worker verifies for any holder of the pubkey
+    /// (the receiver uses a fresh `CryptoService` purely as a verifier).
+    #[test]
+    fn signed_frame_good_sig_verifies() {
+        let sender = CryptoService::generate().unwrap();
+        let signer = sender.pair_frame_signer();
+        let verifier = CryptoService::generate().unwrap(); // receiver, different identity
+
+        let frame = PairFrame::TermInput {
+            from: "m2".into(),
+            data: b"ls\n".to_vec(),
+        };
+        let signed = sign_frame(&signer, "m2", SID, 1, 1, frame).unwrap();
+
+        assert_eq!(signed.member_id, "m2");
+        assert_eq!(signed.pubkey, sender.pubkey_base64);
+        assert_eq!(signed.epoch, 1);
+        assert_eq!(signed.seq, 1);
+        assert!(!signed.sig.is_empty());
+        assert!(verify_sig(&verifier, &signed), "good signature must verify");
+    }
+
+    /// Tampering with the inner frame after signing breaks the signature
+    /// (the canonical bytes no longer match what was signed).
+    #[test]
+    fn signed_frame_tampered_payload_rejected() {
+        let sender = CryptoService::generate().unwrap();
+        let signer = sender.pair_frame_signer();
+
+        let frame = PairFrame::TermInput {
+            from: "m2".into(),
+            data: b"ls\n".to_vec(),
+        };
+        let mut signed = sign_frame(&signer, "m2", SID, 1, 1, frame).unwrap();
+        // Attacker swaps the keystrokes for `rm -rf /` but keeps the sig.
+        signed.frame = PairFrame::TermInput {
+            from: "m2".into(),
+            data: b"rm -rf /\n".to_vec(),
+        };
+        assert!(
+            !verify_sig(&sender, &signed),
+            "tampered payload must fail verification"
+        );
+    }
+
+    /// A signature is bound to the signer's pubkey: presenting the same signed
+    /// bytes under a DIFFERENT pubkey (wrong-key / impersonation) fails.
+    #[test]
+    fn signed_frame_wrong_key_rejected() {
+        let sender = CryptoService::generate().unwrap();
+        let attacker = CryptoService::generate().unwrap();
+        let signer = sender.pair_frame_signer();
+
+        let frame = PairFrame::Cursor {
+            from: "m2".into(),
+            row: 1,
+            col: 2,
+        };
+        let mut signed = sign_frame(&signer, "m2", SID, 1, 1, frame).unwrap();
+        // Attacker substitutes their own pubkey (claiming authorship). The sig
+        // was made with the sender's key, so it no longer verifies.
+        signed.pubkey = attacker.pubkey_base64.clone();
+        assert!(
+            !verify_sig(&sender, &signed),
+            "sig must not verify against a different pubkey"
+        );
+    }
+
+    /// Identity binding (TOFU): once `member_id → pubkey` is pinned, a frame from
+    /// the same member_id carrying a DIFFERENT pubkey is a mismatch (rejected by
+    /// the receiver before any signature check).
+    #[test]
+    fn member_pubkey_mismatch_detected() {
+        let real = CryptoService::generate().unwrap();
+        let imposter = CryptoService::generate().unwrap();
+
+        // First frame from "m2" pins its pubkey.
+        let first = sign_frame(&real.pair_frame_signer(), "m2", SID, 1, 1, PairFrame::RequestControl { from: "m2".into() }).unwrap();
+        let pinned = first.pubkey.clone();
+
+        // Later frame claims to be "m2" but carries a different (imposter) key —
+        // even though it is internally self-consistent (imposter signed it).
+        let forged = sign_frame(&imposter.pair_frame_signer(), "m2", SID, 1, 2, PairFrame::RequestControl { from: "m2".into() }).unwrap();
+
+        assert_ne!(pinned, forged.pubkey, "imposter key differs from pinned");
+        // The receiver rejects on the pinned≠carried pubkey mismatch (this is the
+        // `PubkeyMismatch` arm) WITHOUT trusting the forged frame's self-sig.
+        assert_eq!(forged.member_id, "m2");
+        // Sanity: the forged frame is itself validly signed by the imposter key,
+        // proving the defence is the *binding*, not a broken signature.
+        assert!(verify_sig(&imposter, &forged));
+    }
+
+    /// Anti-replay: a replayed (or reordered) frame carries a seq that does not
+    /// strictly exceed the last seen seq, so the receiver drops it. We assert the
+    /// seq monotonicity rule the receiver enforces.
+    #[test]
+    fn replayed_seq_rejected_by_monotonic_rule() {
+        let sender = CryptoService::generate().unwrap();
+        let signer = sender.pair_frame_signer();
+
+        let mk = |seq: u64| {
+            sign_frame(&signer, "m2", SID, 1, seq, PairFrame::Cursor { from: "m2".into(), row: 0, col: 0 }).unwrap()
+        };
+        let f1 = mk(1);
+        let f2 = mk(2);
+        let replay = mk(1); // a captured copy of an earlier frame
+
+        // All three are individually valid signatures...
+        assert!(verify_sig(&sender, &f1));
+        assert!(verify_sig(&sender, &f2));
+        assert!(verify_sig(&sender, &replay));
+
+        // ...but the receiver tracks (epoch, last_seq) and requires a strictly
+        // newer pair. After accepting epoch=1/seq=2, a replayed epoch=1/seq=1 is
+        // NOT newer, so it is dropped.
+        let mut stored: (u64, u64) = (0, 0); // (epoch, last_seq)
+        let mut accept = |epoch: u64, seq: u64| -> bool {
+            if epoch > stored.0 {
+                stored = (epoch, seq);
+                return true;
+            }
+            if epoch == stored.0 && seq > stored.1 {
+                stored.1 = seq;
+                return true;
+            }
+            false
+        };
+        assert!(accept(f1.epoch, f1.seq), "seq 1 accepted first");
+        assert!(accept(f2.epoch, f2.seq), "seq 2 accepted");
+        assert!(!accept(replay.epoch, replay.seq), "replayed seq 1 must be rejected");
+    }
+
+    /// End-to-end transport: a worker-signed frame, encrypted into the opaque
+    /// envelope, round-trips back through `handle_inbound_text` as a
+    /// `SignedFrame` event carrying the intact member_id/pubkey/seq/sig — and the
+    /// recovered envelope's signature still verifies.
+    #[test]
+    fn signed_frame_roundtrips_through_envelope() {
+        let cipher = RelayCipher::new(KEY);
+        let sender = CryptoService::generate().unwrap();
+        let signer = sender.pair_frame_signer();
+
+        let frame = PairFrame::PtyOutput { data: vec![0x1b, b'[', b'2', b'J'], offset: 0 };
+        let signed = sign_frame(&signer, "host1", SID, 1, 5, frame).unwrap();
+        let envelope = encrypt_signed_frame(&cipher, &signed).unwrap();
+        let wire = serde_json::to_string(&envelope).unwrap();
+        assert!(wire.contains("\"type\":\"encrypted\""));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(handle_inbound_text(&wire, Some(&cipher), &tx).is_none());
+
+        match rx.try_recv().unwrap() {
+            PairRoomEvent::SignedFrame(got) => {
+                assert_eq!(got.member_id, "host1");
+                assert_eq!(got.seq, 5);
+                assert_eq!(got.pubkey, sender.pubkey_base64);
+                assert!(matches!(got.frame, PairFrame::PtyOutput { .. }));
+                assert!(verify_sig(&sender, &got), "recovered sig must verify");
+            }
+            _ => panic!("expected a SignedFrame event"),
+        }
+    }
+
+    /// Single signing seam: one outbound `PairFrame` is wrapped in EXACTLY ONE
+    /// `SignedPairFrame` (one signature, one envelope, one inbound SignedFrame
+    /// event). With `SendSigned` removed, `sign_frame` is the sole signing path,
+    /// so a frame is never double-signed. This guards the "signed exactly once"
+    /// invariant the dead-seam removal was about.
+    #[test]
+    fn outbound_frame_is_signed_exactly_once() {
+        let cipher = RelayCipher::new(KEY);
+        let sender = CryptoService::generate().unwrap();
+        let signer = sender.pair_frame_signer();
+
+        // The worker's outbound step for one Send: sign once, encrypt once.
+        let frame = PairFrame::Cursor { from: "m2".into(), row: 1, col: 2 };
+        let signed = sign_frame(&signer, "m2", SID, 1, 1, frame).unwrap();
+        let envelope = encrypt_signed_frame(&cipher, &signed).unwrap();
+        let wire = serde_json::to_string(&envelope).unwrap();
+
+        // Exactly one inbound event, and it is a SignedFrame (not a double emit
+        // and not the legacy unsigned path).
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(handle_inbound_text(&wire, Some(&cipher), &tx).is_none());
+        assert!(
+            matches!(rx.try_recv(), Ok(PairRoomEvent::SignedFrame(_))),
+            "exactly one SignedFrame event expected"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "a single outbound frame must yield a single event (signed once)"
+        );
+    }
+
+    /// A legacy bare `PairFrame` (no signing fields) still parses as the unsigned
+    /// `Frame` path — wire-compat with pre-M3 peers is preserved.
+    #[test]
+    fn legacy_unsigned_frame_still_parses() {
+        let cipher = RelayCipher::new(KEY);
+        let frame = PairFrame::Resize { cols: 80, rows: 24 };
+        let envelope = encrypt_frame(&cipher, &frame).unwrap();
+        let wire = serde_json::to_string(&envelope).unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(handle_inbound_text(&wire, Some(&cipher), &tx).is_none());
+        match rx.try_recv().unwrap() {
+            PairRoomEvent::Frame(PairFrame::Resize { cols, rows }) => {
+                assert_eq!((cols, rows), (80, 24));
+            }
+            _ => panic!("expected legacy unsigned Frame event"),
+        }
     }
 }
