@@ -21,13 +21,15 @@ shell. Everything load-bearing lives in the **`jarvis-rs/`** Rust workspace.
   Gemini · MiniMax**, switchable in-panel). Read-only filesystem tools by default;
   **write/exec tools are opt-in and gated behind a fail-closed human approval
   gate** (no-shell argv execution, sandbox-jailed paths, per-call approval).
+  Optional **push-to-talk voice input** (OpenAI Whisper → the prompt box for review).
 - **Live chat + presence** — runs over Jarvis's **own relay** (the `jarvis-relay`
   crate), no third-party backend; channel messages are signed with per-user ECDSA
   identities and direct messages are end-to-end encrypted (AES-GCM), with the relay
   forwarding only opaque frames. Deployable anywhere (a Railway/Docker config is included).
-- **Collaborative terminal / pair programming** *(experimental, off by default)* —
+- **Collaborative terminal / pair programming** *(on by default, authenticated)* —
   share a terminal over the relay with driver/navigator roles; sessions are
-  **authenticated with signed frames** (see `collab.enabled` in config).
+  **authenticated with per-member signed frames** plus the relay's signed-`room_hello`
+  slot binding (toggle with `collab.enabled`).
 - **Mobile companion** — `jarvis-mobile/` (React Native / Expo): pair to the
   desktop for a remote terminal, the same relay chat, and a `claude.ai` view.
 - **Cross-platform** — Windows, macOS, Linux (incl. Windows workspace screen
