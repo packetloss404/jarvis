@@ -34,8 +34,15 @@ by the final code/dev review and the design docs.
 
 ## Testing
 
-- **Real 2-user / multi-machine test** of chat, presence, and pair programming (everything
-  is single-instance + unit-tested today; two distinct identities need two machines).
+- **Real 2-user / multi-machine test** of chat, presence, and pair programming.
+  - *Relay transport — VERIFIED (2026-06-05).* A two-distinct-identity test against the
+    **live Railway relay** passed 10/10: both signed joins admitted, presence roster +
+    `member_count` propagate both ways, bidirectional opaque message fan-out (no member gets
+    its own frame), and the slot binding holds — a third key cannot evict an active member's
+    slot, and that member stays live. This covers the N:N transport chat/presence/pair all share.
+  - *Still pending — the client app flow.* The desktop pair-programming driver/navigator state
+    machine (and the chat/presence UIs) across **two real app instances on two machines** is
+    not yet exercised live; that's the remaining gap (needs Ian's second machine).
 
 ## Features to complete
 
