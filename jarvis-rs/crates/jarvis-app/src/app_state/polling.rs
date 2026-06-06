@@ -17,6 +17,7 @@ impl JarvisApp {
             self.poll_presence();
             self.poll_pair();
             self.poll_assistant();
+            self.poll_voice_transcripts();
             self.poll_webview_events();
             self.poll_pty_output();
             self.poll_chat_stream();

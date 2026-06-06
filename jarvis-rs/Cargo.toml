@@ -61,6 +61,9 @@ base64 = "0.22"
 # Audio metadata
 lofty = "0.22"
 
+# Audio capture (microphone, push-to-talk voice input)
+cpal = "0.15"
+
 # WebView
 wry = { version = "0.47", features = ["fullscreen"] }
 

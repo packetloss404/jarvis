@@ -1107,6 +1107,30 @@ function registerIpcHandlers() {
     }
   });
 
+  // --- Voice input (push-to-talk transcript) ---
+  //
+  // Rust sends the Whisper transcript here on PTT release. We DROP it into the
+  // input textarea for the user to review and send manually — we never submit
+  // it. Appends to any existing draft (with a separating space) so a held draft
+  // is not clobbered; replaces only when the box is empty. Focuses the box so
+  // the user can edit/send immediately.
+  ipcBridge.on('voice_transcript', function(payload) {
+    var text = (payload && payload.text) ? String(payload.text) : '';
+    if (!text) return;
+    var existing = inputEl.value;
+    if (existing && existing.trim().length) {
+      inputEl.value = existing.replace(/\s*$/, '') + ' ' + text;
+    } else {
+      inputEl.value = text;
+    }
+    autoResize();
+    inputEl.focus();
+    // Place the caret at the end so the user can keep typing.
+    var end = inputEl.value.length;
+    try { inputEl.setSelectionRange(end, end); } catch (e) {}
+    updateCmdHint();
+  });
+
   ipcBridge.on('theme_update', function(payload) {
     applyTheme(payload);
   });

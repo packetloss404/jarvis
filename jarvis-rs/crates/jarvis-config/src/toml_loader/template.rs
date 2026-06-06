@@ -101,10 +101,19 @@ name = "jarvis-dark"
 # action = "listening"   # listening, panels, chat, game, skill
 
 [voice]
+# Push-to-talk speech-to-text. Needs OPENAI_API_KEY (Whisper) and a microphone.
+# Hold the push-to-talk key (see [keybinds].push_to_talk, default F4) to record;
+# on release the audio is transcribed and the text lands in the assistant panel's
+# input box for you to review and send manually (it is NOT auto-sent).
 # enabled = true
 # mode = "ptt"           # ptt, vad
 # input_device = "default"
 # sample_rate = 24000
+# language = "en"        # Whisper language hint (ISO-639-1); omit to auto-detect
+# model = "whisper-1"    # Whisper transcription model
+
+[voice.ptt]
+# key = "F4"             # hold to talk (also mirrored as [keybinds].push_to_talk)
 
 [assistant]
 # Which AI provider the assistant uses: "claude", "openai", "minimax", or "gemini".
@@ -139,7 +148,7 @@ name = "jarvis-dark"
 # base_url = ""          # empty = https://generativelanguage.googleapis.com/v1beta
 
 [keybinds]
-# push_to_talk = "Option+Period"
+# push_to_talk = "F4"   # hold to talk (voice input); needs [voice].enabled + OPENAI_API_KEY
 # open_assistant = "Cmd+G"
 # new_panel = "Cmd+T"
 # close_panel = "Escape+Escape"

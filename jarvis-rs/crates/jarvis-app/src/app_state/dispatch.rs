@@ -305,6 +305,12 @@ impl JarvisApp {
                     }
                 }
             }
+            Action::PushToTalk => {
+                self.handle_push_to_talk();
+            }
+            Action::ReleasePushToTalk => {
+                self.handle_release_push_to_talk();
+            }
             Action::PairMobile => {
                 self.show_pair_code();
             }

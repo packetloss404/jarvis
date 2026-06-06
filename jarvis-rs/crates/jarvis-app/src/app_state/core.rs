@@ -100,6 +100,17 @@ pub struct JarvisApp {
     pub(super) assistant_pending_approvals:
         HashMap<String, tokio::sync::oneshot::Sender<jarvis_ai::ApprovalDecision>>,
 
+    /// Active push-to-talk microphone recorder. `Some` while the PTT key is
+    /// held; `None` otherwise. `cpal::Stream` is `!Send`, so the recorder lives
+    /// here on the UI/event-loop thread that started it and is taken + stopped
+    /// on key release (the WAV bytes are then transcribed on the async runtime).
+    pub(super) voice_recorder: Option<jarvis_ai::VoiceRecorder>,
+    /// Receives transcribed voice text from the async Whisper task; drained each
+    /// poll and pushed into the assistant panel's input box (never auto-sent).
+    pub(super) voice_transcript_rx: Option<std::sync::mpsc::Receiver<String>>,
+    /// Sender half of `voice_transcript_rx`, cloned into each transcription task.
+    pub(super) voice_transcript_tx: Option<std::sync::mpsc::Sender<String>>,
+
     // Mobile relay bridge
     pub(super) mobile_broadcaster: Option<Arc<super::ws_server::MobileBroadcaster>>,
     pub(super) mobile_cmd_rx: Option<std::sync::mpsc::Receiver<super::ws_server::ClientCommand>>,
@@ -219,6 +230,9 @@ impl JarvisApp {
             assistant_tx: None,
             assistant_provider_tx: None,
             assistant_pending_approvals: HashMap::new(),
+            voice_recorder: None,
+            voice_transcript_rx: None,
+            voice_transcript_tx: None,
             mobile_broadcaster: None,
             mobile_cmd_rx: None,
             relay_event_rx: None,

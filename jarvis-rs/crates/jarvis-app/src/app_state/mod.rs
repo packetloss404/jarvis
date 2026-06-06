@@ -22,6 +22,7 @@ mod social;
 mod title;
 mod types;
 mod ui_state;
+mod voice;
 mod webview_bridge;
 mod workspace_capture;
 mod ws_server;

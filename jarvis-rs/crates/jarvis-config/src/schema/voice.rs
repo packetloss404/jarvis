@@ -23,7 +23,11 @@ pub struct PTTConfig {
 impl Default for PTTConfig {
     fn default() -> Self {
         Self {
-            key: "Option+Period".into(),
+            // Single, unused function key: hold-to-talk needs a clean key-up to
+            // stop recording, and a bare key (no modifier) makes the release
+            // unambiguous. F4 is not bound to any other app action (only F1 is,
+            // as the non-macOS command palette), so it does not collide.
+            key: "F4".into(),
             cooldown: 0.3,
         }
     }
@@ -79,6 +83,11 @@ pub struct VoiceConfig {
     pub sample_rate: u32,
     pub whisper_sample_rate: u32,
     pub sounds: VoiceSoundsConfig,
+    /// Spoken language hint passed to Whisper (ISO-639-1, e.g. "en"). `None`
+    /// lets Whisper auto-detect.
+    pub language: Option<String>,
+    /// Whisper transcription model.
+    pub model: String,
 }
 
 impl Default for VoiceConfig {
@@ -92,6 +101,8 @@ impl Default for VoiceConfig {
             sample_rate: 24000,
             whisper_sample_rate: 16000,
             sounds: VoiceSoundsConfig::default(),
+            language: None,
+            model: "whisper-1".into(),
         }
     }
 }

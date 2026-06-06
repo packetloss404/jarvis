@@ -232,7 +232,7 @@ impl JarvisApp {
     }
 
     /// Send an IPC message to all assistant webview panes.
-    fn send_assistant_ipc(&self, kind: &str, payload: &serde_json::Value) {
+    pub(in crate::app_state) fn send_assistant_ipc(&self, kind: &str, payload: &serde_json::Value) {
         let pane_ids = self.tiling.panes_by_kind(PaneKind::Assistant);
         if let Some(ref registry) = self.webviews {
             for pane_id in pane_ids {

@@ -37,7 +37,10 @@ pub struct KeybindConfig {
 impl Default for KeybindConfig {
     fn default() -> Self {
         Self {
-            push_to_talk: "Option+Period".into(),
+            // Hold-to-talk: a single unmodified function key gives an
+            // unambiguous key-up to stop recording. F4 is otherwise unused
+            // (only F1 is bound — the non-macOS command palette).
+            push_to_talk: "F4".into(),
             open_assistant: "Cmd+G".into(),
             new_panel: "Cmd+T".into(),
             close_panel: "Escape+Escape".into(),

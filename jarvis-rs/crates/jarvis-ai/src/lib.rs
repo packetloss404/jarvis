@@ -13,6 +13,7 @@ pub mod session;
 pub mod streaming;
 pub mod token_tracker;
 pub mod tools;
+pub mod voice;
 pub mod whisper;
 
 use async_trait::async_trait;
@@ -28,6 +29,7 @@ pub use token_tracker::TokenTracker;
 pub use tools::{
     builtin_tools, read_only_tools, ReadOnlyToolExecutor, WriteExecToolExecutor, WRITE_EXEC_TOOLS,
 };
+pub use voice::{encode_wav_mono, VoiceRecorder};
 pub use whisper::{WhisperClient, WhisperConfig};
 
 #[async_trait]

@@ -20,3 +20,4 @@ regex = { workspace = true }
 glob = { workspace = true }
 walkdir = { workspace = true }
 shell-words = { workspace = true }
+cpal = { workspace = true }

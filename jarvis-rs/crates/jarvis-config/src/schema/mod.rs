@@ -221,7 +221,9 @@ mod tests {
         assert_eq!(config.voice.mode, VoiceMode::Ptt);
         assert_eq!(config.voice.sample_rate, 24000);
         assert_eq!(config.voice.whisper_sample_rate, 16000);
-        assert_eq!(config.voice.ptt.key, "Option+Period");
+        assert_eq!(config.voice.ptt.key, "F4");
+        assert_eq!(config.voice.language, None);
+        assert_eq!(config.voice.model, "whisper-1");
     }
 
     #[test]
@@ -259,7 +261,7 @@ model = "gpt-4o-mini"
     #[test]
     fn default_config_has_correct_keybinds() {
         let config = JarvisConfig::default();
-        assert_eq!(config.keybinds.push_to_talk, "Option+Period");
+        assert_eq!(config.keybinds.push_to_talk, "F4");
         assert_eq!(config.keybinds.open_assistant, "Cmd+G");
         assert_eq!(config.keybinds.new_panel, "Cmd+T");
         assert_eq!(config.keybinds.close_panel, "Escape+Escape");
