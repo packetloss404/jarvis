@@ -39,9 +39,12 @@ by the final code/dev review and the design docs.
 
 ## Features to complete
 
-- **Voice input.** `jarvis-ai/src/whisper.rs` (Whisper STT client) is present but unwired —
-  needs mic capture (e.g. `cpal`) + push-to-talk. Part of the broader v2 **Voice Chat &
-  Screen Sharing** roadmap (`dev/_archive/jarvis-rs/PLAN_2026-02-27.md` Phase 8, feature-flagged).
+- **Voice input** *(DONE)*. Push-to-talk STT is wired: hold the PTT key (default `F4`) →
+  `cpal` mic capture → `jarvis-ai/src/voice` WAV encode → `whisper.rs` (OpenAI Whisper) →
+  the transcript lands in the assistant input textarea for review (never auto-sent).
+  Off by default (`[voice].enabled`, needs `OPENAI_API_KEY`). The broader v2 **Voice Chat &
+  Screen Sharing** (peer-to-peer audio over the relay, needs TURN/coturn) is still future
+  work — see `dev/plans/voice-chat.md`.
 - **Chat history persistence.** Chat history is currently ephemeral (client-side, capped,
   wiped on refresh). A lightweight server-side store on the relay is optional future work.
 - **Boot splash timing.** `jarvis-app/src/boot/sequence.rs` has unused timing methods —
