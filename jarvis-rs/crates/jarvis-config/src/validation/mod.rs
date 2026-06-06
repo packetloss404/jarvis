@@ -35,7 +35,6 @@ pub fn validate(config: &JarvisConfig) -> Result<(), ConfigError> {
     background::validate_background(&mut errors, config);
     visualizer::validate_visualizer(&mut errors, config);
     misc::validate_startup(&mut errors, config);
-    misc::validate_voice(&mut errors, config);
     misc::validate_performance(&mut errors, config);
     misc::validate_livechat(&mut errors, config);
     misc::validate_presence(&mut errors, config);

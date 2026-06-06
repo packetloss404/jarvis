@@ -18,7 +18,8 @@ pub struct ShellConfig {
     pub working_directory: Option<String>,
     /// Extra environment variables injected into the shell.
     pub env: HashMap<String, String>,
-    /// Launch as a login shell (prepend `-` to argv[0]).
+    /// Launch as a login shell. On Unix this passes `-l` to the shell (loads
+    /// `.profile` / `.bash_profile` / etc.); no effect on Windows shells.
     pub login_shell: bool,
 }
 

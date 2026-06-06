@@ -690,56 +690,24 @@ assistant panel's input box for you to review and send (it is **not** auto-sent)
 > key). On Linux, microphone capture additionally requires the ALSA development
 > headers (`libasound2-dev`) at build time.
 >
-> Only push-to-talk (`mode = "ptt"`) is implemented. The `mode = "vad"`
-> voice-activity-detection path and the `[voice.vad]` settings below are **config
-> only and not yet wired up** — selecting `vad` does not currently capture audio.
+> Input is **push-to-talk**: hold the `[keybinds].push_to_talk` key (default `F4`)
+> to record. There is no voice-activity-detection mode.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable voice input (also requires `OPENAI_API_KEY`) |
-| `mode` | enum | `"ptt"` | Input mode: `ptt` (push-to-talk). `vad` (voice-activity detection) is config-only / not yet implemented |
-| `input_device` | string | `"default"` | Audio input device name (currently informational; capture uses the system default input device) |
-| `sample_rate` | u32 | `24000` | Output sample rate in Hz |
-| `whisper_sample_rate` | u32 | `16000` | Whisper transcription sample rate in Hz |
+| `input_device` | string | `"default"` | Microphone device name to capture from; `"default"` (or an unknown name) uses the system default input device |
 | `language` | string? | `null` | Whisper language hint (ISO-639-1, e.g. `"en"`); omit to auto-detect |
 | `model` | string | `"whisper-1"` | Whisper transcription model |
 
-#### \[voice.ptt\]
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `key` | string | `"F4"` | Push-to-talk key (hold to record). Mirrored by `[keybinds].push_to_talk` |
-| `cooldown` | f64 | `0.3` | Cooldown between activations in seconds |
-
-#### \[voice.vad\]
-
-> **Not yet implemented.** These fields exist in the schema but voice-activity
-> detection is not wired into capture; only push-to-talk works today.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `silence_threshold` | f64 | `1.0` | Silence detection threshold in seconds |
-| `energy_threshold` | u32 | `300` | Audio energy threshold for voice detection |
-
-#### \[voice.sounds\]
-
-| Field | Type | Default | Valid Range | Description |
-|-------|------|---------|-------------|-------------|
-| `enabled` | bool | `true` | -- | Enable feedback sounds |
-| `volume` | f64 | `0.5` | 0.0--1.0 | Feedback sound volume |
-| `listen_start` | bool | `true` | -- | Play sound when listening starts |
-| `listen_end` | bool | `true` | -- | Play sound when listening ends |
+The push-to-talk key lives in [`[keybinds]`](#keybinds) (`push_to_talk`, default
+`F4`), alongside the other keybinds.
 
 ```toml
 [voice]
-enabled = true       # opt in (also needs OPENAI_API_KEY); push-to-talk only
-language = "en"      # optional Whisper language hint; omit to auto-detect
-
-[voice.ptt]
-key = "F4"           # hold to record
-
-[voice.sounds]
-volume = 0.3
+enabled = true              # opt in (also needs OPENAI_API_KEY)
+input_device = "default"    # or a specific microphone device name
+language = "en"             # optional Whisper language hint; omit to auto-detect
 ```
 
 ---
@@ -833,7 +801,7 @@ validation error.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `push_to_talk` | string | `"F4"` | Push-to-talk activation (hold to record; mirrors `[voice.ptt].key`) |
+| `push_to_talk` | string | `"F4"` | Push-to-talk activation (hold to record; needs `[voice].enabled` + `OPENAI_API_KEY`) |
 | `open_assistant` | string | `"Cmd+G"` | Open assistant panel |
 | `new_panel` | string | `"Cmd+T"` | Open new panel |
 | `close_panel` | string | `"Escape+Escape"` | Close current panel (double press) |
@@ -1472,12 +1440,6 @@ Per-state overrides (`state_listening`, `state_speaking`, `state_skill`, `state_
 | Field | Min | Max |
 |-------|-----|-----|
 | `startup.on_ready.panels.count` | 1 | 5 |
-
-### Voice
-
-| Field | Min | Max |
-|-------|-----|-----|
-| `voice.sounds.volume` | 0.0 | 1.0 |
 
 ### Performance
 

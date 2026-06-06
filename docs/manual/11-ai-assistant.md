@@ -712,10 +712,9 @@ manually** -- it is **never auto-sent**. This is a deliberate design choice:
 speech-to-text is imperfect, so a human always sees (and can edit) the text
 before it goes to the model.
 
-> **Push-to-talk only.** Only push-to-talk is implemented. The `[voice]` config
-> also exposes a `mode` (`ptt` / `vad`) and a `[voice.vad]` sub-table, but
-> voice-activity detection is **config-only -- not implemented**. Setting
-> `mode = "vad"` does nothing; the keybind is the only way to trigger recording.
+> **Push-to-talk only.** Recording is triggered by holding the push-to-talk key;
+> there is no voice-activity-detection mode. The key is `[keybinds].push_to_talk`
+> (default `F4`).
 
 ### Gating (OFF by default)
 
@@ -742,12 +741,6 @@ key-up to `Action::ReleasePushToTalk`
 `input/registry.rs`); `dispatch.rs` routes them to `handle_push_to_talk` /
 `handle_release_push_to_talk`. Auto-repeat while the key is held is ignored (a
 recording already in progress short-circuits).
-
-> **Note.** `[voice.ptt].key` (also defaulting to `F4`) exists in the schema but
-> is **not** what drives the keybind registry -- the registry reads
-> `[keybinds].push_to_talk`. The `[voice.ptt]` / `[voice.vad]` sub-tables are
-> config surface that the current PTT path does not consume; only `[voice]`'s
-> `enabled`, `model`, and `language` are read at runtime.
 
 ### The Pipeline
 
@@ -804,14 +797,13 @@ assigned via `value` (textarea), never `innerHTML`. Nothing is auto-submitted.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Master toggle. OFF by default (mic capture is opt-in). Requires `OPENAI_API_KEY` to actually work. |
+| `input_device` | string | `"default"` | Microphone to capture from; `"default"` (or an unknown name) uses the system default input device. |
 | `model` | string | `"whisper-1"` | Whisper transcription model. |
 | `language` | string? | *(unset)* | Spoken-language hint (ISO-639-1, e.g. `"en"`). Unset = Whisper auto-detects. |
-| `mode` | enum | `"ptt"` | `ptt` or `vad`. **Only `ptt` is implemented**; `vad` is config-only. |
 
-The `[voice.ptt]` (`key`, `cooldown`), `[voice.vad]`, `[voice.sounds]`,
-`input_device`, `sample_rate`, and `whisper_sample_rate` fields exist in the
-schema but are **not consumed** by the current push-to-talk path. The actual
-recording uses the device's native rate and is keyed off `[keybinds].push_to_talk`.
+Every field is consumed at runtime. The push-to-talk key is `[keybinds].push_to_talk`
+(default `F4`); recording captures at the device's native rate (Whisper accepts
+the WAV regardless).
 
 ```toml
 [voice]

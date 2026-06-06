@@ -46,7 +46,7 @@ impl JarvisApp {
             return;
         }
 
-        match VoiceRecorder::start() {
+        match VoiceRecorder::start(&self.config.voice.input_device) {
             Ok(recorder) => {
                 tracing::info!("push-to-talk: recording started");
                 self.voice_recorder = Some(recorder);

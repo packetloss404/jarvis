@@ -8,5 +8,5 @@ mod io;
 mod spawn;
 mod types;
 
-pub use spawn::spawn_pty;
+pub use spawn::spawn_pty_with_shell;
 pub use types::{PtyManager, DEFAULT_COLS, DEFAULT_ROWS};

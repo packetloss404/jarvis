@@ -200,9 +200,7 @@ const VALID_PATHS: &[&str] = &[
     "startup.on_ready.action",
     // Voice
     "voice.enabled",
-    "voice.mode",
     "voice.input_device",
-    "voice.sample_rate",
     // Keybinds
     "keybinds.push_to_talk",
     "keybinds.open_assistant",
@@ -350,9 +348,7 @@ fn apply_setting(
         "startup.on_ready.action" => set_str_enum(&mut config.startup.on_ready.action, value),
         // -- Voice --
         "voice.enabled" => set_bool(&mut config.voice.enabled, value),
-        "voice.mode" => set_str_enum(&mut config.voice.mode, value),
         "voice.input_device" => set_str(&mut config.voice.input_device, value),
-        "voice.sample_rate" => set_u32(&mut config.voice.sample_rate, value),
         // -- Keybinds --
         "keybinds.push_to_talk" => set_str(&mut config.keybinds.push_to_talk, value),
         "keybinds.open_assistant" => set_str(&mut config.keybinds.open_assistant, value),

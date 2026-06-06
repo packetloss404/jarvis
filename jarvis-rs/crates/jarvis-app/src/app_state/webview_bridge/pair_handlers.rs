@@ -75,7 +75,12 @@ impl JarvisApp {
         // the host's own panel), and host keystrokes arrive as `pty_input`.
         if !self.ptys.contains(pane_id) {
             let cwd = self.config.shell.working_directory.as_deref();
-            match crate::app_state::pty_bridge::spawn_pty(cols, rows, cwd) {
+            match crate::app_state::pty_bridge::spawn_pty_with_shell(
+                cols,
+                rows,
+                cwd,
+                &self.config.shell,
+            ) {
                 Ok(handle) => {
                     self.ptys.insert(pane_id, handle);
                     tracing::info!(pane_id, cols, rows, "Spawned PTY for pair host panel");

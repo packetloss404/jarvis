@@ -218,10 +218,7 @@ mod tests {
     fn default_config_has_correct_voice() {
         let config = JarvisConfig::default();
         assert!(!config.voice.enabled); // OFF by default — mic capture is opt-in
-        assert_eq!(config.voice.mode, VoiceMode::Ptt);
-        assert_eq!(config.voice.sample_rate, 24000);
-        assert_eq!(config.voice.whisper_sample_rate, 16000);
-        assert_eq!(config.voice.ptt.key, "F4");
+        assert_eq!(config.voice.input_device, "default");
         assert_eq!(config.voice.language, None);
         assert_eq!(config.voice.model, "whisper-1");
     }
@@ -429,16 +426,6 @@ primary = "#ff0000"
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"particle\""));
-    }
-
-    #[test]
-    fn voice_mode_serialization() {
-        let config = VoiceConfig {
-            mode: VoiceMode::Vad,
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        assert!(json.contains("\"vad\""));
     }
 
     #[test]

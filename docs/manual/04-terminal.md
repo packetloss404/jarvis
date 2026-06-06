@@ -87,28 +87,27 @@ EDITOR = "nvim"                 # Extra env vars (schema only — see note below
 | `env` | `HashMap<String, String>` | `{}` | Additional environment variables for the shell. |
 | `login_shell` | `bool` | `true` | Launch as a login shell. |
 
-> **Implementation status (current code):** Of the `[shell]` fields above, only
-> `working_directory` is actually wired into PTY spawning. `spawn_pty()` in
-> `spawn.rs` takes a single `cwd: Option<&str>` argument (sourced from
-> `config.shell.working_directory`) and otherwise hardcodes the shell:
+> **All `[shell]` fields are honored at spawn time.** `spawn_pty_with_shell()` in
+> `spawn.rs` (called from the terminal + pair PTY handlers with `&config.shell`)
+> applies them:
 >
-> - The shell program is **always** auto-detected via `default_shell()` --
->   `program` and `args` are **not** consulted.
-> - `[shell.env]` is **not** injected; only the sanitized allowlist below
->   (plus a forced `TERM`) reaches the shell.
-> - On Unix, `-l` is **always** appended regardless of `login_shell`.
->
-> These fields exist in the schema (and round-trip through the settings UI for
-> `working_directory`) but `program`, `args`, `env`, and `login_shell` are not
-> yet honored at spawn time.
+> - `program` is used as the shell executable; an empty string falls back to
+>   `default_shell()`. `args` are appended to the shell's argv.
+> - `[shell.env]` is injected **on top of** the sanitized allowlist below (plus
+>   the forced `TERM`) — explicit user vars can add or override.
+> - On Unix, `-l` is appended only when `login_shell` is `true`.
+> - `working_directory` sets the initial cwd (a per-pane override, when present,
+>   takes precedence).
 
 ### Shell auto-detection
 
-The shell is always detected at spawn time in `spawn.rs` (the `program` field
-is ignored):
+When `[shell].program` is empty, the shell is auto-detected at spawn time in
+`spawn.rs` via `default_shell()`:
 
 - **Unix**: Reads `$SHELL`, falls back to `/bin/sh`.
 - **Windows**: Reads `$COMSPEC`, falls back to `cmd.exe`.
+
+A non-empty `[shell].program` overrides this and is used directly.
 
 ### Environment sanitization
 
@@ -126,9 +125,9 @@ USERPROFILE, APPDATA, LOCALAPPDATA, SYSTEMROOT, COMSPEC, HOMEDRIVE, HOMEPATH
 In addition, `TERM` is always forced to `xterm-256color` regardless of the
 inherited value.
 
-> **Note:** `[shell.env]` variables are **not** currently merged on top of this
-> set -- the allowlist above (plus the forced `TERM`) is the complete shell
-> environment.
+> **Note:** `[shell.env]` variables ARE merged on top of this set (applied after
+> the allowlist and the forced `TERM`), so user-configured vars can add to or
+> override the inherited environment.
 
 ---
 

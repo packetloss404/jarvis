@@ -66,9 +66,15 @@ by the final code/dev review and the design docs.
   cosmetic `supabase` strings (backend is the relay Room now) and keep deps on a supported SDK.
 - **Windows identity-key permissions.** Ensure the persistent ECDSA identity key file is
   ACL-restricted on Windows (it is on Unix).
+- **Windows native window manager is a stub.** `jarvis-platform/src/windows.rs`
+  `Win32WindowManager` delegates to the noop manager — Windows-specific native window
+  management (beyond what winit/wgpu already provide) is unimplemented. Latent gap, not a
+  user-facing break: the app runs on Windows via winit. Surfaced by the manual audit.
 
 ## Done (for reference — see CHANGELOG.md)
 
 Multi-provider AI · agentic tools + approval gate · relay Room backend (chat/presence off
-Supabase) · authenticated pair programming (M1–M3) · games→plugins · Windows capture ·
-Railway deploy · mobile migration · legacy archived · MIT license · docs/manual rebuilt.
+Supabase) · signed-room_hello slot binding · authenticated pair programming (M1–M3) ·
+voice input (push-to-talk STT) · games→plugins · Windows capture · Railway deploy · mobile
+migration · legacy archived · MIT license · docs/manual rebuilt + audited · config audit
+(voice schema trimmed to what's consumed, shell `program`/`args`/`env`/`login_shell` now honored).

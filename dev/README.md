@@ -8,7 +8,7 @@ docs live in [`../docs/manual/`](../docs/manual/) and the root `README.md` / `AR
 | Path | What it is |
 |------|------------|
 | [`ROADMAP.md`](ROADMAP.md) | **Active.** Remaining / incomplete work and the forward roadmap. Start here for "what's left." |
-| [`plans/`](plans/) | **Active** design docs for features. Currently: [`c2-pair-programming.md`](plans/c2-pair-programming.md) (the collaborative-terminal design + security model; M1–M3 shipped, kept as the design record). |
+| [`plans/`](plans/) | **Active** design docs for features: [`c2-pair-programming.md`](plans/c2-pair-programming.md) (the collaborative-terminal design + security model; M1–M3 + the relay slot binding shipped, kept as the design record) and [`voice-chat.md`](plans/voice-chat.md) (the v2 peer-to-peer voice / screen-share design — media plane not yet built, blocked on TURN/coturn). |
 | [`_archive/`](_archive/) | **Historical.** Superseded analyses and dated plans — kept for the record, not current guidance. |
 
 ## What's in `_archive/`

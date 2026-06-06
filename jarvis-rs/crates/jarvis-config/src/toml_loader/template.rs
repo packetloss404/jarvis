@@ -106,15 +106,11 @@ name = "jarvis-dark"
 # on release the audio is transcribed and the text lands in the assistant panel's
 # input box for you to review and send manually (it is NOT auto-sent).
 # OFF by default (mic capture is opt-in); set enabled = true to use it.
+# The push-to-talk key is [keybinds].push_to_talk (default F4).
 # enabled = false
-# mode = "ptt"           # ptt, vad
-# input_device = "default"
-# sample_rate = 24000
+# input_device = "default"  # microphone device name, or "default"
 # language = "en"        # Whisper language hint (ISO-639-1); omit to auto-detect
 # model = "whisper-1"    # Whisper transcription model
-
-[voice.ptt]
-# key = "F4"             # hold to talk (also mirrored as [keybinds].push_to_talk)
 
 [assistant]
 # Which AI provider the assistant uses: "claude", "openai", "minimax", or "gemini".

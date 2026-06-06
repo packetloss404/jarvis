@@ -3,7 +3,7 @@
 
 use crate::schema::JarvisConfig;
 
-use super::helpers::{validate_range, validate_range_f64};
+use super::helpers::validate_range;
 
 /// Validate startup constraints.
 pub(crate) fn validate_startup(errors: &mut Vec<String>, config: &JarvisConfig) {
@@ -13,17 +13,6 @@ pub(crate) fn validate_startup(errors: &mut Vec<String>, config: &JarvisConfig) 
         config.startup.on_ready.panels.count,
         1,
         5,
-    );
-}
-
-/// Validate voice constraints.
-pub(crate) fn validate_voice(errors: &mut Vec<String>, config: &JarvisConfig) {
-    validate_range_f64(
-        errors,
-        "voice.sounds.volume",
-        config.voice.sounds.volume,
-        0.0,
-        1.0,
     );
 }
 

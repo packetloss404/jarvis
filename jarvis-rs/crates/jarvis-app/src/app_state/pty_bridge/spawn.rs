@@ -4,6 +4,7 @@ use std::io::Read;
 use std::sync::mpsc;
 use std::thread;
 
+use jarvis_config::schema::ShellConfig;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 use super::types::{PtyHandle, DEFAULT_COLS, DEFAULT_ROWS, PTY_READ_CHUNK};
@@ -61,11 +62,14 @@ const ALLOWED_ENV_VARS: &[&str] = &[
     "HOMEPATH",
 ];
 
-/// Build a sanitized `CommandBuilder` for the given shell.
-fn build_shell_command(shell: &str, cwd: Option<&str>) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new(shell);
+/// Build a sanitized `CommandBuilder` for `program`, honoring the user's
+/// [`ShellConfig`] (`args`, `env`, `login_shell`) and the resolved `cwd`.
+fn build_shell_command(program: &str, cwd: Option<&str>, shell: &ShellConfig) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new(program);
 
-    // Clear inherited env, then selectively re-add safe vars
+    // Clear inherited env, then selectively re-add safe vars (the allowlist
+    // exists so Jarvis-internal secrets — API keys, tokens — never leak into the
+    // shell automatically).
     cmd.env_clear();
     for key in ALLOWED_ENV_VARS {
         if let Ok(val) = std::env::var(key) {
@@ -75,6 +79,26 @@ fn build_shell_command(shell: &str, cwd: Option<&str>) -> CommandBuilder {
 
     // Always set TERM for proper terminal behavior
     cmd.env("TERM", "xterm-256color");
+
+    // User-configured environment (`[shell.env]`) — explicit user intent, so it
+    // is applied ON TOP of the allowlist and may add or override vars.
+    for (key, val) in &shell.env {
+        cmd.env(key, val);
+    }
+
+    // On Unix, pass -l for a login shell (loads .profile, .bash_profile, etc.)
+    // unless the user disabled it. No effect on Windows shells.
+    #[cfg(unix)]
+    {
+        if shell.login_shell {
+            cmd.arg("-l");
+        }
+    }
+
+    // Extra user-configured arguments (`[shell].args`), after the login flag.
+    for arg in &shell.args {
+        cmd.arg(arg);
+    }
 
     // Set working directory if provided and valid
     if let Some(dir) = cwd {
@@ -98,12 +122,6 @@ fn build_shell_command(shell: &str, cwd: Option<&str>) -> CommandBuilder {
         }
     }
 
-    // On Unix, pass -l for a login shell (loads .profile, .bash_profile, etc.)
-    #[cfg(unix)]
-    {
-        cmd.arg("-l");
-    }
-
     cmd
 }
 
@@ -111,12 +129,24 @@ fn build_shell_command(shell: &str, cwd: Option<&str>) -> CommandBuilder {
 // SPAWN
 // =============================================================================
 
-/// Spawn a new PTY with the given terminal size.
+/// Spawn a new PTY with the given terminal size, using the default shell config.
 ///
 /// Returns a `PtyHandle` that owns the master side of the PTY pair.
 /// A background thread reads output from the PTY and sends chunks
 /// over the returned handle's `output_rx` channel.
 pub fn spawn_pty(cols: u16, rows: u16, cwd: Option<&str>) -> Result<PtyHandle, String> {
+    spawn_pty_with_shell(cols, rows, cwd, &ShellConfig::default())
+}
+
+/// Spawn a new PTY honoring the user's [`ShellConfig`] (`program`, `args`,
+/// `env`, `login_shell`). `cwd` (already resolved by the caller, e.g. a per-pane
+/// override) takes precedence over `shell.working_directory`.
+pub fn spawn_pty_with_shell(
+    cols: u16,
+    rows: u16,
+    cwd: Option<&str>,
+    shell: &ShellConfig,
+) -> Result<PtyHandle, String> {
     let pty_system = native_pty_system();
 
     let size = PtySize {
@@ -130,13 +160,18 @@ pub fn spawn_pty(cols: u16, rows: u16, cwd: Option<&str>) -> Result<PtyHandle, S
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let shell = default_shell();
-    let cmd = build_shell_command(&shell, cwd);
+    // Configured program wins; otherwise auto-detect the user's default shell.
+    let program = if shell.program.trim().is_empty() {
+        default_shell()
+    } else {
+        shell.program.clone()
+    };
+    let cmd = build_shell_command(&program, cwd, shell);
 
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("Failed to spawn shell '{shell}': {e}"))?;
+        .map_err(|e| format!("Failed to spawn shell '{program}': {e}"))?;
 
     // Drop the slave side — we only need the master
     drop(pair.slave);
@@ -263,6 +298,26 @@ mod tests {
         assert_eq!(handle.size.cols, 80);
         assert_eq!(handle.size.rows, 24);
         // Clean up
+        handle.child.kill().ok();
+    }
+
+    #[test]
+    fn spawn_pty_with_shell_honors_configured_program() {
+        // A configured program that does not exist must surface as a spawn error,
+        // proving `shell.program` is actually used (not silently ignored).
+        let shell = ShellConfig {
+            program: "/nonexistent/jarvis-test-shell-xyz".into(),
+            ..Default::default()
+        };
+        let result = spawn_pty_with_shell(80, 24, None, &shell);
+        assert!(result.is_err(), "spawn with a bogus program should fail");
+    }
+
+    #[test]
+    fn spawn_pty_with_default_shell_config_succeeds() {
+        // An empty program falls back to the user's default shell.
+        let mut handle =
+            spawn_pty_with_shell(80, 24, None, &ShellConfig::default()).expect("spawn should work");
         handle.child.kill().ok();
     }
 

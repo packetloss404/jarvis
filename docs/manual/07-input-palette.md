@@ -168,13 +168,10 @@ paste = "Cmd+V"
 > `Cmd+Shift+P` on macOS, `F1` on Windows/Linux.
 
 > **Push-to-talk binding:** The key that triggers `Action::PushToTalk` is
-> `[keybinds].push_to_talk` (default `F4`) — this is the field the
-> `KeybindRegistry` actually binds. There is also a separate `[voice.ptt]`
-> section (`key`, default `F4`; `cooldown`, default `0.3`) in `VoiceConfig`
-> (`jarvis-config/src/schema/voice.rs`); `[voice.ptt].key` documents the
-> intended push-to-talk key but is not consulted by the registry today — keep
-> the two in sync. A bare, unmodified function key is used so the key _release_
-> is unambiguous for hold-to-talk.
+> `[keybinds].push_to_talk` (default `F4`) — the single field the
+> `KeybindRegistry` binds for hold-to-talk. A bare, unmodified function key is
+> used so the key _release_ is unambiguous. Recording also requires
+> `[voice].enabled` and `OPENAI_API_KEY` (see [Chapter 11](11-ai-assistant.md)).
 
 ### Modifier Names (Case-Insensitive)
 

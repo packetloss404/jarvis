@@ -39,16 +39,18 @@ pub struct VoiceRecorder {
 }
 
 impl VoiceRecorder {
-    /// Open the default input device and begin capturing.
+    /// Open an input device and begin capturing.
     ///
-    /// Returns an error if there is no default input device, no supported input
+    /// `device_name` selects the capture device by name; `"default"` (or a name
+    /// that matches no available device) uses the system default input device.
+    ///
+    /// Returns an error if there is no usable input device, no supported input
     /// config, or the stream cannot be built/started. On success the stream is
     /// already running.
-    pub fn start() -> Result<Self, AiError> {
+    pub fn start(device_name: &str) -> Result<Self, AiError> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| AiError::ApiError("no default input device".into()))?;
+        let device = select_input_device(&host, device_name)
+            .ok_or_else(|| AiError::ApiError("no usable input device".into()))?;
 
         let supported = device
             .default_input_config()
@@ -176,6 +178,26 @@ impl VoiceRecorder {
         );
         encode_wav_mono(&samples, self.sample_rate)
     }
+}
+
+/// Pick the capture device named `device_name`, falling back to the system
+/// default. `"default"` (case-insensitive) or a name that matches no enumerable
+/// input device returns the default device (with a warning in the latter case).
+fn select_input_device(host: &cpal::Host, device_name: &str) -> Option<cpal::Device> {
+    if !device_name.eq_ignore_ascii_case("default") && !device_name.is_empty() {
+        // Look for an input device whose name matches exactly.
+        if let Ok(mut devices) = host.input_devices() {
+            if let Some(dev) = devices.find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
+            {
+                return Some(dev);
+            }
+        }
+        warn!(
+            requested = device_name,
+            "configured voice input_device not found; using system default"
+        );
+    }
+    host.default_input_device()
 }
 
 /// Encode mono `f32` samples (`[-1.0, 1.0]`) into a 16-bit PCM WAV byte vector.
