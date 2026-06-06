@@ -43,7 +43,7 @@ Tested on macOS 13+ (Ventura and later).
 
 #### Linux
 
-The following development libraries are required for the GPU renderer (wgpu/Vulkan), windowing (winit/X11/Wayland), WebKit webviews (wry), and system menu support (muda):
+The following development libraries are required for the GPU renderer (wgpu/Vulkan), windowing (winit/X11/Wayland), WebKit webviews (wry), system menu support (muda), and microphone capture for voice input (cpal/ALSA):
 
 ```bash
 # Debian / Ubuntu
@@ -57,7 +57,8 @@ sudo apt-get install -y \
   libgtk-3-dev \
   libsoup-3.0-dev \
   libwebkit2gtk-4.1-dev \
-  libxdo-dev
+  libxdo-dev \
+  libasound2-dev
 ```
 
 These packages provide:
@@ -70,6 +71,7 @@ These packages provide:
 | `libgtk-3-dev` | wry, muda (WebView hosting, system menus) |
 | `libsoup-3.0-dev`, `libwebkit2gtk-4.1-dev` | wry (WebView rendering) |
 | `libxdo-dev` | muda (system menu / tray support) |
+| `libasound2-dev` | cpal (ALSA microphone capture for voice input) |
 
 For Fedora/RHEL-based distributions, the equivalent packages are:
 
@@ -83,7 +85,8 @@ sudo dnf install \
   gtk3-devel \
   libsoup3-devel \
   webkit2gtk4.1-devel \
-  libxdo-devel
+  libxdo-devel \
+  alsa-lib-devel
 ```
 
 A GPU driver supporting Vulkan is required at runtime for wgpu.
@@ -197,20 +200,27 @@ jarvis-rs/assets/
     assistant/index.html       # AI assistant panel
     boot/index.html            # Boot animation
     chat/index.html            # Live chat panel
+    pair/index.html            # Pair-programming panel
     presence/index.html        # Online presence panel
     settings/index.html        # Settings UI
     status_bar/index.html      # Status bar
     terminal/index.html        # Terminal emulator
-    games/
-      asteroids.html           # Jarvis Asteroids
-      doodlejump.html          # Doodle Jump
-      draw.html                # Drawing canvas
-      minesweeper.html         # Minesweeper
-      pinball.html             # Pinball (with pinball.js, pinball.css)
-      subway.html              # Subway Surfers
-      tetris.html              # Tetris
-      videoplayer.html         # Video player
+    plugins/                   # Bundled plugins (games, draw, music, emulator)
+      asteroids/               # Jarvis Asteroids
+      doodlejump/              # Doodle Jump
+      draw/                    # Drawing canvas
+      emulator/                # Retro console emulator
+      minesweeper/             # Minesweeper
+      music-player/            # Music player
+      pinball/                 # Pinball
+      subway/                  # Subway Surfers
+      tetris/                  # Tetris
 ```
+
+Each bundled plugin lives in its own folder under `panels/plugins/<id>/` with a
+`plugin.toml` manifest and an HTML entry point. The games, drawing pad, music
+player, and emulator all ship as plugins (there is no separate `panels/games/`
+directory).
 
 The window icon (`jarvis-icon.png`) is compiled into the binary via `include_bytes!` so it does not need to be distributed alongside the binary. The Windows `.ico` icon is embedded into the `.exe` at build time by `build.rs`.
 
@@ -330,14 +340,23 @@ Copy `.env.example` to `.env` and fill in what you need. All values are optional
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `GOOGLE_API_KEY` | Google Gemini API key for voice routing and data skills. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). | (none) |
+| `OPENAI_API_KEY` | OpenAI API key. Used by the `openai` assistant provider **and** by Whisper for push-to-talk voice transcription. | (none) |
+| `MINIMAX_API_KEY` | MiniMax API key (OpenAI-compatible). Used by the `minimax` assistant provider. | (none) |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Google Gemini API key, used by the `gemini` assistant provider (and legacy voice routing / data skills). `GEMINI_API_KEY` takes precedence; `GOOGLE_API_KEY` is the fallback. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). | (none) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for the `claude` provider (API-key auth). Alternative to OAuth (`claude auth login` / `CLAUDE_CODE_OAUTH_TOKEN`). | (none) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token for the `claude` provider. Most setups use CLI auth (`claude auth login`) instead, which the client also picks up. | (none) |
 | `PROJECTS_DIR` | Directory where Jarvis looks for code projects. | Jarvis repo root |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token for the proxy connector. Most setups use CLI auth (`claude auth login`) instead. | (none) |
 | `PRESENCE_URL` | WebSocket URL for the presence server. | `ws://localhost:8790` |
 | `RUST_LOG` | Standard Rust logging filter. Overrides the default log directive. | (not set; defaults to `jarvis=info`) |
 | `USER` / `USERNAME` | Used to determine the hostname for social/presence features. | System username |
 | `SHELL` | (Unix) Shell to spawn in terminal panels. | `/bin/sh` |
 | `COMSPEC` | (Windows) Command processor to spawn in terminal panels. | `cmd.exe` |
+
+> **API keys are read from the environment only** — never written to `config.toml`
+> or logs. The `[assistant].provider` field in config selects which provider is
+> used; the matching key above must be present in the environment (or `.env`).
+> Push-to-talk voice input additionally requires `OPENAI_API_KEY` (Whisper) and
+> `[voice].enabled = true`.
 
 ### Claude OAuth Token Setup (Archived Prototype)
 
@@ -385,14 +404,14 @@ jarvis -e "htop"
 
 ### Linux: Missing system libraries
 
-**Symptom**: Compilation errors referencing `x11`, `xkbcommon`, `wayland`, `gtk`, `webkit2gtk`, or `soup`.
+**Symptom**: Compilation errors referencing `x11`, `xkbcommon`, `wayland`, `gtk`, `webkit2gtk`, `soup`, or `alsa`/`asound`.
 
 **Solution**: Install all required development packages (see [Linux Prerequisites](#linux)).
 
 ```bash
 sudo apt-get install -y libx11-dev libxcb1-dev libxkbcommon-dev \
   libxkbcommon-x11-dev libwayland-dev libgtk-3-dev \
-  libsoup-3.0-dev libwebkit2gtk-4.1-dev libxdo-dev
+  libsoup-3.0-dev libwebkit2gtk-4.1-dev libxdo-dev libasound2-dev
 ```
 
 ### Linux: `libxdo-dev` not found
@@ -603,10 +622,18 @@ The CI workflow (`.github/workflows/rust-ci.yml`) runs on every push to `main` a
 
 ### Experimental Features
 
-The `jarvis-social` crate has an experimental feature flag:
+The `jarvis-social` crate has an experimental feature flag, `experimental-collab`,
+that compiles in the `pair` (pair programming), `voice` (voice chat), and
+`screen_share` modules. The main `jarvis-app` binary **already enables this
+feature**, so a normal `cargo build` includes them; you only need the flag below
+when building `jarvis-social` on its own.
 
 ```bash
-# Enable experimental collaboration features (voice chat, screen sharing, pair programming)
-# WARNING: These features have no authentication -- do NOT enable in production.
-cargo build --features jarvis-social/experimental-collab
+# Build jarvis-social standalone with the experimental collaboration modules
+cargo build -p jarvis-social --features experimental-collab
 ```
+
+> Pair programming is authenticated end-to-end (per-app ECDSA-signed frames) and
+> is enabled by default at runtime via `[collab].enabled`. The `voice` and
+> `screen_share` modules, however, still have no authentication -- do not rely on
+> them in production.

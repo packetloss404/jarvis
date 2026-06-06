@@ -894,16 +894,20 @@ impl JarvisApp {
     ///   - `request_control`/`cursor`/`join` are accepted from any verified
     ///     member.
     ///
-    /// RESIDUAL (DoS only — needs a relay change to fully close; relay is
-    /// intentionally NOT modified here): the relay assigns the in-room
-    /// `member_id` slot from a SELF-ASSERTED member_id and reconnect-REPLACES it,
-    /// and that layer is unsigned. So a peer who knows the `session_id` can claim
-    /// or churn a member_id slot — disrupting or hijacking the SLOT for DENIAL.
-    /// It cannot forge CONTENT: every honored frame is end-to-end signed, so the
-    /// host identity (pinned from the invite pubkey) and each member identity are
-    /// non-forgeable — an attacker can only deny/disrupt, never impersonate.
-    /// Closing the slot-DoS would require the relay to bind slots to identities
-    /// (a relay protocol change + redeploy); tracked in
+    /// RESIDUAL (denial only): the relay now BINDS each Room slot to a key — every
+    /// member signs its `room_hello` and the relay TOFU-pins `(session_id,
+    /// member_id) -> pubkey` and enforces a strictly-monotonic nonce (see
+    /// `jarvis-relay/src/room_auth.rs`), so a peer who merely knows the
+    /// `session_id` can no longer churn, replace, or evict another member's pinned
+    /// slot (wrong key -> rejected; replayed/older nonce -> rejected). What remains
+    /// is FIRST-MOVER pinning: the pair `member_id` is a random token with no
+    /// pubkey relationship, so a malicious party who learns a `session_id` could
+    /// race to pin a member_id before its legitimate owner connects — disrupting
+    /// the join for DENIAL only. It cannot forge CONTENT: every honored frame is
+    /// end-to-end signed, so the host identity (pinned from the invite pubkey) and
+    /// each member identity are non-forgeable — an attacker can only deny/disrupt,
+    /// never impersonate. Fully closing first-mover pinning would require deriving
+    /// the pair `member_id` from the pubkey (an id-format change); tracked in
     /// `dev/plans/c2-pair-programming.md` §6.
     fn apply_pair_frame(&mut self, frame: PairFrame, verified_sender: Option<&str>) {
         let Some(session_id) = self.pair_session_id.clone() else {

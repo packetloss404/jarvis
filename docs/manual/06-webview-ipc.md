@@ -589,6 +589,14 @@ These are dispatched via `handle.send_ipc(kind, payload)` which calls `window.ja
 | `emulator_load_rom_response` | `{ _reqId, data: base64, filename }` or `{ _reqId, error }` | Response to `emulator_load_rom` |
 | `pair_event` | `{ event: "session_started"\|"session_ended"\|"session_meta"\|"error"\|... , ... }` | Pair-programming session event pushed to the panel |
 | `pair_status` | `{ session_id, member_id, role, connected, invite?, host_user_id?, driver_user_id?, allow_takeover?, cols?, rows?, participants? }` | Authoritative (host) or identity-only (navigator) pair session snapshot |
+| `voice_transcript` | `{ text: string }` | Push-to-talk transcript. Sent to the **assistant** panel(s) via `send_assistant_ipc` after the captured audio is transcribed (Whisper). The assistant panel's `index.html` handler drops it into the input textarea for review — it is **never** auto-sent. |
+
+> **Note:** Assistant panels also receive several other outbound messages from
+> `send_assistant_ipc` that are not enumerated here (e.g. `assistant_config`,
+> `assistant_provider`, `assistant_chunk`, `assistant_output`,
+> `assistant_error`, `tool_call`, `tool_result`, `tool_approval_request`).
+> These are part of the assistant runtime protocol rather than the core
+> WebView/IPC bridge.
 
 ---
 

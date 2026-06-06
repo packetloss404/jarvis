@@ -60,9 +60,18 @@ ConPTY echo test). Built and adversarially reviewed via multi-agent build/review
   chat and presence now run over it (no third-party backend), with per-member ECDSA identities.
   Deployable anywhere — a Railway config (`railway.json` + `.dockerignore`) is included and the
   relay is live on Railway.
-- **Collaborative terminal / pair programming** (experimental, off by default) — share a terminal
+- **Collaborative terminal / pair programming** (on by default, authenticated) — share a terminal
   over the relay Room with driver/navigator roles; sessions are authenticated with per-member
   signed frames (host pinned from the invite capability; replay- and impersonation-resistant).
+  `collab.enabled` now defaults to `true` (still flag-gated; set `false` to disable).
+- **Signed Room slot binding** — every Room client (chat, presence, pair) signs its `room_hello`
+  with its ECDSA identity; the relay verifies the signature, enforces a per-slot strictly-monotonic
+  nonce (anti-replay), and TOFU-pins `(session_id, member_id) → pubkey`, so a self-asserted
+  `member_id` can no longer squat or evict a slot without the matching key. (Breaking relay cutover:
+  unsigned hellos are rejected.) Verified live against the deployed relay.
+- **Voice input (push-to-talk speech-to-text)** — hold the PTT key (default `F4`) to record from the
+  mic (`cpal`) and transcribe via OpenAI Whisper; the transcript lands in the assistant input box for
+  review (never auto-sent). Off by default — needs `[voice].enabled` + `OPENAI_API_KEY`.
 - **Windows workspace screen capture** (for live sharing).
 - **MIT `LICENSE`** (the license `Cargo.toml` declared but never shipped).
 
@@ -80,9 +89,14 @@ ConPTY echo test). Built and adversarially reviewed via multi-agent build/review
 
 ### Known residuals
 
-- The relay's in-room `member_id` slot permits a denial-only DoS (content is unforgeable — pair
-  frames are signed). A full signed-slot binding and enabling collaboration by default are tracked
-  in [`dev/ROADMAP.md`](dev/ROADMAP.md).
+- The signed Room slot binding fully closes the member-id squat/evict for the chat clients (whose
+  `member_id` embeds a pubkey fingerprint). The pair (`random_alnum`) and presence (raw UUID)
+  `member_id` formats carry no key relationship, so a **first** valid signer could pre-pin an id it
+  doesn't "own" (denial-only — a later differently-keyed claimant is refused; content stays
+  unforgeable). Fully closing it would change those id formats; tracked in [`dev/ROADMAP.md`](dev/ROADMAP.md).
+- A real **2-user / multi-machine** run of the pair-programming UI is still pending — the relay
+  transport + auth are verified (a two-identity live test passed 10/10), but the desktop
+  driver/navigator flow across two app instances has not yet been exercised live.
 
 ---
 

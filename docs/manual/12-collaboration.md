@@ -1,18 +1,24 @@
 # 12 -- Collaborative Terminal / Pair Programming
 
-This chapter covers Jarvis's collaborative terminal -- an **experimental**
-pair-programming feature that lets a host share one terminal with remote
-participants over the relay, with `driver`/`navigator` roles, live ghost
-cursors, and end-to-end signed frames.  It is described from both the
-user-facing perspective and the implementation perspective, with particular
-attention to the security model, which is the most load-bearing part of the
-design.
+This chapter covers Jarvis's collaborative terminal -- a pair-programming feature
+that lets a host share one terminal with remote participants over the relay, with
+`driver`/`navigator` roles, live ghost cursors, and **end-to-end signed frames**.
+It is described from both the user-facing perspective and the implementation
+perspective, with particular attention to the security model, which is the most
+load-bearing part of the design.
 
-> **Experimental and off by default.** The entire feature is gated on
-> `collab.enabled`, which defaults to **`false`**.  With it unset, every pair
-> IPC handler and the transport worker are no-ops.  The Rust code lives behind
-> the `experimental-collab` feature flag of the `jarvis-social` crate.  Treat
-> this chapter as documentation of a feature you must deliberately opt into.
+> **On by default, and authenticated.** As of the M3 hardening,
+> `collab.enabled` defaults to **`true`** -- pair programming is enabled out of
+> the box.  It is no longer an untrusted experiment: every honored frame is
+> **end-to-end signed** with a per-member ECDSA identity (the host pinned from
+> the invite), and the relay binds each Room slot to its key via signed
+> `room_hello` (see [09 -- Networking & Social](09-networking.md)).  The shared
+> room key is therefore confidentiality-only; the signatures are the real
+> security boundary between members.  `require_signed_join` also defaults to
+> **`true`**, so unsigned/unverifiable frames are dropped fail-closed.  This is a
+> relatively new feature, but it is enabled and authenticated by default; the
+> Rust code is still compiled in behind the `experimental-collab` Cargo feature
+> of the `jarvis-social` crate (which `jarvis-app` enables).
 
 The authoritative design and security specification is
 `dev/plans/c2-pair-programming.md`.  This chapter reflects the implemented M3
@@ -197,12 +203,17 @@ writing it to the PTY.
 
 ## Security Model
 
-This is the most important section of the chapter.  Pair programming runs over a
-**bearer-secret** Room: anyone who knows the `session_id` can connect to the
-relay's room.  The room key (PBKDF2 of the `session_id`) is therefore
-**confidentiality-only** -- it hides traffic from the relay but is shared by all
-members, so it is *not* a boundary between members.  The real security boundary
-is a **per-member ECDSA signature** on every frame.
+This is the most important section of the chapter, and it is why the feature is
+safe to enable by default.  Pair programming runs over a **bearer-secret** Room:
+anyone who knows the `session_id` can connect to the relay's room.  The room key
+(PBKDF2 of the `session_id`) is therefore **confidentiality-only** -- it hides
+traffic from the relay but is shared by all members, so it is *not* a boundary
+between members.  The real security boundary is a **per-member ECDSA signature**
+on every frame, enforced by default (`require_signed_join = true`).  Combined
+with the relay's signed-`room_hello` slot binding (each Room slot bound to its
+key; see [09 -- Networking & Social](09-networking.md)), every honored frame is
+attributable to a non-forgeable member identity, with the host pinned out of band
+from the invite.
 
 ### Signed frames
 
@@ -317,27 +328,34 @@ When `require_signed_join` is `false`, the legacy permissive M1/M2 path is used
 startup; this is for experiments only and the room key is not a security
 boundary in that mode.
 
-### Documented residual: relay member-slot DoS
+### Documented residual: relay first-mover slot pinning
 
 There is **one** documented residual risk, called out in the `RESIDUAL` block
 atop `apply_pair_frame` and in the spec.
 
-The relay assigns a member's in-room **slot** from a **self-asserted**
-`member_id` and reconnect-replaces it, and that relay layer is **unsigned**.  A
-peer who knows the `session_id` can therefore claim or churn a `member_id` slot
--- disrupting or hijacking the **slot** for **denial only**.
+The relay now **binds each Room slot to a key**: every member signs its
+`room_hello` and the relay TOFU-pins `(session_id, member_id) → pubkey` and
+enforces a strictly-monotonic nonce (see [Chapter 9](09-networking.md) and
+`jarvis-relay/src/room_auth.rs`).  So a peer who merely knows the `session_id`
+can **no longer churn, replace, or evict** another member's pinned slot — a wrong
+key is rejected (`PubkeyMismatch`), and a replayed/older `room_hello` is rejected
+(`StaleNonce`).
+
+What remains is **first-mover pinning**: the pair `member_id` is a random token
+with no pubkey relationship, so a malicious party who learns a `session_id` could
+race to pin a `member_id` *before its legitimate owner connects* — disrupting the
+join for **denial only**.
 
 It **cannot forge content**: every honored frame is end-to-end signed, so the
 host identity (pinned from the invite pubkey) and every member identity are
 non-forgeable.  An attacker can deny or disrupt, but never impersonate.
 
-Fully closing the slot-DoS would require the **relay** to bind slots to
-identities (a relay protocol change + redeploy).  The relay is intentionally
-left unchanged for this slice.  Defense-in-depth limits the blast radius: the
-feature defaults off, the `session_id` is a high-entropy capability secret never
-logged at info (only a `first6…(len=N)` fingerprint at debug), the relay
-enforces a global session cap, and `term_input` is length-capped
-(`MAX_TERM_INPUT_BYTES = 4096`) on both send and host.
+Fully closing first-mover pinning would require deriving the pair `member_id`
+from the pubkey (an id-format change).  Defense-in-depth already limits the blast
+radius: this is **denial only** (content is non-forgeable, as above), the
+`session_id` is a high-entropy capability secret never logged at info (only a
+`first6…(len=N)` fingerprint at debug), the relay enforces a global session cap,
+and `term_input` is length-capped (`MAX_TERM_INPUT_BYTES = 4096`) on both send and host.
 
 A possible future improvement is optional per-member ECDH, giving each member a
 distinct key (confidentiality *between* members, not just from the relay).
@@ -350,7 +368,7 @@ Source: `jarvis-rs/crates/jarvis-config/src/schema/collab.rs`
 
 ```toml
 [collab]
-enabled = false             # master toggle; when false all pair IPC + transport are no-ops
+enabled = true              # master toggle (DEFAULT true); when false all pair IPC + transport are no-ops
 max_participants = 4        # max participants per session, including the host
 allow_takeover = true       # may navigators request / take the driver seat
 require_signed_join = true  # ENFORCED: every inbound frame must carry a valid E2E signature
@@ -358,10 +376,10 @@ require_signed_join = true  # ENFORCED: every inbound frame must carry a valid E
 
 | Field                | Default | Meaning |
 |----------------------|---------|---------|
-| `enabled`            | `false` | Master toggle.  The whole feature is off unless this is set. |
+| `enabled`            | `true`  | Master toggle.  **On by default.**  Set `false` to make every pair IPC handler and the transport worker a no-op. |
 | `max_participants`   | `4`     | Maximum participants per session (host included).  Enforced by `PairManager::join_session`. |
 | `allow_takeover`     | `true`  | Whether navigators may request / be granted the driver seat (`PairManager::set_driver`). |
-| `require_signed_join`| `true`  | When true, every inbound pair frame must carry a valid ECDSA signature binding `member_id` to its identity pubkey; unsigned/unverifiable frames are dropped fail-closed.  When false, the legacy permissive (unsigned, self-asserted `from`) path is used -- experiments only. |
+| `require_signed_join`| `true`  | **On by default.**  When true, every inbound pair frame must carry a valid ECDSA signature binding `member_id` to its identity pubkey; unsigned/unverifiable frames are dropped fail-closed.  When false, the legacy permissive (unsigned, self-asserted `from`) path is used -- experiments only (a `warn!` is logged at startup). |
 
 Pairing also requires a relay URL.  It reuses the same `[relay].url`
 (networking chapter, "Relay Configuration"); with no relay URL, `start_pair` is

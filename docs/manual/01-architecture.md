@@ -66,10 +66,10 @@ The workspace at `jarvis-rs/Cargo.toml` defines 10 crates:
 | `jarvis-platform` | Library | OS abstractions: clipboard, paths, crash reports, input processing, keybind registry, crypto identity |
 | `jarvis-tiling` | Library | Binary split tree, layout engine, pane management, focus tracking, zoom, stacks (tabs) |
 | `jarvis-renderer` | Library | GPU rendering: wgpu context, background shader pipeline, quad renderer, UI chrome, command palette, assistant panel |
-| `jarvis-ai` | Library | Multi-provider AI clients (Claude, Gemini, OpenAI-compatible: OpenAI/MiniMax, Whisper); SSE streaming, agentic tool-calling loops with an approval gate, session management, skill routing |
+| `jarvis-ai` | Library | Multi-provider AI clients (Claude, Gemini, OpenAI-compatible: OpenAI/MiniMax, Whisper); SSE streaming, agentic tool-calling loops with an approval gate, session management, skill routing; push-to-talk voice input (cpal mic capture + WAV encode feeding Whisper) |
 | `jarvis-social` | Library | Social features over the relay's symmetric **Room** transport: presence tracking, chat history, channels, identity; experimental voice/screen share/pair programming (feature-gated) |
 | `jarvis-webview` | Library | WebView management: wry wrapper, IPC bridge, content provider (`jarvis://` protocol), theme bridge, navigation control |
-| `jarvis-relay` | Binary (`jarvis-relay`) | Standalone WebSocket relay server: mobile-desktop session pairing **and** the symmetric Room fan-out used by presence/chat/pair; rate limiting, stale session reaping |
+| `jarvis-relay` | Binary (`jarvis-relay`) | Standalone WebSocket relay server: mobile-desktop session pairing **and** the symmetric Room fan-out used by presence/chat/pair; signed-`room_hello` TOFU slot binding (`room_auth`), rate limiting, stale session reaping |
 
 ### 3.1 Crate Details
 
@@ -253,6 +253,7 @@ Providers:
 - `gemini::GeminiClient` / `GeminiConfig` -- Gemini (Google Generative Language API) client.
 - `openai::OpenAiClient` / `OpenAiConfig` -- One parameterized client speaking the OpenAI Chat Completions wire format, used for both the `OpenAi` and `MiniMax` providers.
 - `whisper::WhisperClient` / `WhisperConfig` -- OpenAI Whisper transcription client.
+- `voice::VoiceRecorder` / `voice::encode_wav_mono` (`voice/mod.rs`) -- Microphone capture for push-to-talk voice input. Opens the default input device via `cpal`, buffers samples while the PTT key is held, mixes them down to mono, and on `stop()` encodes a complete 16-bit PCM WAV byte vector (at the device's native sample rate) ready to hand to `WhisperClient::transcribe`. The `cpal` stream is `!Send`, so the recorder lives on the app's main/UI thread. On Linux this requires the ALSA dev headers (`libasound2-dev`) at build time.
 - `router::SkillRouter` -- Routes user intents to the appropriate provider/skill. `Provider` enum is `Claude | OpenAi | MiniMax | Gemini` (default `Claude`); `Skill { name, provider, system_prompt }`. Tool conversion helpers (`to_claude_tool`, `to_gemini_tool`, `to_openai_tool`) adapt the shared `ToolDefinition` to each provider's schema.
 
 Agentic session and tools:
@@ -324,17 +325,18 @@ Key types:
 **Path:** `jarvis-rs/crates/jarvis-relay/src/main.rs`
 **Depends on:** (no internal crates -- standalone binary)
 
-A standalone WebSocket relay server (CLI flags: `--port` default 8080, `--session-ttl`, `--max-connections-per-ip`, `--max-sessions`). It serves three connection topologies, all keyed by a session ID and forwarding opaque text after the first message:
+A standalone WebSocket relay server (CLI flags: `--port` default 8080, `--session-ttl`, `--max-connections-per-ip`, `--max-sessions`). The connecting client's `Role` (`Desktop`/`Mobile`/`Host`/`Spectator`/`Member`) maps to one of three `SessionKind`s (`Bridge`/`Broadcast`/`Room`), all keyed by a session ID and forwarding opaque text after the first message:
 
-- **Pairing (1:1)** -- `desktop_hello` / `mobile_hello`, with `peer_connected` / `peer_disconnected` notifications. Used for mobile<->desktop bridging.
-- **Broadcast (1:N)** -- `host_hello` / `spectator_hello`, with `host_connected` / `viewer_count`. Used for workspace/chat streaming to viewers.
-- **Room (N:N symmetric)** -- `room_hello { session_id, member_id }` -> `room_ready` + `member_joined`* + `member_count`, then symmetric opaque fan-out. This is the transport `jarvis-social` (presence/chat/pair) rides on.
+- **Bridge (1:1 pairing)** -- `Desktop`/`Mobile` roles via `desktop_hello` / `mobile_hello`, with `peer_connected` / `peer_disconnected` notifications. Used for mobile<->desktop bridging.
+- **Broadcast (1:N)** -- `Host`/`Spectator` roles via `host_hello` / `spectator_hello`, with `host_connected` / `viewer_count`. Used for workspace/chat streaming to viewers.
+- **Room (N:N symmetric)** -- `Member` role via `room_hello { session_id, member_id, pubkey, nonce, sig }` -> `room_ready` + `member_joined`* + `member_count`, then symmetric opaque fan-out. This is the transport `jarvis-social` (presence/chat/pair) rides on.
 
 Modules:
 
-- `connection` -- Handles individual WebSocket connections, parses the first `RelayHello`, and routes the connection into the appropriate topology.
-- `protocol` -- `RelayHello` / `RelayResponse` wire enums (only the first frame is parsed; the rest is opaque text). Wire conformance is pinned against JSON fixtures in `jarvis-rs/testdata/relay/`.
-- `session::SessionStore` -- Manages active sessions, supports stale session reaping.
+- `connection` -- Handles individual WebSocket connections, parses the first `RelayHello`, verifies/commits the signed `room_hello` (for Room joins) via `room_auth`, and routes the connection into the appropriate session kind.
+- `protocol` -- `RelayHello` / `RelayResponse` wire enums (only the first frame is parsed; the rest is opaque text), plus `signed_hello_payload` (the canonical bytes a `room_hello` signs). Wire conformance is pinned against JSON fixtures in `jarvis-rs/testdata/relay/`.
+- `room_auth::RoomAuthStore` -- Signed-`room_hello` verification that binds each Room slot to a cryptographic identity (defeats the member-id slot-squat/eviction DoS). Each `room_hello` is signed with the client's ECDSA P-256 identity; before a member is admitted the relay verifies the signature over the canonical payload, checks nonce freshness/monotonicity (anti-replay), and enforces a per-`(session_id, member_id)` pubkey binding via **relay-side TOFU** (first signed join pins the key; later joins must present the same key). Verification (`verify`) is a pure read; the pin + nonce high-water mark are mutated only by `commit`, called after the slot is actually registered.
+- `session::SessionStore` -- Manages active `Bridge`/`Broadcast`/`Room` sessions, supports stale session reaping.
 - `rate_limit::RateLimiter` -- Per-IP connection limiting and total session caps.
 
 The relay never inspects message payloads -- all PTY/pair data is E2E encrypted between endpoints using the `CryptoService` from `jarvis-platform`.
@@ -725,7 +727,7 @@ The Rust rewrite (`jarvis-rs/`) replaces the entire stack with a cross-platform 
 | Swift chat panels | `jarvis-webview` (wry WebViews with HTML/JS/CSS) |
 | `skills/router.py` | `jarvis-ai::router::SkillRouter` |
 | `skills/claude_code.py` | `jarvis-ai::claude::ClaudeClient` |
-| `voice/audio.py` | `jarvis-ai::whisper::WhisperClient` |
+| `voice/audio.py` | `jarvis-ai::voice::VoiceRecorder` (cpal mic capture) + `jarvis-ai::whisper::WhisperClient` (transcription) |
 | `connectors/token_tracker.py` | `jarvis-ai::token_tracker::TokenTracker` |
 | None (new) | `jarvis-ai` multi-provider clients (OpenAI / MiniMax / Gemini) + agentic tool loop with approval gate |
 | None (new) | `jarvis-tiling` (binary split tree tiling manager) |

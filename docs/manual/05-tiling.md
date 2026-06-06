@@ -40,12 +40,12 @@ jarvis-tiling/
       types.rs           -- PaneStack struct
       operations.rs      -- push, remove, cycle_next, cycle_prev
     platform/
-      mod.rs             -- WindowManager trait, ExternalWindow, WindowEvent
-      windows.rs         -- Windows implementation
+      mod.rs             -- WindowManager trait, ExternalWindow, WindowEvent, create_window_manager()
+      windows.rs         -- Windows stub (Win32WindowManager; delegates to noop)
       macos/             -- macOS CoreGraphics implementation
       wayland.rs         -- Wayland stub
       x11.rs             -- X11 stub
-      noop.rs            -- No-op fallback
+      noop.rs            -- No-op fallback (NoopWindowManager)
 ```
 
 ---

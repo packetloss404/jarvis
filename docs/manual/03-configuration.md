@@ -680,24 +680,41 @@ titles = ["Code", "Shell"]
 
 ### \[voice\]
 
-Voice input and audio configuration.
+Voice input and audio configuration. Voice input is push-to-talk speech-to-text:
+hold the push-to-talk key to capture the microphone (via `cpal`), and on release
+the recorded audio is transcribed with OpenAI Whisper and dropped into the
+assistant panel's input box for you to review and send (it is **not** auto-sent).
+
+> **Disabled by default.** Voice input captures the microphone, so it is explicit
+> opt-in: set `enabled = true` **and** provide an `OPENAI_API_KEY` (the Whisper
+> key). On Linux, microphone capture additionally requires the ALSA development
+> headers (`libasound2-dev`) at build time.
+>
+> Only push-to-talk (`mode = "ptt"`) is implemented. The `mode = "vad"`
+> voice-activity-detection path and the `[voice.vad]` settings below are **config
+> only and not yet wired up** — selecting `vad` does not currently capture audio.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `true` | Enable voice input |
-| `mode` | enum | `"ptt"` | Input mode: `ptt` (push-to-talk), `vad` (voice-activity detection) |
-| `input_device` | string | `"default"` | Audio input device name |
+| `enabled` | bool | `false` | Enable voice input (also requires `OPENAI_API_KEY`) |
+| `mode` | enum | `"ptt"` | Input mode: `ptt` (push-to-talk). `vad` (voice-activity detection) is config-only / not yet implemented |
+| `input_device` | string | `"default"` | Audio input device name (currently informational; capture uses the system default input device) |
 | `sample_rate` | u32 | `24000` | Output sample rate in Hz |
 | `whisper_sample_rate` | u32 | `16000` | Whisper transcription sample rate in Hz |
+| `language` | string? | `null` | Whisper language hint (ISO-639-1, e.g. `"en"`); omit to auto-detect |
+| `model` | string | `"whisper-1"` | Whisper transcription model |
 
 #### \[voice.ptt\]
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `key` | string | `"Option+Period"` | Push-to-talk key combination |
+| `key` | string | `"F4"` | Push-to-talk key (hold to record). Mirrored by `[keybinds].push_to_talk` |
 | `cooldown` | f64 | `0.3` | Cooldown between activations in seconds |
 
 #### \[voice.vad\]
+
+> **Not yet implemented.** These fields exist in the schema but voice-activity
+> detection is not wired into capture; only push-to-talk works today.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -715,12 +732,11 @@ Voice input and audio configuration.
 
 ```toml
 [voice]
-enabled = true
-mode = "vad"
+enabled = true       # opt in (also needs OPENAI_API_KEY); push-to-talk only
+language = "en"      # optional Whisper language hint; omit to auto-detect
 
-[voice.vad]
-silence_threshold = 0.8
-energy_threshold = 250
+[voice.ptt]
+key = "F4"           # hold to record
 
 [voice.sounds]
 volume = 0.3
@@ -817,7 +833,7 @@ validation error.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `push_to_talk` | string | `"Option+Period"` | Push-to-talk activation |
+| `push_to_talk` | string | `"F4"` | Push-to-talk activation (hold to record; mirrors `[voice.ptt].key`) |
 | `open_assistant` | string | `"Cmd+G"` | Open assistant panel |
 | `new_panel` | string | `"Cmd+T"` | Open new panel |
 | `close_panel` | string | `"Escape+Escape"` | Close current panel (double press) |
@@ -962,17 +978,19 @@ room_id = "my-team-presence"
 Collaborative terminal / pair-programming sessions. Like presence, collab
 rides the relay **Room** transport (it reuses `[relay].url`).
 
-> **Experimental.** Disabled by default. Membership is authenticated with
-> end-to-end signed frames (per-app ECDSA identity); the shared room key is
-> confidentiality-only and the signatures are the security boundary between
-> members.
+> **Enabled by default.** As of the signed-`room_hello` slot binding (the relay
+> binds each Room slot to its key) plus end-to-end signed pair frames (per-app
+> ECDSA identity), members are authenticated and the experimental gate has been
+> lifted. The shared room key is confidentiality-only and the signatures are the
+> security boundary between members. It is still feature-flagged here, so set
+> `enabled = false` to turn it off.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Master toggle. When false, all pair IPC and transport are no-ops |
+| `enabled` | bool | `true` | Master toggle. When false, all pair IPC and transport are no-ops |
 | `max_participants` | usize | `4` | Maximum participants per session (including the host) |
 | `allow_takeover` | bool | `true` | Whether navigators may request/take the driver seat |
-| `require_signed_join` | bool | `true` | Enforce end-to-end ECDSA-signed frames. When false, the legacy permissive (unsigned) path is used -- experiments only |
+| `require_signed_join` | bool | `true` | Enforce end-to-end ECDSA-signed frames (the security boundary between members). When false, the legacy permissive (unsigned) path is used -- experiments only |
 
 ```toml
 [collab]

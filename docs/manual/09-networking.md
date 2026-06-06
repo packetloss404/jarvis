@@ -75,13 +75,30 @@ The first message identifies the client's role.  Defined in `protocol.rs`
 {"type": "host_hello",      "session_id": "abc123..."}
 {"type": "spectator_hello", "session_id": "abc123..."}
 
-// Room (note the extra member_id)
-{"type": "room_hello", "session_id": "abc123...", "member_id": "m1"}
+// Room — SIGNED (note the extra member_id + signed credential)
+{
+  "type": "room_hello",
+  "session_id": "abc123...",
+  "member_id": "m1",
+  "pubkey": "<base64 ECDSA P-256 SPKI DER>",
+  "nonce": 1700000000000,
+  "sig": "<base64 IEEE-P1363 ECDSA-P256 signature>"
+}
 ```
 
 If no valid hello arrives within **10 seconds**, the connection is dropped.
 Session IDs are validated against `max_session_id_len` (default 64 bytes) and
-must be non-empty.
+must be non-empty.  Room `member_id`s are validated the same way: non-empty, at
+most `max_session_id_len` bytes, and restricted to a conservative charset
+(alphanumeric plus `-`, `_`, `.`).
+
+> **Room hellos must now be SIGNED.**  Unlike the four single-field hellos,
+> `room_hello` carries a cryptographic credential — `pubkey`, `nonce`, and
+> `sig` — that the relay verifies *before* the member is admitted.  The old
+> unsigned `{"type":"room_hello","session_id":..,"member_id":..}` form is
+> **rejected** (a breaking cutover; all four Room clients sign).  See
+> [Signed `room_hello` (Room Slot Binding)](#signed-room_hello-room-slot-binding)
+> for the full signing scheme and the relay-side checks.
 
 ### Control Responses (Relay to Client)
 
@@ -143,6 +160,135 @@ Rooms are the newest and most general session kind.  They back relay-hosted
 Because a pair-programming room's `session_id` is itself a capability secret,
 the relay logs only a truncated, non-reversible fingerprint of that id (first
 6 chars + length) for `Member` connections.
+
+### Signed `room_hello` (Room Slot Binding)
+
+Source: `jarvis-rs/crates/jarvis-relay/src/protocol.rs`,
+`jarvis-rs/crates/jarvis-relay/src/room_auth.rs`,
+`jarvis-rs/crates/jarvis-relay/src/connection.rs`
+
+A Room slot is identified by a self-asserted `member_id`.  Without
+authentication, anyone could send a `room_hello` claiming any `member_id` and
+either squat a not-yet-taken slot or evict the live connection holding it (a
+member-id slot DoS).  To close this, **every Room hello is signed** with the
+client's ECDSA P-256 identity key, and the relay verifies and *pins* the
+signature to the slot.  This is a **security boundary**: a self-asserted
+`member_id` can no longer squat or evict a slot without the matching private
+key.
+
+#### What the client signs
+
+The client builds a canonical, deterministic byte string
+(`room_hello_canonical_bytes`):
+
+```text
+"jarvis-room-hello-v1" 0x1F session_id 0x1F member_id 0x1F pubkey 0x1F nonce(decimal)
+```
+
+- `"jarvis-room-hello-v1"` — a fixed crypto **domain separator**, so a
+  room-hello signature can never be cross-presented to another signer that
+  shares the same ECDSA identity (pair frames use the disjoint
+  `jarvis-pair-sig-v1`).
+- `0x1F` — the ASCII Unit Separator delimiting the fields (disjoint from
+  base64 / hostnames / member-id charsets, so the fields are unambiguous).
+- `session_id` — binds the signature to **this** room, so a captured hello
+  can't be replayed into a different session.
+- `member_id` **and** `pubkey` — bound together, so the slot the signature
+  claims is cryptographically tied to the signing key.
+- `nonce` — a freshness value: **unix-epoch MILLISECONDS** as a decimal `u64`.
+
+The string actually fed to ECDSA sign/verify is **`base64(canonical_bytes)`**
+(`signed_hello_payload`).  Encoding the canonical bytes as base64 first lets the
+signature round-trip losslessly through the project's `&str`-based ECDSA
+sign/verify surface (`CryptoService::{sign,verify}` on desktop, Web Crypto on
+mobile), matching the `SignedPairFrame` precedent.  The wire `sig` is the
+base64 IEEE-P1363 (r‖s, 64-byte) ECDSA-P256 signature over that payload, and
+`pubkey` is the signer's ECDSA SPKI-DER identity key, base64.
+
+A fixed golden vector pins the encoding across all clients and the relay:
+`signed_hello_payload("sid","m1","pk",42)` ==
+`"amFydmlzLXJvb20taGVsbG8tdjEfc2lkH20xH3BrHzQy"`.  The Rust relay test, the
+desktop chat JS, and the mobile chat JS all assert this same constant, so any
+future separator/domain drift fails the build on at least one side.
+
+#### How the relay verifies (before admission)
+
+When a `room_hello` arrives, the connection handler (Room arm of
+`connection.rs`) calls `RoomAuthStore::verify` **before** `ensure_session` can
+even auto-create the room.  `verify` is a pure read and performs, in order:
+
+1. **Nonce sanity freshness.**  The `nonce` must be within **±30 s**
+   (`NONCE_WINDOW_MS`) of the relay clock, in either direction.  This is only a
+   sanity bound — the real anti-replay guarantee is the monotonic check below.
+2. **Signature.**  The ECDSA-P256 signature must verify against the carried
+   `pubkey` over `signed_hello_payload(...)`.  (Mirrors
+   `CryptoService::verify` exactly: same curve, SPKI pubkey encoding, P1363
+   signature encoding, SHA-256 prehash.)
+3. **Fingerprint-prefix check (chat-style ids only).**  If `member_id` has the
+   form `<fp>.<userId>` where `<fp>` is a 16-char lowercase-hex pubkey
+   fingerprint (the chat clients' id format), the leading `<fp>` segment must
+   equal `fingerprint(carried_pubkey)` (first 8 bytes of `SHA-256(SPKI DER)`,
+   lowercase hex, no `:` separators).  This closes the *first-mover squat* on
+   those ids — an attacker can't be the first to pin a fingerprinted id without
+   holding the key whose fingerprint the id embeds.
+4. **TOFU pin + monotonic nonce.**  If `(session_id, member_id)` is already
+   pinned, the carried `pubkey` must equal the pinned key (else
+   `PubkeyMismatch`), and the `nonce` must be **strictly greater** than the
+   last nonce accepted for that slot (else `StaleNonce`).
+
+A rejected hello is answered with a coarse `error` response (`"invalid room
+hello signature"` or `"member id bound to a different identity"`) and the
+connection is dropped.  An **unsigned** `room_hello` (no credential at all) is
+rejected outright with `"signed room hello required"`.
+
+#### Verify / commit split (no orphan pins)
+
+The pin and the nonce high-water are mutated only by `RoomAuthStore::commit`,
+which the handler calls **only after the slot is actually registered**
+(`register_room` succeeded).  `commit` re-checks the same pubkey + monotonic
+nonce invariants under the write lock, so two concurrent valid hellos for the
+same slot can't race a replay through; if the commit loses that race the
+just-registered slot is torn back down.  Any early return after `verify`
+(capacity, `ensure_session`, register, or the first `send` failing) therefore
+leaves **no** pin and **no** advanced nonce behind.  When a room empties, its
+pins are dropped (`forget_session`), so the same slot can later be re-pinned by
+a fresh signed join.
+
+#### Binding model: TOFU pinning (not self-authenticating ids)
+
+The four Room clients derive `member_id` heterogeneously and none of them is a
+pure function of the pubkey:
+
+| Client | `member_id` |
+|--------|-------------|
+| Desktop **pair** | `random_alnum(16)` |
+| Desktop **presence** | `identity.user_id` (a UUIDv4) |
+| Desktop **chat** (JS) | `fingerprint(pubkey).hex + "." + userId` |
+| Mobile **chat** (JS) | `fingerprint(pubkey).hex + "." + userId` |
+
+Rather than force every id to be `fingerprint(pubkey)` (which would sever the
+`member_id ↔ user_id` linkage that presence rosters, DM channel names, and the
+pair-frame `from` fields all depend on), the relay binds the slot to the key
+via **first-signed-join-pins** TOFU.  The fingerprinted chat ids additionally
+get the prefix check above; the non-fingerprinted formats (pair `random_alnum`,
+presence raw UUID) carry no key relationship and so retain a residual
+first-mover-pins property — the first valid signer to present such an id pins
+it, and any later differently-keyed claimant is refused.
+
+#### Client signers
+
+- Desktop presence (and the shared seam):
+  `jarvis-rs/crates/jarvis-social/src/room/signed_hello.rs`
+  (`RoomHelloSigner` / `build_signed_room_hello`).  `jarvis-social` has no
+  crypto stack of its own; `jarvis-app` injects the ECDSA pubkey + a
+  `sign(payload)` closure backed by `CryptoService`.
+- Desktop chat: the `RoomHelloSig` builder in
+  `jarvis-rs/assets/panels/chat/index.html` (signs via the Rust `crypto` IPC).
+- Mobile chat: the `RoomHelloSig` builder in
+  `jarvis-mobile/lib/jarvis-chat-html.ts` (signs via Web Crypto).
+
+All three reproduce the canonical bytes / base64 payload byte-for-byte so a
+signature any of them produces verifies at the relay.
 
 ### Session Store and Reaping
 
@@ -258,10 +404,17 @@ Source: `jarvis-rs/assets/panels/chat/index.html`, `RoomConnection`
 `RoomConnection` is a small WebSocket wrapper that speaks the relay's Room
 protocol.  Per channel it:
 
-1. Opens a WebSocket and sends
-   `{"type":"room_hello", "session_id": channelId, "member_id": <stable id>}`.
+1. Opens a WebSocket and, on open, builds and sends a **signed** `room_hello`
+   via the `RoomHelloSig` builder — `{"type":"room_hello", "session_id":
+   channelId, "member_id": <fingerprint.userId>, "pubkey": ..., "nonce": ...,
+   "sig": ...}`.  Signing is async (it calls `Identity.sign`, which on desktop
+   is the Rust `crypto` IPC and on mobile is Web Crypto), so the hello is built
+   in a Promise and only sent if the socket is still current.  The relay
+   rejects an unsigned or forged hello — see
+   [Signed `room_hello`](#signed-room_hello-room-slot-binding).
 2. Waits for `room_ready`, then handles `member_joined` / `member_left` /
-   `member_count` control frames (distinguished by their `type` field).
+   `member_count` / `error` control frames (distinguished by their `type`
+   field).
 3. Surfaces every other frame -- the **application frames** tagged with a `k`
    field (`k:"message"`, `k:"reaction"`, or `k:"presence"`) -- to the chat app
    via an `onAppFrame` handler.
@@ -462,8 +615,12 @@ The transport itself is `room::RoomClient` -- a generic, presence-agnostic
 WebSocket client (mirroring the desktop bridge's `relay_client.rs`):
 
 1. Connects to the relay (`RoomConfig.relay_url`, taken from `[relay].url`),
-   sends `{"type":"room_hello", session_id: "jarvis-presence-global",
-   member_id: <user_id>}`, and waits for `room_ready`.
+   sends a **signed** `room_hello` (built by `signed_hello.rs`'s
+   `build_signed_room_hello` from an injected `RoomHelloSigner`) for
+   `session_id: "jarvis-presence-global", member_id: <user_id>`, and waits for
+   `room_ready`.  The presence `member_id` is the desktop's stable `user_id` (a
+   UUID), left untouched by the TOFU binding; the relay still requires the
+   signature.  See [Signed `room_hello`](#signed-room_hello-room-slot-binding).
 2. Surfaces relay control frames (`member_joined` / `member_left` /
    `member_count`) and every opaque text frame as `RoomEvent`s, and accepts
    opaque text frames to broadcast via `RoomClient::send`.
@@ -589,8 +746,11 @@ reconnects with exponential backoff:
 | Connect timeout           | 15 s    |
 
 Reconnection uses exponential backoff: `delay = min(delay * 2, max_delay)`.  On
-reconnect, the client re-sends `room_hello`, re-announces its own presence, and
-re-seeds its roster from the `member_joined` burst the relay replays.
+reconnect, the client re-sends a freshly-signed `room_hello` (a new unix-millis
+`nonce`, strictly greater than the last, so the relay's monotonic check accepts
+the genuine reconnect against the same pinned key), re-announces its own
+presence, and re-seeds its roster from the `member_joined` burst the relay
+replays.
 
 ---
 
@@ -1276,6 +1436,22 @@ transport is a plain WebSocket to the project's own relay.
 The relay server implements per-IP connection limits and global session
 caps to prevent resource exhaustion.  Connection rate limiting uses a
 sliding window, and stale sessions are reaped automatically.
+
+### Signed Room Slot Binding (Relay)
+
+Room membership is a security boundary, not just a label.  Every `room_hello`
+is signed with the client's ECDSA P-256 identity, and the relay verifies the
+signature, enforces nonce freshness (±30 s sanity window) **and** a per-slot
+strictly-monotonic nonce (anti-replay), and TOFU-pins
+`(session_id, member_id) → pubkey` — the first signed join pins the key; later
+joins for that slot need the same key **and** a strictly-greater nonce.  For
+chat-style `<fingerprint>.<userId>` ids the relay additionally checks that the
+fingerprint prefix equals `fingerprint(pubkey)`.  Verification happens *before*
+admission; the pin is committed only *after* the slot registers (no orphan
+pins).  Consequently a self-asserted `member_id` can no longer squat or evict a
+slot without the matching private key, and a captured hello replayed within the
+freshness window cannot evict the live connection holding the slot.  See
+[Signed `room_hello`](#signed-room_hello-room-slot-binding).
 
 ### Collaboration Features
 

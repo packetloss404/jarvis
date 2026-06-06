@@ -71,26 +71,41 @@ Shell settings live in `[shell]` in `jarvis.toml`, defined by
 program = ""                    # Empty = auto-detect
 args = []                       # Extra arguments to pass
 working_directory = "~/code"    # Initial cwd (~ is expanded)
-login_shell = true              # Pass -l on Unix
+login_shell = true              # Launch as a login shell
 
 [shell.env]
-EDITOR = "nvim"                 # Extra env vars injected into shell
+EDITOR = "nvim"                 # Extra env vars (schema only — see note below)
 ```
 
-### Fields
+### Fields (schema)
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `program` | `String` | `""` (auto-detect) | Shell executable path. Empty string triggers auto-detection. |
-| `args` | `Vec<String>` | `[]` | Extra arguments appended to the shell command. |
-| `working_directory` | `Option<String>` | `None` (inherit) | Initial working directory. Supports `~` expansion. Falls back to the parent process's cwd if the path does not exist. |
-| `env` | `HashMap<String, String>` | `{}` | Additional environment variables injected into the shell. |
-| `login_shell` | `bool` | `true` | On Unix, appends `-l` to spawn a login shell (loads `.profile`, `.bash_profile`, etc.). |
+| `program` | `String` | `""` (auto-detect) | Shell executable path. Empty string means auto-detect. |
+| `args` | `Vec<String>` | `[]` | Extra arguments passed to the shell. |
+| `working_directory` | `Option<String>` | `None` (inherit) | Initial working directory. Supports `~` expansion. Falls back to the default if the path does not exist. |
+| `env` | `HashMap<String, String>` | `{}` | Additional environment variables for the shell. |
+| `login_shell` | `bool` | `true` | Launch as a login shell. |
+
+> **Implementation status (current code):** Of the `[shell]` fields above, only
+> `working_directory` is actually wired into PTY spawning. `spawn_pty()` in
+> `spawn.rs` takes a single `cwd: Option<&str>` argument (sourced from
+> `config.shell.working_directory`) and otherwise hardcodes the shell:
+>
+> - The shell program is **always** auto-detected via `default_shell()` --
+>   `program` and `args` are **not** consulted.
+> - `[shell.env]` is **not** injected; only the sanitized allowlist below
+>   (plus a forced `TERM`) reaches the shell.
+> - On Unix, `-l` is **always** appended regardless of `login_shell`.
+>
+> These fields exist in the schema (and round-trip through the settings UI for
+> `working_directory`) but `program`, `args`, `env`, and `login_shell` are not
+> yet honored at spawn time.
 
 ### Shell auto-detection
 
-When `program` is empty (the default), the shell is detected at spawn time in
-`spawn.rs`:
+The shell is always detected at spawn time in `spawn.rs` (the `program` field
+is ignored):
 
 - **Unix**: Reads `$SHELL`, falls back to `/bin/sh`.
 - **Windows**: Reads `$COMSPEC`, falls back to `cmd.exe`.
@@ -111,8 +126,9 @@ USERPROFILE, APPDATA, LOCALAPPDATA, SYSTEMROOT, COMSPEC, HOMEDRIVE, HOMEPATH
 In addition, `TERM` is always forced to `xterm-256color` regardless of the
 inherited value.
 
-Any variables specified in `[shell.env]` are added on top of the inherited
-set.
+> **Note:** `[shell.env]` variables are **not** currently merged on top of this
+> set -- the allowlist above (plus the forced `TERM`) is the complete shell
+> environment.
 
 ---
 
@@ -214,18 +230,20 @@ PTYs are created in two scenarios:
    exit overlay. The Rust handler kills the existing PTY, removes it, then
    spawns a fresh one.
 
-The spawn sequence (`spawn_pty()` in `spawn.rs`):
+The spawn sequence (`spawn_pty(cols, rows, cwd)` in `spawn.rs`, where `cwd`
+comes from `config.shell.working_directory`):
 
 ```
-1. native_pty_system()           -- get OS PTY system
-2. openpty(PtySize{cols,rows})   -- create master/slave pair
-3. build_shell_command(shell)    -- configure shell with sanitized env
-4. slave.spawn_command(cmd)      -- fork shell into slave side
-5. drop(slave)                   -- only master is needed
-6. master.take_writer()          -- get writer for input
-7. master.try_clone_reader()     -- get reader for output
-8. thread::spawn(pty-reader)     -- background thread reads output
-9. Return PtyHandle              -- caller inserts into PtyManager
+1. native_pty_system()                -- get OS PTY system
+2. openpty(PtySize{cols,rows})        -- create master/slave pair
+3. default_shell()                    -- auto-detect the shell program
+4. build_shell_command(shell, cwd)    -- sanitized env, forced TERM, optional cwd, -l on Unix
+5. slave.spawn_command(cmd)           -- fork shell into slave side
+6. drop(slave)                        -- only master is needed
+7. master.take_writer()               -- get writer for input
+8. master.try_clone_reader()          -- get reader for output
+9. thread::spawn(pty-reader)          -- background thread reads output
+10. Return PtyHandle                  -- caller inserts into PtyManager
 ```
 
 ### 4.2 Default dimensions
@@ -244,13 +262,18 @@ Each PTY is represented by a `PtyHandle` struct:
 
 ```rust
 pub struct PtyHandle {
-    writer: Box<dyn Write + Send>,           // input to PTY
-    output_rx: mpsc::Receiver<Vec<u8>>,      // output from reader thread
-    child: Box<dyn Child + Send + Sync>,     // shell process handle
-    master: Box<dyn MasterPty + Send>,       // for resize operations
-    size: PtySize,                           // current cols x rows
+    writer: Box<dyn Write + Send>,             // input to PTY
+    output_rx: mpsc::Receiver<Vec<u8>>,        // output from reader thread
+    child: Box<dyn Child + Send + Sync>,       // shell process handle
+    master: Option<Box<dyn MasterPty + Send>>, // for resize; Option so Drop can move it out
+    size: PtySize,                             // current cols x rows
 }
 ```
+
+The `master` is wrapped in an `Option` so that `Drop` can move it out (see
+[4.7](#47-non-blocking-drop-windows-conpty-teardown)). Because of this,
+`resize()` first checks that the master is still present and returns an error
+("PTY master already closed") if it has been taken.
 
 ### 4.4 The PtyManager
 
@@ -288,6 +311,33 @@ removes the handle. This runs before webview destruction.
 When a single pane is closed via `panel_close`, the lifecycle handler calls
 `destroy_webview_for_pane(pane_id)`, which first kills the PTY via
 `ptys.kill_and_remove(pane_id)` and then destroys the WebView.
+
+### 4.7 Non-blocking Drop (Windows ConPTY teardown)
+
+`PtyHandle` implements `Drop` (in `types.rs`). On drop it first makes a
+best-effort `child.kill()`, then closes the master PTY.
+
+On Windows, dropping the `MasterPty` invokes `ClosePseudoConsole`, which can
+**block** until pending output has drained and the background reader thread
+unblocks from its `read()` call. Doing this synchronously would hang the
+caller -- the UI thread when a pane closes, or a unit test on teardown. To
+avoid this, `Drop` moves the master out of its `Option` and offloads the close
+to a detached thread:
+
+```rust
+impl Drop for PtyHandle {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        if let Some(master) = self.master.take() {
+            std::thread::spawn(move || drop(master));   // non-blocking close
+        }
+    }
+}
+```
+
+The abandoned thread is reaped on process exit. The net effect is that PTY
+teardown is always non-blocking on every platform -- closing a pane or shutting
+down never stalls on `ClosePseudoConsole`.
 
 ---
 

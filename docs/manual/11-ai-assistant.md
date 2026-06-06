@@ -1,13 +1,14 @@
 # AI Assistant
 
 This document is the definitive reference for Jarvis's built-in AI assistant: the
-multi-provider client layer, the agentic tool-call loop, and the tool sandbox /
-human-approval safety model.
+multi-provider client layer, the agentic tool-call loop, the tool sandbox /
+human-approval safety model, and push-to-talk voice input.
 
 The assistant lives in the `jarvis-ai` crate (the provider clients, the session
-tool loop, and the tools), is configured by the `[assistant]` section of
-`config.toml` (`jarvis-config`), and is driven by a background async task in
-`jarvis-app` that bridges the panel webview to the AI runtime.
+tool loop, the tools, and the voice/Whisper pipeline), is configured by the
+`[assistant]` and `[voice]` sections of `config.toml` (`jarvis-config`), and is
+driven by a background async task in `jarvis-app` that bridges the panel webview
+to the AI runtime.
 
 ---
 
@@ -32,7 +33,8 @@ tool loop, and the tools), is configured by the `[assistant]` section of
     - [No-Shell Argv Execution](#no-shell-argv-execution)
     - [Output Caps & Timeouts](#output-caps--timeouts)
 11. [Panel Integration](#panel-integration)
-12. [Appendix: End-to-End Flow](#appendix-end-to-end-flow)
+12. [Voice Input (Push-to-Talk STT)](#voice-input-push-to-talk-stt)
+13. [Appendix: End-to-End Flow](#appendix-end-to-end-flow)
 
 ---
 
@@ -668,6 +670,7 @@ wired to the background task through IPC.
 | Rust -> JS | `tool_call` | `{ name, input }` | A tool call started |
 | Rust -> JS | `tool_result` | `{ id, name, summary, is_error }` | A tool call finished |
 | Rust -> JS | `tool_approval_request` | `{ id, tool, summary }` | Approval needed |
+| Rust -> JS | `voice_transcript` | `{ text }` | Whisper transcript to drop into the input box (see [Voice Input](#voice-input-push-to-talk-stt)) |
 
 All of these `kind`s are on the IPC allowlist (see the *WebView System & IPC
 Bridge* chapter).
@@ -691,6 +694,134 @@ on its own -- timeout, session end, or task death), which is pure cleanup and ca
 never turn a would-be approve into a deny. When the human answers,
 `resolve_tool_approval` pops the sender and delivers the decision; an unknown or
 already-resolved id is harmless (the gate already failed closed).
+
+---
+
+## Voice Input (Push-to-Talk STT)
+
+**Source:** `jarvis-rs/crates/jarvis-ai/src/voice/mod.rs`,
+`jarvis-rs/crates/jarvis-ai/src/whisper.rs`,
+`jarvis-rs/crates/jarvis-app/src/app_state/voice.rs`,
+`jarvis-rs/assets/panels/assistant/index.html`,
+`jarvis-rs/crates/jarvis-config/src/schema/voice.rs`
+
+You can dictate a message instead of typing it. **Hold** the push-to-talk key to
+record from the default microphone; **release** it to transcribe. The transcript
+is dropped into the assistant panel's **input textarea for you to review and send
+manually** -- it is **never auto-sent**. This is a deliberate design choice:
+speech-to-text is imperfect, so a human always sees (and can edit) the text
+before it goes to the model.
+
+> **Push-to-talk only.** Only push-to-talk is implemented. The `[voice]` config
+> also exposes a `mode` (`ptt` / `vad`) and a `[voice.vad]` sub-table, but
+> voice-activity detection is **config-only -- not implemented**. Setting
+> `mode = "vad"` does nothing; the keybind is the only way to trigger recording.
+
+### Gating (OFF by default)
+
+Voice input is **off by default** and fails to a logged no-op. Recording only
+starts when **both** conditions hold (`JarvisApp::voice_available`):
+
+1. `[voice].enabled = true` (microphone capture is explicit opt-in), **and**
+2. `OPENAI_API_KEY` is set and non-empty in the environment (Whisper reuses the
+   OpenAI key convention).
+
+If either is missing, pressing the push-to-talk key logs *"push-to-talk ignored:
+voice disabled or OPENAI_API_KEY unset"* and does nothing. The key is also
+re-checked at **release** time: if the key was unset mid-hold, the recording is
+discarded rather than transcribed.
+
+### The Keybind
+
+The push-to-talk action is bound to `[keybinds].push_to_talk`, which defaults to
+**`F4`** -- a single unmodified function key, chosen so the key-up that stops
+recording is unambiguous and collides with no other binding (only `F1` is bound,
+as the non-macOS command palette). Key-down maps to `Action::PushToTalk`,
+key-up to `Action::ReleasePushToTalk`
+(`jarvis-platform/src/input_processor/processor.rs`,
+`input/registry.rs`); `dispatch.rs` routes them to `handle_push_to_talk` /
+`handle_release_push_to_talk`. Auto-repeat while the key is held is ignored (a
+recording already in progress short-circuits).
+
+> **Note.** `[voice.ptt].key` (also defaulting to `F4`) exists in the schema but
+> is **not** what drives the keybind registry -- the registry reads
+> `[keybinds].push_to_talk`. The `[voice.ptt]` / `[voice.vad]` sub-tables are
+> config surface that the current PTT path does not consume; only `[voice]`'s
+> `enabled`, `model`, and `language` are read at runtime.
+
+### The Pipeline
+
+```
+Hold F4
+  -> handle_push_to_talk
+       -> VoiceRecorder::start            (jarvis-ai/src/voice/mod.rs)
+            cpal default input device, stream begins capturing
+            channels mixed down to MONO, kept as f32 samples
+Release F4
+  -> handle_release_push_to_talk
+       -> recorder.stop() -> 16-bit PCM WAV bytes (device-native sample rate)
+       -> rt.spawn(async):
+            WhisperClient::transcribe(wav, "audio.wav")   (jarvis-ai/src/whisper.rs)
+              POST https://api.openai.com/v1/audio/transcriptions (multipart)
+              Authorization: Bearer <OPENAI_API_KEY>
+              -> response["text"]
+       -> mpsc send transcript
+  -> poll_voice_transcripts (drains the channel each tick)
+       -> voice_transcript IPC { text }
+            -> assistant panel: drop into input textarea (review-before-send)
+```
+
+- **Capture (`VoiceRecorder`).** Opens the default `cpal` input device, buffers
+  samples while held, and mixes every frame's channels down to a single **mono**
+  channel. `cpal::Stream` is `!Send`, so the recorder lives on the app's main/UI
+  thread. `stop` drops the stream and encodes the buffered samples into a
+  complete **16-bit PCM WAV** (`encode_wav_mono`) at the **device's native sample
+  rate** (written into the WAV header, so the file is always valid). An empty
+  recording yields a valid zero-data WAV.
+- **Transcription (`WhisperClient`).** Posts the WAV as a multipart form to the
+  OpenAI Whisper endpoint with `model` and (optionally) a `language` hint. The
+  HTTP client uses a 10 s connect timeout and a 300 s overall timeout. A `429`
+  maps to `AiError::RateLimited`; the transcript is read from the response's
+  `text` field. The API key is redacted in `WhisperConfig`'s `Debug` impl.
+- **Delivery.** Transcription runs on the shared Tokio runtime (the same one the
+  assistant uses; `ensure_assistant_runtime` builds it if needed). The result is
+  sent over an `mpsc` channel; `poll_voice_transcripts` drains it each tick and
+  forwards each transcript to the panel as a `voice_transcript` IPC message. An
+  empty (whitespace-only) transcript is dropped silently.
+
+### Panel Behavior
+
+The assistant panel's `voice_transcript` handler **appends** the transcript to
+any existing draft (separated by a space) so a half-typed message is not
+clobbered; it **replaces** only when the input box is empty. It then auto-resizes
+and **focuses** the input box so you can edit and send immediately. The text is
+assigned via `value` (textarea), never `innerHTML`. Nothing is auto-submitted.
+
+### Configuration (`[voice]`)
+
+**Source:** `jarvis-rs/crates/jarvis-config/src/schema/voice.rs`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Master toggle. OFF by default (mic capture is opt-in). Requires `OPENAI_API_KEY` to actually work. |
+| `model` | string | `"whisper-1"` | Whisper transcription model. |
+| `language` | string? | *(unset)* | Spoken-language hint (ISO-639-1, e.g. `"en"`). Unset = Whisper auto-detects. |
+| `mode` | enum | `"ptt"` | `ptt` or `vad`. **Only `ptt` is implemented**; `vad` is config-only. |
+
+The `[voice.ptt]` (`key`, `cooldown`), `[voice.vad]`, `[voice.sounds]`,
+`input_device`, `sample_rate`, and `whisper_sample_rate` fields exist in the
+schema but are **not consumed** by the current push-to-talk path. The actual
+recording uses the device's native rate and is keyed off `[keybinds].push_to_talk`.
+
+```toml
+[voice]
+enabled = true        # opt in (also requires OPENAI_API_KEY)
+model = "whisper-1"
+language = "en"       # optional hint; omit to auto-detect
+
+[keybinds]
+push_to_talk = "F4"   # hold to record, release to transcribe
+```
 
 ---
 

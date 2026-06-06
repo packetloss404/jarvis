@@ -184,7 +184,18 @@ Other mitigations retained: `collab.enabled` defaults false (a `warn!` fires if
 logged at info (only a `first6…(len=N)` fingerprint at debug); `term_input` is
 length-capped (`MAX_TERM_INPUT_BYTES = 4096`) on send and on the host.
 
-### RESIDUAL (deferred — needs a relay change + redeploy)
+### RESIDUAL — mostly closed
+
+> **UPDATE 2026-06-05 — the relay slot binding LANDED + deployed.** The relay change
+> described below as "deferred" was implemented: every Room client now SIGNS its
+> `room_hello` and the relay verifies it, enforces a per-slot strictly-monotonic
+> nonce, and TOFU-pins `(session_id, member_id) → pubkey` (`jarvis-relay/src/room_auth.rs`).
+> A self-asserted `member_id` can no longer churn/replace/evict another member's
+> pinned slot. The residual is now reduced to **first-mover pinning** on the pair
+> `member_id` (a random token, no pubkey relationship): a party who learns a
+> `session_id` could race to pin an id before its owner connects — **denial only**.
+> Fully closing that would require deriving the pair `member_id` from the pubkey
+> (an id-format change). The original (now largely historical) analysis follows.
 
 **Relay member_id slot DoS.** The relay assigns the in-room slot from a
 **self-asserted** `member_id` and **reconnect-replaces** it, and that layer is

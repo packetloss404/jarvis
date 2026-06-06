@@ -80,8 +80,8 @@ resolve to an `Action` before being dispatched.
 | `CloseOverlay` | Close Overlay | Apps | Close whichever overlay is open (assistant or palette) and return to `Terminal` mode. |
 | `OpenURLPrompt` | Open URL | Apps | Sentinel action -- never dispatched.  Intercepted by the palette to enter URL input mode. |
 | `OpenAssistant` | Open Assistant | Apps | Toggle the AI assistant panel (opens or closes). (Declared under "AI / Voice" in the enum, but `category()` groups it under **Apps**.) |
-| `PushToTalk` | Push to Talk | System | Begin push-to-talk voice capture. On key _release_, emits `ReleasePushToTalk`. |
-| `ReleasePushToTalk` | Release Push to Talk | System | End push-to-talk voice capture. Synthesized by `InputProcessor` on key release. |
+| `PushToTalk` | Push to Talk | System | **Hold-to-talk.** Bound to `[keybinds].push_to_talk` (default `F4`). Key _down_ starts microphone capture (`handle_push_to_talk()`); auto-repeat while held is ignored. Gated on `[voice].enabled` + an `OPENAI_API_KEY`; otherwise a logged no-op. |
+| `ReleasePushToTalk` | Release Push to Talk | System | End push-to-talk capture. Synthesized by `InputProcessor` on the matching key _release_ (when the released combo looks up to `PushToTalk`). Stops the recording, transcribes the WAV via Whisper on the async runtime, and routes the transcript to the assistant input via the `voice_transcript` IPC message (review-before-send; never auto-submitted). |
 | `ScrollUp(n)` | Scroll Up | Terminal | Scroll the terminal up by `n` lines. Handled by the webview. |
 | `ScrollDown(n)` | Scroll Down | Terminal | Scroll the terminal down by `n` lines. Handled by the webview. |
 | `ScrollToTop` | Scroll to Top | Terminal | Scroll to the top of terminal history. |
@@ -142,7 +142,7 @@ field is a string in `"Modifier+Key"` format.
 
 ```toml
 [keybinds]
-push_to_talk = "Option+Period"
+push_to_talk = "F4"
 open_assistant = "Cmd+G"
 new_panel = "Cmd+T"
 close_panel = "Escape+Escape"
@@ -166,6 +166,15 @@ paste = "Cmd+V"
 
 > **Note:** The default for `command_palette` is platform-dependent:
 > `Cmd+Shift+P` on macOS, `F1` on Windows/Linux.
+
+> **Push-to-talk binding:** The key that triggers `Action::PushToTalk` is
+> `[keybinds].push_to_talk` (default `F4`) — this is the field the
+> `KeybindRegistry` actually binds. There is also a separate `[voice.ptt]`
+> section (`key`, default `F4`; `cooldown`, default `0.3`) in `VoiceConfig`
+> (`jarvis-config/src/schema/voice.rs`); `[voice.ptt].key` documents the
+> intended push-to-talk key but is not consulted by the registry today — keep
+> the two in sync. A bare, unmodified function key is used so the key _release_
+> is unambiguous for hold-to-talk.
 
 ### Modifier Names (Case-Insensitive)
 
@@ -283,7 +292,7 @@ field name in `[keybinds]`.  The **Binding** column uses the `Cmd` abstraction
 
 | Config Key | Binding | Action | Label |
 |------------|---------|--------|-------|
-| `push_to_talk` | `Option+.` | `PushToTalk` | Push to Talk |
+| `push_to_talk` | `F4` | `PushToTalk` | Push to Talk |
 | `open_assistant` | `Cmd+G` | `OpenAssistant` | Open Assistant |
 | `new_panel` | `Cmd+T` | `NewPane` | New Pane |
 | `close_panel` | `Escape+Escape` | `ClosePane` | Close Pane |
