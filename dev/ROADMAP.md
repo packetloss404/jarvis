@@ -4,6 +4,17 @@ The revival is shipped (see `CHANGELOG.md`). This is the consolidated list of wh
 **not** finished — known residuals, deferred hardening, and forward features. Surfaced
 by the final code/dev review and the design docs.
 
+**Where we are vs the original strategic analysis** (`_archive/pathforward/finalfindings.md`,
+2026-03-25): its core thesis is delivered — emergency security remediated (the Python
+shell-injection blocklist and the Swift `isTrusted` keyboard hack are gone with the excised
+legacy stack; the new Rust agent uses no-shell argv exec + an allowlist + a fail-closed
+approval gate), the Python/Swift legacy archived (not just frozen), and **both** candidate
+Rust vertical slices finished (terminal+assistant *and* social+chat+relay+pair) rather than
+the one it asked for, deployed + adversarially reviewed. The items below are the residuals,
+including the few analysis findings still open (xterm CDN, the AI-client `.expect()` panics).
+Phase-4 / post-v1 work it scoped (Redis relay backplane, WebRTC voice, WASM-unified crypto,
+OpenTelemetry) remains intentionally future.
+
 ## Security hardening
 
 - **Relay member-id slot binding** *(LANDED — residual: first-mover pin on
@@ -70,6 +81,15 @@ by the final code/dev review and the design docs.
   `Win32WindowManager` delegates to the noop manager — Windows-specific native window
   management (beyond what winit/wgpu already provide) is unimplemented. Latent gap, not a
   user-facing break: the app runs on Windows via winit. Surfaced by the manual audit.
+- **Bundle xterm.js (drop the CDN).** `assets/panels/terminal/index.html` loads xterm + the
+  fit addon from `cdn.jsdelivr.net`, so the terminal breaks offline / air-gapped and pulls a
+  third-party asset at runtime — inconsistent with the otherwise self-contained binary. Bundle
+  it via `include_dir` like the other panel assets. *(Flagged by the original analysis.)*
+- **AI client constructors panic on startup.** `claude/client.rs:25`, `gemini/client.rs:39`,
+  `openai/client.rs:28`, and `whisper.rs:59` call `.expect()` on the reqwest build + header
+  parses, turning recoverable setup errors into process panics. Propagate with `Result`
+  instead. Low real-world risk (build only fails on TLS init) but it's a named finding.
+  *(Flagged by the original analysis, security item #8.)*
 
 ## Done (for reference — see CHANGELOG.md)
 
