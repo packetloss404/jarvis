@@ -105,7 +105,8 @@ name = "jarvis-dark"
 # Hold the push-to-talk key (see [keybinds].push_to_talk, default F4) to record;
 # on release the audio is transcribed and the text lands in the assistant panel's
 # input box for you to review and send manually (it is NOT auto-sent).
-# enabled = true
+# OFF by default (mic capture is opt-in); set enabled = true to use it.
+# enabled = false
 # mode = "ptt"           # ptt, vad
 # input_device = "default"
 # sample_rate = 24000

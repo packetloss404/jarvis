@@ -93,7 +93,10 @@ pub struct VoiceConfig {
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            // OFF by default: voice input captures the microphone, so it is
+            // explicit opt-in. Enabling it ALSO requires `OPENAI_API_KEY` (the
+            // Whisper key); with both set, hold the PTT key to record.
+            enabled: false,
             mode: VoiceMode::Ptt,
             ptt: PTTConfig::default(),
             vad: VADConfig::default(),

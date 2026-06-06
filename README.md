@@ -91,9 +91,7 @@ See **[ARCHITECTURE.md](ARCHITECTURE.md)** for boundaries and "where does this f
 |-----|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Repo map, crate boundaries |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Builds, tests, PR hints |
-| [docs/manual/README.md](docs/manual/README.md) | Full technical manual (12 chapters) |
-| ↳ [11 — AI Assistant](docs/manual/11-ai-assistant.md) | Multi-provider AI, the agentic tool loop, the approval gate |
-| ↳ [12 — Collaboration](docs/manual/12-collaboration.md) | Pair programming over the relay Room, signed-frame auth |
+| [docs/manual/README.md](docs/manual/README.md) | Full technical manual — 12 chapters (architecture, terminal, tiling, IPC, plugins, networking, renderer, AI assistant, collaboration) |
 | [dev/ROADMAP.md](dev/ROADMAP.md) | Remaining / incomplete work |
 | [dev/plans/c2-pair-programming.md](dev/plans/c2-pair-programming.md) | Collaborative-terminal design record |
 | [CHANGELOG.md](CHANGELOG.md) | History — including what changed vs the original version |

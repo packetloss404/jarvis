@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn default_config_has_correct_voice() {
         let config = JarvisConfig::default();
-        assert!(config.voice.enabled);
+        assert!(!config.voice.enabled); // OFF by default — mic capture is opt-in
         assert_eq!(config.voice.mode, VoiceMode::Ptt);
         assert_eq!(config.voice.sample_rate, 24000);
         assert_eq!(config.voice.whisper_sample_rate, 16000);
