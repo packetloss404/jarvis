@@ -156,6 +156,12 @@ pub fn spawn_pty_with_shell(
         pixel_height: 0,
     };
 
+    #[cfg(target_os = "windows")]
+    tracing::warn!(
+        "PTY win32-input-mode is not implemented — control key sequences (arrows, Ctrl combos, F-keys) \
+         will be dropped on Windows. This is a known limitation."
+    );
+
     let pair = pty_system
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;

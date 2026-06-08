@@ -30,6 +30,19 @@ pub(crate) fn capture_workspace_frame(request: ChatStreamCaptureRequest) -> Resu
     let bytes_per_row = image.bytes_per_row();
     let raw = image.data().bytes().to_vec();
 
+    // Guard against a truncated buffer: the last row we read ends at
+    // (height-1)*bytes_per_row + width*4.  If the buffer is shorter than that,
+    // the slice indexing below would panic — and with panic=abort that kills
+    // the entire shell process.
+    let expected_len = (height as usize).saturating_sub(1) * bytes_per_row + width as usize * 4;
+    if raw.len() < expected_len {
+        return Err(format!(
+            "screenshot buffer too short: {} < {}",
+            raw.len(),
+            expected_len
+        ));
+    }
+
     let mut rgba = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height as usize {
         let row = &raw[y * bytes_per_row..y * bytes_per_row + (width as usize * 4)];

@@ -14,7 +14,8 @@ use std::time::Duration;
 
 use clap::Parser;
 use tokio::net::TcpListener;
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::accept_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use crate::connection::handle_connection;
 use crate::rate_limit::{RateLimitConfig, RateLimiter};
@@ -106,7 +107,13 @@ async fn main() {
                 let store = store.clone();
                 let room_auth = room_auth.clone();
                 tokio::spawn(async move {
-                    match accept_async(stream).await {
+                    // Cap individual frames and messages at 64 KiB pre-auth to
+                    // prevent memory exhaustion from oversized frames before the
+                    // hello handshake is even validated.
+                    let ws_config = WebSocketConfig::default()
+                        .max_message_size(Some(65536))
+                        .max_frame_size(Some(65536));
+                    match accept_async_with_config(stream, Some(ws_config)).await {
                         Ok(ws) => handle_connection(ws, addr, store, room_auth, &limiter).await,
                         Err(e) => {
                             tracing::warn!(peer = %addr, error = %e, "WS handshake failed");

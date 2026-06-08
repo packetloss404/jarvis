@@ -81,7 +81,7 @@ impl JarvisApp {
 
         if self.tokio_runtime.is_none() {
             match tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
+                .worker_threads(2)
                 .enable_all()
                 .build()
             {

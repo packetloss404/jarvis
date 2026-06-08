@@ -32,29 +32,32 @@ impl ClaudeClient {
     }
 
     /// Build auth headers for the configured auth method.
-    pub(crate) fn auth_headers(&self) -> reqwest::header::HeaderMap {
+    pub(crate) fn auth_headers(&self) -> Result<reqwest::header::HeaderMap, crate::AiError> {
+        use reqwest::header::HeaderValue;
         let mut headers = reqwest::header::HeaderMap::new();
         match self.config.auth_method {
             super::config::AuthMethod::ApiKey => {
                 headers.insert(
                     "x-api-key",
-                    self.config.token.parse().expect("invalid API key header"),
+                    HeaderValue::from_str(&self.config.token).map_err(|e| {
+                        crate::AiError::ApiError(format!("invalid API key header: {e}"))
+                    })?,
                 );
             }
             super::config::AuthMethod::OAuth => {
                 headers.insert(
                     "Authorization",
-                    format!("Bearer {}", self.config.token)
-                        .parse()
-                        .expect("invalid OAuth header"),
+                    HeaderValue::from_str(&format!("Bearer {}", self.config.token)).map_err(
+                        |e| crate::AiError::ApiError(format!("invalid OAuth header: {e}")),
+                    )?,
                 );
             }
         }
         headers.insert(
             "anthropic-version",
-            ANTHROPIC_VERSION.parse().expect("invalid version header"),
+            HeaderValue::from_static(ANTHROPIC_VERSION),
         );
-        headers
+        Ok(headers)
     }
 
     /// Build the JSON request body for the Messages API.

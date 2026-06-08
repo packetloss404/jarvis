@@ -172,6 +172,8 @@ impl SessionStore {
             None => return Err("session not found"),
         };
 
+        const MAX_SPECTATORS: usize = 100;
+
         match role {
             Role::Host => {
                 if session.host_tx.is_some() {
@@ -180,6 +182,10 @@ impl SessionStore {
                 session.host_tx = Some(tx);
             }
             Role::Spectator => {
+                if session.spectator_txs.len() >= MAX_SPECTATORS {
+                    tracing::warn!("Spectator cap reached");
+                    return Err("spectator cap reached");
+                }
                 session.spectator_txs.push(tx);
             }
             _ => return Err("invalid role for broadcast session"),

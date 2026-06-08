@@ -84,8 +84,8 @@ pub(crate) async fn event_translator(
             RoomEvent::MemberCount { count } => {
                 debug!(count, "presence member_count");
             }
-            RoomEvent::Frame(text) => {
-                handle_frame(&text, &online_users, &event_tx, &our_user_id).await;
+            RoomEvent::Frame { member_id: sender_member_id, text } => {
+                handle_frame(&text, &sender_member_id, &online_users, &event_tx, &our_user_id).await;
             }
             RoomEvent::Disconnected => {
                 *connected.write().await = false;
@@ -126,8 +126,14 @@ async fn announce_self(
 }
 
 /// Parse and dispatch one opaque presence frame.
+///
+/// `sender_member_id` is the relay-authenticated sender identity from the
+/// `MemberFrame` envelope. The `Presence` arm validates that the frame's
+/// self-asserted `user_id` matches, preventing a member from spoofing another
+/// member's presence.
 async fn handle_frame(
     text: &str,
+    sender_member_id: &str,
     online_users: &Roster,
     event_tx: &mpsc::Sender<PresenceEvent>,
     our_user_id: &str,
@@ -142,6 +148,14 @@ async fn handle_frame(
 
     match frame {
         PresenceFrame::Presence { user } => {
+            if user.user_id != sender_member_id {
+                tracing::warn!(
+                    claimed = %user.user_id,
+                    authenticated = %sender_member_id,
+                    "Presence user_id mismatch with authenticated member_id — ignoring",
+                );
+                return;
+            }
             if user.user_id == our_user_id {
                 return; // never echo ourselves into UI events
             }
@@ -249,7 +263,8 @@ mod tests {
     async fn presence_frame_adds_user_and_emits_online() {
         let users = roster();
         let (tx, mut rx) = chan();
-        handle_frame(&presence_frame("u2", "Bob"), &users, &tx, "u1").await;
+        // sender_member_id == "u2" matches the frame's user_id → passes binding check
+        handle_frame(&presence_frame("u2", "Bob"), "u2", &users, &tx, "u1").await;
 
         assert!(users.read().await.contains_key("u2"));
         match rx.recv().await.unwrap() {
@@ -265,7 +280,7 @@ mod tests {
     async fn second_presence_frame_emits_activity_changed() {
         let users = roster();
         let (tx, mut rx) = chan();
-        handle_frame(&presence_frame("u2", "Bob"), &users, &tx, "u1").await;
+        handle_frame(&presence_frame("u2", "Bob"), "u2", &users, &tx, "u1").await;
         let _ = rx.recv().await; // UserOnline
 
         // Re-announce with a different activity → ActivityChanged, not UserOnline.
@@ -278,7 +293,7 @@ mod tests {
             },
         })
         .unwrap();
-        handle_frame(&frame, &users, &tx, "u1").await;
+        handle_frame(&frame, "u2", &users, &tx, "u1").await;
         match rx.recv().await.unwrap() {
             PresenceEvent::ActivityChanged(u) => {
                 assert_eq!(u.status, UserStatus::InGame);
@@ -293,7 +308,9 @@ mod tests {
         let users = roster();
         let (tx, mut rx) = chan();
         // A frame whose user_id == ours must not produce a UI event.
-        handle_frame(&presence_frame("u1", "Me"), &users, &tx, "u1").await;
+        // sender_member_id == "u1" == our_user_id: binding check passes, then
+        // the self-echo guard suppresses the event.
+        handle_frame(&presence_frame("u1", "Me"), "u1", &users, &tx, "u1").await;
         assert!(rx.try_recv().is_err());
     }
 
@@ -308,7 +325,7 @@ mod tests {
             target_user_id: "someone_else".into(),
         }))
         .unwrap();
-        handle_frame(&to_other, &users, &tx, "u1").await;
+        handle_frame(&to_other, "u2", &users, &tx, "u1").await;
         assert!(rx.try_recv().is_err(), "poke for others must be filtered");
 
         let to_us = serde_json::to_string(&PresenceFrame::Poke(PokePayload {
@@ -317,7 +334,7 @@ mod tests {
             target_user_id: "u1".into(),
         }))
         .unwrap();
-        handle_frame(&to_us, &users, &tx, "u1").await;
+        handle_frame(&to_us, "u2", &users, &tx, "u1").await;
         match rx.recv().await.unwrap() {
             PresenceEvent::Poked { display_name, .. } => assert_eq!(display_name, "Bob"),
             other => panic!("expected Poked, got {other:?}"),
@@ -335,7 +352,7 @@ mod tests {
             code: Some("XYZ".into()),
         }))
         .unwrap();
-        handle_frame(&frame, &users, &tx, "u1").await;
+        handle_frame(&frame, "u2", &users, &tx, "u1").await;
         match rx.recv().await.unwrap() {
             PresenceEvent::GameInvite { game, code, .. } => {
                 assert_eq!(game, "tetris");

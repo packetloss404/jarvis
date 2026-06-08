@@ -24,8 +24,8 @@ const BLOCKED_PATH_SEGMENTS: &[&str] = &[".ssh", ".aws", ".gnupg", ".env", ".git
 /// `.com` file (see `run_command`), so even a future allowlist mistake fails
 /// closed.
 const ALLOWED_COMMANDS: &[&str] = &[
-    "ls", "cat", "head", "tail", "wc", "find", "grep", "rg", "git", "cargo", "rustc", "node",
-    "python3", "echo", "mkdir", "cp", "mv", "rm", "touch",
+    "ls", "cat", "head", "tail", "wc", "find", "grep", "rg", "git", "cargo", "echo", "mkdir",
+    "cp", "mv", "rm", "touch",
 ];
 
 /// Return true if any component of `path` exactly equals a blocked segment.
@@ -283,8 +283,11 @@ mod tests {
                 "{c} must not be allowlisted (Windows .cmd shim risk)"
             );
         }
-        // node/cargo (real .exe-backed) stay allowed.
-        assert!(sb.validate_command("node").is_ok());
+        // node/python3/rustc are removed: they accept -c / arbitrary code execution.
+        assert!(sb.validate_command("node").is_err(), "node must not be allowlisted (-c escape risk)");
+        assert!(sb.validate_command("python3").is_err(), "python3 must not be allowlisted (-c escape risk)");
+        assert!(sb.validate_command("rustc").is_err(), "rustc must not be allowlisted");
+        // cargo (real .exe-backed) stays allowed but is constrained by subcommand list.
         assert!(sb.validate_command("cargo").is_ok());
     }
 

@@ -102,11 +102,16 @@ export function useRelayConnection(terminalRef: React.RefObject<TerminalWebViewH
     });
   }, [terminalRef, relayDebug]);
 
-  // Auto-connect when terminal is ready and token exists
+  // Auto-connect when terminal is ready and token exists.
+  // The cleanup ensures the WebSocket is closed when the component unmounts,
+  // preventing dangling connections and memory leaks.
   useEffect(() => {
     if (terminalReady && sessionToken && status === 'disconnected') {
       connectToRelay(sessionToken);
     }
+    return () => {
+      connectionRef.current.disconnect();
+    };
   }, [terminalReady, sessionToken, status, connectToRelay]);
 
   const connect = useCallback(async (token: string) => {

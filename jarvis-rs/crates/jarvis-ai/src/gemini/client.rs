@@ -51,16 +51,16 @@ impl GeminiClient {
     }
 
     /// `x-goog-api-key` auth header (Gemini does not use Bearer auth).
-    pub(crate) fn auth_headers(&self) -> reqwest::header::HeaderMap {
+    pub(crate) fn auth_headers(&self) -> Result<reqwest::header::HeaderMap, crate::AiError> {
+        use reqwest::header::HeaderValue;
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "x-goog-api-key",
-            self.config
-                .api_key
-                .parse()
-                .expect("invalid x-goog-api-key header"),
+            HeaderValue::from_str(&self.config.api_key).map_err(|e| {
+                crate::AiError::ApiError(format!("invalid x-goog-api-key header: {e}"))
+            })?,
         );
-        headers
+        Ok(headers)
     }
 
     /// Build the JSON request body for the Gemini API.

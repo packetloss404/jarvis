@@ -78,6 +78,43 @@ impl JarvisApp {
             return;
         }
 
+        // ISS-07: Canonicalize the scan path and verify it stays within
+        // the configured music directory to prevent directory traversal.
+        let canonical_dir = match std::fs::canonicalize(&dir) {
+            Ok(p) => p,
+            Err(e) => {
+                let payload = serde_json::json!({
+                    "_reqId": req_id,
+                    "error": format!("Invalid path: {e}"),
+                });
+                self.music_send(pane_id, "music_scan_response", &payload);
+                return;
+            }
+        };
+        let configured_music_dir = self
+            .music_library
+            .as_ref()
+            .map(|l| PathBuf::from(&l.music_dir))
+            .unwrap_or_else(music_library::default_music_dir);
+        let canonical_music_dir = match std::fs::canonicalize(&configured_music_dir) {
+            Ok(p) => p,
+            Err(_) => configured_music_dir.clone(),
+        };
+        if !canonical_dir.starts_with(&canonical_music_dir) {
+            tracing::warn!(
+                pane_id,
+                path = %canonical_dir.display(),
+                music_dir = %canonical_music_dir.display(),
+                "music_scan rejected: path outside music directory"
+            );
+            let payload = serde_json::json!({
+                "_reqId": req_id,
+                "error": "path outside music directory",
+            });
+            self.music_send(pane_id, "music_scan_response", &payload);
+            return;
+        }
+
         tracing::info!(path = %dir.display(), "Scanning music directory");
         let library = music_library::scan_directory(&dir);
         let track_count = library.tracks.len();
@@ -180,15 +217,59 @@ impl JarvisApp {
             return;
         }
 
+        // ISS-07: Canonicalize the new directory and verify it stays within
+        // the user's home directory to prevent the music root from being
+        // redirected to sensitive locations via symlinks or `..` traversal.
+        let canonical_dir = match std::fs::canonicalize(&dir) {
+            Ok(p) => p,
+            Err(e) => {
+                let payload = serde_json::json!({
+                    "_reqId": req_id,
+                    "error": format!("Invalid path: {e}"),
+                });
+                self.music_send(pane_id, "music_set_dir_response", &payload);
+                return;
+            }
+        };
+        let home = match dirs::home_dir() {
+            Some(h) => h,
+            None => {
+                let payload = serde_json::json!({
+                    "_reqId": req_id,
+                    "error": "cannot determine home directory",
+                });
+                self.music_send(pane_id, "music_set_dir_response", &payload);
+                return;
+            }
+        };
+        let canonical_home = std::fs::canonicalize(&home).unwrap_or(home);
+        if !canonical_dir.starts_with(&canonical_home) {
+            tracing::warn!(
+                pane_id,
+                path = %canonical_dir.display(),
+                "music_set_dir rejected: path outside home directory"
+            );
+            let payload = serde_json::json!({
+                "_reqId": req_id,
+                "error": "path outside home directory",
+            });
+            self.music_send(pane_id, "music_set_dir_response", &payload);
+            return;
+        }
+
+        // Store the canonical path so subsequent scans also work with the
+        // resolved path, preventing a TOCTOU race via symlink replacement.
+        let canonical_str = canonical_dir.to_string_lossy().to_string();
+
         // Update the stored directory (will be used on next scan)
         if let Some(ref mut lib) = self.music_library {
-            lib.music_dir = path.to_string();
+            lib.music_dir = canonical_str.clone();
             music_library::save_library_cache(lib);
         }
 
         let payload = serde_json::json!({
             "_reqId": req_id,
-            "music_dir": path,
+            "music_dir": canonical_str,
         });
         self.music_send(pane_id, "music_set_dir_response", &payload);
     }

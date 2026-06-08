@@ -66,9 +66,11 @@ impl TilingManager {
         }
     }
 
-    /// Close the focused pane. If it's the last pane, returns `false`.
+    /// Close the focused pane. If it's the last tree pane, returns `false`.
     pub fn close_focused(&mut self) -> bool {
-        if self.panes.len() <= 1 {
+        // Use tree pane count so stacked (tab) panes don't block the last-pane
+        // guard — those panes are not tree leaves (ISS-26).
+        if self.tree.pane_count() <= 1 {
             return false;
         }
 
@@ -79,6 +81,9 @@ impl TilingManager {
         if let Some(next) = self.tree.next_pane(to_close) {
             self.focused = next;
         }
+
+        // Prune closed pane from focus history (ISS-44).
+        self.focus_history.retain(|&fid| fid != to_close);
 
         if self.tree.remove_pane(to_close) {
             self.panes.remove(&to_close);
@@ -91,7 +96,8 @@ impl TilingManager {
 
     /// Close a specific pane by ID.
     pub fn close_pane(&mut self, id: u32) -> bool {
-        if self.panes.len() <= 1 {
+        // Use tree pane count for the last-pane guard (ISS-26).
+        if self.tree.pane_count() <= 1 {
             return false;
         }
 
@@ -99,9 +105,38 @@ impl TilingManager {
             return self.close_focused();
         }
 
+        // ISS-26: stacked panes live in self.panes + a PaneStack but are NOT
+        // tree leaves.  tree.remove_pane returns false for them, so the old
+        // code silently leaked the pane entry and left focus potentially
+        // dangling.  Check stacks first.
+        let in_stack = self
+            .stacks
+            .iter()
+            .find_map(|(leaf_id, stack)| {
+                if stack.contains(id) {
+                    Some(*leaf_id)
+                } else {
+                    None
+                }
+            });
+        if let Some(leaf_id) = in_stack {
+            if let Some(stack) = self.stacks.get_mut(&leaf_id) {
+                stack.remove(id);
+            }
+            self.panes.remove(&id);
+            // Prune from focus history (ISS-44).
+            self.focus_history.retain(|&fid| fid != id);
+            if self.focused == id {
+                self.focused = leaf_id;
+            }
+            return true;
+        }
+
         if self.tree.remove_pane(id) {
             self.panes.remove(&id);
             self.stacks.remove(&id);
+            // Prune from focus history (ISS-44).
+            self.focus_history.retain(|&fid| fid != id);
             if self.zoomed == Some(id) {
                 self.zoomed = None;
             }

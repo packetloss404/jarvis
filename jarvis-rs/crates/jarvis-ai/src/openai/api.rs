@@ -99,7 +99,7 @@ impl AiClient for OpenAiClient {
         let response = self
             .http
             .post(self.api_url())
-            .headers(self.auth_headers())
+            .headers(self.auth_headers()?)
             .header("content-type", "application/json")
             .json(&body)
             .send()
@@ -137,7 +137,7 @@ impl AiClient for OpenAiClient {
         let response = self
             .http
             .post(self.api_url())
-            .headers(self.auth_headers())
+            .headers(self.auth_headers()?)
             .header("content-type", "application/json")
             .json(&body)
             .send()

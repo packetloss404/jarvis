@@ -67,6 +67,7 @@ impl GeminiConfig {
     pub fn from_env() -> Result<Self, AiError> {
         let key = std::env::var("GEMINI_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            .map(|k| k.trim().to_string())
             .map_err(|_| {
                 AiError::ApiError(
                     "Gemini API not configured. Set GEMINI_API_KEY (or GOOGLE_API_KEY)."

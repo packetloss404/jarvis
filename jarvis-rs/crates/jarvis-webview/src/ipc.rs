@@ -53,6 +53,14 @@ impl IpcMessage {
 /// This is injected as an initialization script into every WebView.
 pub const IPC_INIT_SCRIPT: &str = r#"
 (function() {
+    // ISS-06: Origin guard — only activate the IPC bridge on trusted origins.
+    // This prevents the bridge from being exposed to arbitrary web content
+    // loaded in an external navigation (e.g. https:// pages opened via open_url).
+    var _loc = window.location;
+    var _trusted = (_loc.protocol === 'jarvis:') ||
+                   (_loc.hostname === 'jarvis.localhost' && _loc.protocol === 'http:');
+    if (!_trusted) return;
+
     // Jarvis IPC bridge
     window.jarvis = window.jarvis || {};
     window.jarvis.ipc = {

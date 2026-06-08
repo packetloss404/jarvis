@@ -1394,23 +1394,23 @@ const TrustStore = {
   },
 
   check(nick, fingerprint) {
-    var entry = this._store[nick];
+    var entry = this._store[fingerprint];
     if (!entry) {
-      this._store[nick] = { fingerprint: fingerprint, firstSeen: Date.now(), lastSeen: Date.now() };
+      this._store[fingerprint] = { nick: nick };
       this._save();
       return 'new';
     }
-    if (entry.fingerprint === fingerprint) {
-      entry.lastSeen = Date.now();
+    if (entry.nick !== nick) {
+      entry.nick = nick;
       this._save();
-      return 'trusted';
+      return 'nick-changed';
     }
-    return 'changed';
+    return 'trusted';
   },
 
-  getFingerprint(nick) {
-    var entry = this._store[nick];
-    return entry ? entry.fingerprint : null;
+  getNick(fingerprint) {
+    var entry = this._store[fingerprint];
+    return entry ? entry.nick : null;
   },
 
   _save() {
@@ -1756,6 +1756,20 @@ const UI = {
 };
 
 function var_primary() { return '#00e5ff'; }
+
+/**
+ * Escape HTML special characters to prevent XSS when inserting user content
+ * into the DOM via innerHTML or a markdown renderer.
+ * Message text already uses textContent (safe); use this function whenever
+ * rendered content must go through innerHTML or an external markdown renderer.
+ */
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 /** Generate a deterministic color from a string (for nick colors). */
 function nickColor(nick) {
@@ -2574,12 +2588,8 @@ const Chat = {
         var valid = await Identity.verify(canonical, payload.sig, payload.pubkey);
         if (valid) {
           var tofuResult = TrustStore.check(nick, payload.fingerprint);
-          if (tofuResult === 'trusted' || tofuResult === 'new') {
+          if (tofuResult === 'trusted' || tofuResult === 'new' || tofuResult === 'nick-changed') {
             verifyStatus = 'verified';
-          } else if (tofuResult === 'changed') {
-            verifyStatus = 'key-changed';
-            this._addSystemToChannel(channelId,
-              '\u26A0 WARNING: ' + nick + '\'s identity key has changed!', 'leave');
           }
         } else {
           verifyStatus = 'invalid';
@@ -3007,10 +3017,8 @@ const Chat = {
         var valid = await Identity.verify(canonical, payload.sig, payload.pubkey);
         if (valid) {
           var tofuResult = TrustStore.check(nick, payload.fingerprint);
-          if (tofuResult === 'trusted' || tofuResult === 'new') {
+          if (tofuResult === 'trusted' || tofuResult === 'new' || tofuResult === 'nick-changed') {
             verifyStatus = 'verified';
-          } else if (tofuResult === 'changed') {
-            verifyStatus = 'key-changed';
           }
         } else {
           verifyStatus = 'invalid';
@@ -3619,14 +3627,10 @@ document.addEventListener('DOMContentLoaded', () => {
         var badge = document.createElement('span');
         badge.style.marginRight = '4px';
         badge.style.fontSize = '10px';
-        if (trustStatus === 'trusted' || trustStatus === 'new') {
+        if (trustStatus === 'trusted' || trustStatus === 'new' || trustStatus === 'nick-changed') {
           badge.textContent = '\u2713';
           badge.style.color = '#58a6ff';
           badge.title = 'Verified: ' + fp;
-        } else if (trustStatus === 'changed') {
-          badge.textContent = '\u26A0';
-          badge.style.color = '#d29922';
-          badge.title = 'Key changed! Was: ' + (TrustStore.getFingerprint(nick) || '?') + ' Now: ' + fp;
         }
         nameEl.appendChild(badge);
       }

@@ -25,7 +25,19 @@ struct StreamAccumulator {
 
 impl StreamAccumulator {
     /// Ingest one parsed SSE chunk, pushing any newly emitted text via `on_chunk`.
-    fn ingest(&mut self, data: &serde_json::Value, on_chunk: &(dyn Fn(String) + Send + Sync)) {
+    ///
+    /// Returns an error if the chunk contains an API error payload (so the
+    /// caller can propagate it instead of silently losing it).
+    fn ingest(
+        &mut self,
+        data: &serde_json::Value,
+        on_chunk: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<(), crate::AiError> {
+        // Check if this is an error response before accessing text content.
+        if let Some(error) = data.get("error") {
+            return Err(crate::AiError::ApiError(error.to_string()));
+        }
+
         if let Some(candidates) = data["candidates"].as_array() {
             for candidate in candidates {
                 if let Some(parts) = candidate["content"]["parts"].as_array() {
@@ -53,6 +65,8 @@ impl StreamAccumulator {
                 .as_u64()
                 .unwrap_or(self.usage.output_tokens);
         }
+
+        Ok(())
     }
 }
 
@@ -71,7 +85,7 @@ impl AiClient for GeminiClient {
         let response = self
             .http
             .post(&url)
-            .headers(self.auth_headers())
+            .headers(self.auth_headers()?)
             .header("content-type", "application/json")
             .json(&body)
             .send()
@@ -111,7 +125,7 @@ impl AiClient for GeminiClient {
         let response = self
             .http
             .post(&url)
-            .headers(self.auth_headers())
+            .headers(self.auth_headers()?)
             .header("content-type", "application/json")
             .json(&body)
             .send()
@@ -129,8 +143,13 @@ impl AiClient for GeminiClient {
         }
 
         let mut acc = StreamAccumulator::default();
+        let mut stream_error: Option<AiError> = None;
 
         parse_sse_stream(response, |event: SseEvent| {
+            // Stop processing further chunks if a previous chunk returned an error.
+            if stream_error.is_some() {
+                return;
+            }
             let data = event.data.trim();
             if data.is_empty() {
                 return;
@@ -139,9 +158,15 @@ impl AiClient for GeminiClient {
                 Ok(v) => v,
                 Err(_) => return,
             };
-            acc.ingest(&json, on_chunk.as_ref());
+            if let Err(e) = acc.ingest(&json, on_chunk.as_ref()) {
+                stream_error = Some(e);
+            }
         })
         .await?;
+
+        if let Some(e) = stream_error {
+            return Err(e);
+        }
 
         if acc.usage.input_tokens == 0 && acc.usage.output_tokens == 0 {
             warn!("No usage data received in Gemini streaming response");
@@ -173,13 +198,13 @@ mod tests {
                 "candidates": [{ "content": { "parts": [{ "text": "Hel" }] } }]
             }),
             cb.as_ref(),
-        );
+        ).unwrap();
         acc.ingest(
             &serde_json::json!({
                 "candidates": [{ "content": { "parts": [{ "text": "lo" }] } }]
             }),
             cb.as_ref(),
-        );
+        ).unwrap();
         assert_eq!(acc.content, "Hello");
         assert!(acc.tool_calls.is_empty());
     }
@@ -196,7 +221,7 @@ mod tests {
                 "candidates": [{ "content": { "parts": [{ "text": "a" }, { "text": "b" }] } }]
             }),
             cb.as_ref(),
-        );
+        ).unwrap();
         assert_eq!(*collected.lock().unwrap(), vec!["a", "b"]);
     }
 
@@ -211,7 +236,7 @@ mod tests {
                 ] } }]
             }),
             cb.as_ref(),
-        );
+        ).unwrap();
         acc.ingest(
             &serde_json::json!({
                 "candidates": [{ "content": { "parts": [
@@ -219,7 +244,7 @@ mod tests {
                 ] } }]
             }),
             cb.as_ref(),
-        );
+        ).unwrap();
         assert_eq!(acc.tool_calls.len(), 2);
         assert_eq!(acc.tool_calls[0].id, "call_0");
         assert_eq!(acc.tool_calls[0].name, "read_file");
@@ -238,7 +263,7 @@ mod tests {
                 "usageMetadata": { "promptTokenCount": 9, "candidatesTokenCount": 3 }
             }),
             cb.as_ref(),
-        );
+        ).unwrap();
         assert_eq!(acc.usage.input_tokens, 9);
         assert_eq!(acc.usage.output_tokens, 3);
     }
@@ -255,9 +280,20 @@ mod tests {
                 ] } }]
             }),
             cb.as_ref(),
-        );
+        ).unwrap();
         assert_eq!(acc.content, "let me look");
         assert_eq!(acc.tool_calls.len(), 1);
         assert_eq!(acc.tool_calls[0].name, "read_file");
+    }
+
+    #[test]
+    fn ingest_returns_error_on_api_error_chunk() {
+        let mut acc = StreamAccumulator::default();
+        let cb = noop();
+        let result = acc.ingest(
+            &serde_json::json!({ "error": { "code": 400, "message": "bad request" } }),
+            cb.as_ref(),
+        );
+        assert!(result.is_err());
     }
 }

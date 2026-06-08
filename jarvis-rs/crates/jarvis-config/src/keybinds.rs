@@ -29,17 +29,21 @@ pub fn all_keybinds(config: &KeybindConfig) -> Vec<(&str, &str)> {
 }
 
 /// Validate that no two keybinds are mapped to the same key combination.
+///
+/// Comparison is case-insensitive so that `Cmd+G` and `cmd+g` are treated as
+/// the same binding regardless of how the user capitalises them.
 pub fn validate_no_duplicates(config: &KeybindConfig) -> Result<(), ConfigError> {
     let binds = all_keybinds(config);
-    let mut seen: HashMap<&str, &str> = HashMap::new();
+    let mut seen: HashMap<String, &str> = HashMap::new();
 
     for (name, binding) in &binds {
-        if let Some(existing_name) = seen.get(binding) {
+        let normalized = binding.to_lowercase();
+        if let Some(existing_name) = seen.get(&normalized) {
             return Err(ConfigError::ValidationError(format!(
                 "duplicate keybind '{binding}': assigned to both '{existing_name}' and '{name}'"
             )));
         }
-        seen.insert(binding, name);
+        seen.insert(normalized, name);
     }
 
     Ok(())

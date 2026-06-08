@@ -53,14 +53,20 @@ struct IdentityFile {
 
 impl CryptoService {
     /// Load an existing identity from `path`, or generate a new one and save it.
+    ///
+    /// If the file exists but cannot be parsed, this returns an error rather than
+    /// silently overwriting a potentially-valid key with a newly-generated one.
     pub fn load_or_generate(path: &Path) -> Result<Self, PlatformError> {
         if path.exists() {
-            match Self::load(path) {
-                Ok(svc) => return Ok(svc),
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to load identity, generating new one");
-                }
-            }
+            // Always try to load first.  If the file exists but is corrupt/unreadable
+            // we return an error rather than silently clobbering the user's identity.
+            return Self::load(path).map_err(|e| {
+                PlatformError::CryptoError(format!(
+                    "identity file exists at '{}' but could not be loaded: {}",
+                    path.display(),
+                    e
+                ))
+            });
         }
         let svc = Self::generate()?;
         svc.save(path)?;
@@ -69,12 +75,34 @@ impl CryptoService {
 
     // -- symmetric key derivation -------------------------------------------
 
-    /// Derive an AES-256 key from a room name via PBKDF2-HMAC-SHA256.
-    /// Returns an opaque handle to the key.
+    /// Derives the AES-256 key for a relay chat channel.
+    /// NOTE: Without a channel_secret in config, this key is deterministically
+    /// recoverable from the public channel name — group messages are authenticated
+    /// but not confidential against observers. Configure relay.channel_secret for
+    /// per-deployment confidentiality.
     pub fn derive_room_key(&mut self, room_name: &str) -> u32 {
+        self.derive_room_key_with_secret(room_name, None)
+    }
+
+    /// Derives the AES-256 key for a relay chat channel with an optional
+    /// per-deployment secret for additional confidentiality.
+    ///
+    /// When `channel_secret` is provided, it is mixed into the PBKDF2 password
+    /// as `"{room_name}:{channel_secret}"`, making the key non-precomputable
+    /// from the public channel name alone.
+    pub fn derive_room_key_with_secret(
+        &mut self,
+        room_name: &str,
+        channel_secret: Option<&str>,
+    ) -> u32 {
         let salt = b"jarvis-livechat-salt-v1";
+        let password = if let Some(secret) = channel_secret {
+            format!("{room_name}:{secret}")
+        } else {
+            room_name.to_string()
+        };
         let mut key = [0u8; 32];
-        pbkdf2::pbkdf2::<HmacSha256>(room_name.as_bytes(), salt, 10_000, &mut key)
+        pbkdf2::pbkdf2::<HmacSha256>(password.as_bytes(), salt, 100_000, &mut key)
             .expect("PBKDF2 output length is valid");
         self.store_key(key)
     }
@@ -258,31 +286,48 @@ impl CryptoService {
             std::fs::create_dir_all(parent).map_err(|e| pe(&e))?;
         }
 
-        // Write with restricted permissions on Unix
-        #[cfg(unix)]
+        // Write atomically: write to a temp file first, then rename into place.
+        // This prevents two classes of failure:
+        //   - On Unix, truncate(true) would destroy the existing key before write_all
+        //     completes; a crash in between is unrecoverable.
+        //   - On Windows, the target file is world-readable (inherited ACL) for the
+        //     window between fs::write and the subsequent icacls call.
+        // By operating on a temp file and renaming, neither window exists.
+        #[cfg(not(target_os = "windows"))]
         {
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut opts = std::fs::OpenOptions::new();
-            opts.write(true).create(true).truncate(true).mode(0o600);
             use std::io::Write;
-            let mut f = opts.open(path).map_err(|e| pe(&e))?;
-            f.write_all(json.as_bytes()).map_err(|e| pe(&e))?;
+            let tmp_path = path.with_extension("tmp");
+            {
+                // Build OpenOptions; on Unix also set mode 0o600 so the temp
+                // file is never world-readable even before the rename.
+                let mut opts = std::fs::OpenOptions::new();
+                opts.write(true).create(true).truncate(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.mode(0o600);
+                }
+                let mut f = opts.open(&tmp_path).map_err(|e| pe(&e))?;
+                f.write_all(json.as_bytes()).map_err(|e| pe(&e))?;
+                f.sync_all().map_err(|e| pe(&e))?;
+            }
+            std::fs::rename(&tmp_path, path).map_err(|e| pe(&e))?;
         }
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         {
-            std::fs::write(path, &json).map_err(|e| pe(&e))?;
-            // Restrict the identity key file to the current user. Windows has no
-            // single-call mode-bit API like Unix, so use `icacls` to disable
-            // inheritance and grant ONLY the current user full control. This is
-            // best-effort: an ACL failure is logged but does not fail identity
-            // persistence (the key is still written), and it mirrors the intent
-            // of the Unix `0o600`.
-            restrict_windows_acl(path);
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            std::fs::write(path, &json).map_err(|e| pe(&e))?;
+            let tmp_path = path.with_extension("tmp");
+            std::fs::write(&tmp_path, &json).map_err(|e| pe(&e))?;
+            match restrict_windows_acl(&tmp_path) {
+                Ok(_) => {}
+                Err(e) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(PlatformError::CryptoError(format!(
+                        "Failed to set file ACL: {}",
+                        e
+                    )));
+                }
+            }
+            std::fs::rename(&tmp_path, path).map_err(|e| pe(&e))?;
         }
 
         Ok(())
@@ -346,18 +391,18 @@ fn pe(e: &dyn std::fmt::Display) -> PlatformError {
 ///   1. `/inheritance:r` — strip inherited ACEs (e.g. Users group read),
 ///   2. `/grant:r "%USERNAME%":F` — grant ONLY the current user full control.
 ///
-/// Best-effort: any failure (icacls missing, non-NTFS volume, etc.) is logged at
-/// `warn` and does NOT fail identity persistence — the key file is still written.
+/// Returns `Ok(())` on success. Returns `Err(String)` if the path is not valid
+/// UTF-8, if `USERNAME` is unset, if `icacls` cannot be launched, or if icacls
+/// exits with a non-zero status. The caller is responsible for handling the error
+/// (e.g. deleting the temp file and propagating the failure).
 #[cfg(windows)]
-fn restrict_windows_acl(path: &Path) {
-    let Some(path_str) = path.to_str() else {
-        tracing::warn!("identity key path is not valid UTF-8; skipping ACL restriction");
-        return;
-    };
+fn restrict_windows_acl(path: &Path) -> Result<(), String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "identity key path is not valid UTF-8".to_string())?;
     let user = std::env::var("USERNAME").unwrap_or_default();
     if user.is_empty() {
-        tracing::warn!("USERNAME unset; cannot restrict identity key ACL");
-        return;
+        return Err("USERNAME environment variable is unset; cannot restrict identity key ACL".to_string());
     }
     let grant = format!("{user}:F");
     match std::process::Command::new("icacls")
@@ -366,20 +411,17 @@ fn restrict_windows_acl(path: &Path) {
     {
         Ok(out) if out.status.success() => {
             tracing::debug!(path = %path_str, "Restricted identity key ACL to current user");
+            Ok(())
         }
         Ok(out) => {
-            tracing::warn!(
-                path = %path_str,
-                stderr = %String::from_utf8_lossy(&out.stderr),
-                "icacls failed to restrict identity key ACL (key still written)"
-            );
+            Err(format!(
+                "icacls exited with status {:?}: {}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ))
         }
         Err(e) => {
-            tracing::warn!(
-                path = %path_str,
-                error = %e,
-                "could not run icacls to restrict identity key ACL (key still written)"
-            );
+            Err(format!("could not launch icacls: {e}"))
         }
     }
 }

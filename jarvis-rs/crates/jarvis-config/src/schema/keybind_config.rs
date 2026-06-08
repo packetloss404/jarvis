@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 ///
 /// Format: "Modifier+Key" where Modifier is one of: Cmd, Option, Control, Shift.
 /// Multiple modifiers: "Cmd+Shift+G".
-/// Double press: "Escape+Escape".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeybindConfig {

@@ -57,12 +57,12 @@ impl ClaudeConfig {
     /// 3. `~/.claude/.credentials.json` (OAuth, written by `claude auth login`)
     pub fn from_env() -> Result<Self, AiError> {
         // 1. Anthropic API key
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY").map(|k| k.trim().to_string()) {
             return Ok(Self::new(key, AuthMethod::ApiKey));
         }
 
         // 2. OAuth env var
-        if let Ok(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN") {
+        if let Ok(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").map(|k| k.trim().to_string()) {
             return Ok(Self::new(token, AuthMethod::OAuth));
         }
 

@@ -26,6 +26,8 @@ pub struct TilingManager {
     pub(super) layout_engine: LayoutEngine,
     /// Auto-incrementing counter for pane IDs.
     pub(super) next_id: u32,
+    /// History of recently focused pane IDs, capped at 64 entries (ISS-44).
+    pub(super) focus_history: Vec<u32>,
 }
 
 impl TilingManager {
@@ -44,6 +46,7 @@ impl TilingManager {
             zoomed: None,
             layout_engine: LayoutEngine::default(),
             next_id: 2,
+            focus_history: Vec::new(),
         }
     }
 

@@ -99,7 +99,10 @@ impl JarvisApp {
 
         let rt = self.tokio_runtime.get_or_insert_with(|| {
             tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
+                // ISS-22: minimum 2 workers prevents single-worker starvation when
+                // block_on() is called from the winit event loop while a bridge task
+                // is waiting on the same runtime.
+                .worker_threads(2)
                 .enable_all()
                 .build()
                 .expect("Failed to create tokio runtime for relay client")

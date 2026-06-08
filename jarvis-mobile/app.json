@@ -33,7 +33,8 @@
         {
           "cameraPermission": "Allow Jarvis to scan relay pairing QR codes from your desktop."
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }

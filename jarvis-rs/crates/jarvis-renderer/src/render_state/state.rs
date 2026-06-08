@@ -138,10 +138,22 @@ impl RenderState {
         self.bg_pipeline
             .update_uniforms(&self.gpu.queue, &self.uniforms);
 
-        let output = match self.gpu.current_texture() {
+        let output = match self.gpu.surface.get_current_texture() {
             Ok(t) => t,
+            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+                // Surface became invalid (sleep/wake, GPU TDR, monitor change).
+                // Reconfigure and skip this frame — next RedrawRequested will succeed.
+                self.gpu
+                    .surface
+                    .configure(&self.gpu.device, &self.gpu.surface_config);
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::Timeout) => {
+                // Transient: GPU is busy. Skip this frame silently.
+                return Ok(());
+            }
             Err(e) => {
-                tracing::error!("Failed to get surface texture: {e}");
+                tracing::error!("Fatal surface error: {e}");
                 return Err(RendererError::SurfaceError(e.to_string()));
             }
         };

@@ -434,8 +434,14 @@ impl JarvisApp {
 
         // Derive the M1 room-symmetric AES key from the session id (same scheme
         // as chat channels) and hand it to the worker before it starts sending.
+        // Use channel_secret from relay config if configured, for per-deployment
+        // key confidentiality (see ISS-11).
+        let channel_secret = self.config.relay.channel_secret.clone();
         if let Some(ref mut crypto) = self.crypto {
-            let handle = crypto.derive_room_key(&session_id);
+            let handle = crypto.derive_room_key_with_secret(
+                &session_id,
+                channel_secret.as_deref(),
+            );
             match crypto.export_key(handle) {
                 Ok(key_bytes) => {
                     let _ = key_tx.send(Some(key_bytes));
@@ -466,7 +472,7 @@ impl JarvisApp {
 
         let rt = self.tokio_runtime.get_or_insert_with(|| {
             tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
+                .worker_threads(2)
                 .enable_all()
                 .build()
                 .expect("Failed to create tokio runtime for pair client")

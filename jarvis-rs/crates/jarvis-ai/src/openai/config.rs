@@ -69,11 +69,13 @@ impl OpenAiConfig {
     /// Reads the API key from `OPENAI_API_KEY` and uses the default OpenAI base
     /// URL and model.
     pub fn from_openai_env() -> Result<Self, AiError> {
-        let key = std::env::var("OPENAI_API_KEY").map_err(|_| {
-            AiError::ApiError(
-                "OpenAI API not configured. Set OPENAI_API_KEY.".into(),
-            )
-        })?;
+        let key = std::env::var("OPENAI_API_KEY")
+            .map(|k| k.trim().to_string())
+            .map_err(|_| {
+                AiError::ApiError(
+                    "OpenAI API not configured. Set OPENAI_API_KEY.".into(),
+                )
+            })?;
         Ok(Self::new(
             key,
             DEFAULT_OPENAI_MODEL,
@@ -87,11 +89,13 @@ impl OpenAiConfig {
     /// OpenAI-compatible endpoint. The base URL is a normal field, so callers
     /// can override it (e.g. for a regional endpoint).
     pub fn from_minimax_env() -> Result<Self, AiError> {
-        let key = std::env::var("MINIMAX_API_KEY").map_err(|_| {
-            AiError::ApiError(
-                "MiniMax API not configured. Set MINIMAX_API_KEY.".into(),
-            )
-        })?;
+        let key = std::env::var("MINIMAX_API_KEY")
+            .map(|k| k.trim().to_string())
+            .map_err(|_| {
+                AiError::ApiError(
+                    "MiniMax API not configured. Set MINIMAX_API_KEY.".into(),
+                )
+            })?;
         Ok(Self::new(
             key,
             DEFAULT_MINIMAX_MODEL,

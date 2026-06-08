@@ -210,14 +210,20 @@ async fn session(
                             Ok(RoomControl::MemberCount { count }) => {
                                 let _ = event_tx.send(RoomEvent::MemberCount { count }).await;
                             }
+                            Ok(RoomControl::MemberFrame { member_id, payload }) => {
+                                let _ = event_tx
+                                    .send(RoomEvent::Frame {
+                                        member_id,
+                                        text: payload,
+                                    })
+                                    .await;
+                            }
                             Ok(RoomControl::Error { message }) => {
                                 warn!(error = %message, "Presence room relay error");
                                 let _ = event_tx.send(RoomEvent::RelayError(message)).await;
                             }
-                            // Not a control frame → opaque application payload.
-                            Err(_) => {
-                                let _ = event_tx.send(RoomEvent::Frame(text.to_string())).await;
-                            }
+                            // Unrecognised control frame — drop silently.
+                            Err(_) => {}
                         }
                     }
                     Some(Ok(Message::Ping(data))) => {

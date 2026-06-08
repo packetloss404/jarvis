@@ -100,6 +100,12 @@ impl JarvisApp {
 
         tracing::debug!(pane_id, kind = %msg.kind, "IPC message dispatched");
 
+        // ISS-09: Privileged IPC kinds are forbidden from plugin/game panes.
+        // A pane is considered a plugin pane while it has an entry in
+        // `game_active` (set when the pane navigates to a plugin URL and
+        // cleared when it navigates back to its original URL).
+        let is_plugin_pane = self.game_active.contains_key(&pane_id);
+
         match msg.kind.as_str() {
             "boot_complete" => {
                 self.handle_boot_complete();
@@ -125,18 +131,27 @@ impl JarvisApp {
                 self.notify_focus_changed();
                 self.needs_redraw = true;
             }
-            "pty_input" => {
-                tracing::trace!(pane_id, "pty_input received");
-                self.handle_pty_input(pane_id, &msg.payload);
-            }
-            "pty_resize" => {
-                self.handle_pty_resize(pane_id, &msg.payload);
-            }
-            "pty_restart" => {
-                self.handle_pty_restart(pane_id, &msg.payload);
-            }
-            "terminal_ready" => {
-                self.handle_terminal_ready(pane_id, &msg.payload);
+            "pty_input" | "pty_resize" | "pty_restart" | "terminal_ready" => {
+                if is_plugin_pane {
+                    tracing::warn!(pane_id, kind = %msg.kind, "IPC rejected: privileged kind from plugin pane");
+                    return;
+                }
+                match msg.kind.as_str() {
+                    "pty_input" => {
+                        tracing::trace!(pane_id, "pty_input received");
+                        self.handle_pty_input(pane_id, &msg.payload);
+                    }
+                    "pty_resize" => {
+                        self.handle_pty_resize(pane_id, &msg.payload);
+                    }
+                    "pty_restart" => {
+                        self.handle_pty_restart(pane_id, &msg.payload);
+                    }
+                    "terminal_ready" => {
+                        self.handle_terminal_ready(pane_id, &msg.payload);
+                    }
+                    _ => unreachable!(),
+                }
             }
             "presence_request_users" => {
                 self.handle_presence_request_users(pane_id, &msg.payload);
@@ -151,9 +166,17 @@ impl JarvisApp {
                 self.handle_settings_set_theme(pane_id, &msg.payload);
             }
             "settings_update" => {
+                if is_plugin_pane {
+                    tracing::warn!(pane_id, "IPC rejected: settings_update from plugin pane");
+                    return;
+                }
                 self.handle_settings_update(pane_id, &msg.payload);
             }
             "settings_reset_section" => {
+                if is_plugin_pane {
+                    tracing::warn!(pane_id, "IPC rejected: settings_reset_section from plugin pane");
+                    return;
+                }
                 self.handle_settings_reset_section(pane_id, &msg.payload);
             }
             "settings_get_config" => {
@@ -201,6 +224,10 @@ impl JarvisApp {
                 self.handle_keybind_from_webview(pane_id, &msg.payload);
             }
             "read_file" => {
+                if is_plugin_pane {
+                    tracing::warn!(pane_id, "IPC rejected: read_file from plugin pane");
+                    return;
+                }
                 self.handle_read_file(pane_id, &msg.payload);
             }
             "emulator_list_roms" => {
@@ -222,6 +249,10 @@ impl JarvisApp {
                 self.handle_music_set_dir(pane_id, &msg.payload);
             }
             "pair_start" => {
+                if is_plugin_pane {
+                    tracing::warn!(pane_id, "IPC rejected: pair_start from plugin pane");
+                    return;
+                }
                 self.handle_pair_start(pane_id, &msg.payload);
             }
             "pair_join" => {
@@ -268,11 +299,31 @@ impl JarvisApp {
                 }
             }
             "clipboard_paste" => {
+                if is_plugin_pane {
+                    tracing::warn!(pane_id, "IPC rejected: clipboard_paste from plugin pane");
+                    return;
+                }
                 self.handle_clipboard_paste(pane_id, &msg.payload);
             }
             "open_url" => {
                 if let IpcPayload::Json(ref v) = msg.payload {
                     if let Some(url) = v.get("url").and_then(|u| u.as_str()) {
+                        // ISS-10: Reject dangerous URI schemes.
+                        // Check for both `scheme://` forms (file://, http://) AND
+                        // `scheme:` forms without `//` (javascript:, data:, vbscript:).
+                        // A URL with no `:` at all is a bare hostname — safe to pass through
+                        // (https:// gets prepended in dispatch).
+                        let scheme_ok = if let Some(colon_pos) = url.find(':') {
+                            let scheme = &url[..colon_pos];
+                            matches!(scheme, "https" | "jarvis")
+                        } else {
+                            // No colon → no scheme → bare hostname, safe.
+                            true
+                        };
+                        if !scheme_ok {
+                            tracing::warn!(pane_id, %url, "open_url rejected: disallowed scheme");
+                            return;
+                        }
                         let url_owned = url.to_string();
                         self.dispatch(jarvis_common::actions::Action::OpenURL(url_owned));
                     }

@@ -25,7 +25,7 @@ Then open the iOS simulator, Android emulator, or Expo Go / dev client as usual.
 
 ## Tabs
 
-- **[ code ]** — Paste or scan pairing data, connect to the relay, drive a remote terminal. Session token is stored locally (AsyncStorage).
+- **[ code ]** — Paste or scan pairing data, connect to the relay, drive a remote terminal. Session token is stored in the device secure enclave (expo-secure-store).
 - **[ chat ]** — Livechat UI inlined in [lib/jarvis-chat-html.ts](lib/jarvis-chat-html.ts); connects over the relay Room transport (one WebSocket per channel), with the relay URL injected at build time from `EXPO_PUBLIC_DEFAULT_RELAY_URL` (defaults to the production relay if unset). Connection errors show a banner (distinct from relay terminal issues).
 - **[ claude ]** — `https://claude.ai/code` in a WebView. Google / Microsoft / Apple OAuth navigations are opened with `expo-web-browser` **auth session** + `jarvis://oauth/callback` when possible; use **[browser]** or **[reload]** if sign-in still fails. Cookies are not automatically shared back into the WebView.
 

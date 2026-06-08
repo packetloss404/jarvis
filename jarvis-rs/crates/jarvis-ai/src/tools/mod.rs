@@ -112,7 +112,6 @@ mod sandbox_tests {
             "rm temp.txt",
             "touch new_file",
             "grep pattern file.rs",
-            "python3 script.py",
         ] {
             assert!(
                 sandbox.validate_command(cmd).is_ok(),

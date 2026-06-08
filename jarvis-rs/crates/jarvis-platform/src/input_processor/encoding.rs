@@ -6,40 +6,40 @@ pub fn encode_key_for_terminal(key: &str, ctrl: bool, alt: bool, _shift: bool) -
         // Editing keys
         "Enter" => [alt_prefix, b"\r"].concat(),
         "Backspace" => [alt_prefix, b"\x7f"].concat(),
-        "Tab" => b"\t".to_vec(),
-        "Escape" => b"\x1b".to_vec(),
+        "Tab" => [alt_prefix, b"\t"].concat(),
+        "Escape" => [alt_prefix, b"\x1b"].concat(),
         "Space" => [alt_prefix, b" "].concat(),
-        "Delete" => b"\x1b[3~".to_vec(),
-        "Insert" => b"\x1b[2~".to_vec(),
+        "Delete" => [alt_prefix, b"\x1b[3~"].concat(),
+        "Insert" => [alt_prefix, b"\x1b[2~"].concat(),
 
         // Arrow keys
-        "Up" => b"\x1b[A".to_vec(),
-        "Down" => b"\x1b[B".to_vec(),
-        "Right" => b"\x1b[C".to_vec(),
-        "Left" => b"\x1b[D".to_vec(),
+        "Up" => [alt_prefix, b"\x1b[A"].concat(),
+        "Down" => [alt_prefix, b"\x1b[B"].concat(),
+        "Right" => [alt_prefix, b"\x1b[C"].concat(),
+        "Left" => [alt_prefix, b"\x1b[D"].concat(),
 
         // Navigation
-        "Home" => b"\x1b[H".to_vec(),
-        "End" => b"\x1b[F".to_vec(),
-        "PageUp" => b"\x1b[5~".to_vec(),
-        "PageDown" => b"\x1b[6~".to_vec(),
+        "Home" => [alt_prefix, b"\x1b[H"].concat(),
+        "End" => [alt_prefix, b"\x1b[F"].concat(),
+        "PageUp" => [alt_prefix, b"\x1b[5~"].concat(),
+        "PageDown" => [alt_prefix, b"\x1b[6~"].concat(),
 
         // Function keys
-        "F1" => b"\x1bOP".to_vec(),
-        "F2" => b"\x1bOQ".to_vec(),
-        "F3" => b"\x1bOR".to_vec(),
-        "F4" => b"\x1bOS".to_vec(),
-        "F5" => b"\x1b[15~".to_vec(),
-        "F6" => b"\x1b[17~".to_vec(),
-        "F7" => b"\x1b[18~".to_vec(),
-        "F8" => b"\x1b[19~".to_vec(),
-        "F9" => b"\x1b[20~".to_vec(),
-        "F10" => b"\x1b[21~".to_vec(),
-        "F11" => b"\x1b[23~".to_vec(),
-        "F12" => b"\x1b[24~".to_vec(),
+        "F1" => [alt_prefix, b"\x1bOP"].concat(),
+        "F2" => [alt_prefix, b"\x1bOQ"].concat(),
+        "F3" => [alt_prefix, b"\x1bOR"].concat(),
+        "F4" => [alt_prefix, b"\x1bOS"].concat(),
+        "F5" => [alt_prefix, b"\x1b[15~"].concat(),
+        "F6" => [alt_prefix, b"\x1b[17~"].concat(),
+        "F7" => [alt_prefix, b"\x1b[18~"].concat(),
+        "F8" => [alt_prefix, b"\x1b[19~"].concat(),
+        "F9" => [alt_prefix, b"\x1b[20~"].concat(),
+        "F10" => [alt_prefix, b"\x1b[21~"].concat(),
+        "F11" => [alt_prefix, b"\x1b[23~"].concat(),
+        "F12" => [alt_prefix, b"\x1b[24~"].concat(),
 
         _ => {
-            if key.len() == 1 {
+            if key.chars().count() == 1 {
                 let ch = key.chars().next().unwrap();
                 if ctrl && ch.is_ascii_alphabetic() {
                     let ctrl_byte = (ch.to_ascii_lowercase() as u8) - b'a' + 1;

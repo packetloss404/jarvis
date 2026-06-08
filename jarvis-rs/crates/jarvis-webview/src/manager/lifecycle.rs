@@ -133,7 +133,17 @@ impl WebViewManager {
     }
 }
 
+/// Allowed audio file extensions for music streaming.
+const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "wav", "aac", "m4a", "opus"];
+
 /// Decode a base64url-encoded file path from a music URL.
+///
+/// # Security (ISS-07)
+/// Returns `None` if:
+/// - The path does not decode to valid UTF-8.
+/// - The file does not exist.
+/// - The file extension is not a recognized audio format.
+/// - The canonicalized path escapes the configured music directory.
 fn decode_music_path(encoded: &str) -> Option<std::path::PathBuf> {
     use base64::Engine as _;
     // Strip any query string
@@ -147,7 +157,64 @@ fn decode_music_path(encoded: &str) -> Option<std::path::PathBuf> {
     if !path.is_file() {
         return None;
     }
-    Some(path)
+
+    // ISS-07: Extension check — only serve recognised audio formats.
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !AUDIO_EXTENSIONS.contains(&ext.as_str()) {
+        warn!(path = %path.display(), ext = %ext, "music stream rejected: not an audio file");
+        return None;
+    }
+
+    // ISS-07: Path-traversal containment — the resolved path must stay inside
+    // the configured music directory.  We load the cached library just to read
+    // the stored music_dir; if no cache exists we fall back to the platform
+    // default.  canonicalize() resolves symlinks and ".." components.
+    let canonical = std::fs::canonicalize(&path).ok()?;
+
+    let music_dir = load_music_dir_from_cache();
+    let canonical_music_dir = std::fs::canonicalize(&music_dir).ok()?;
+
+    if !canonical.starts_with(&canonical_music_dir) {
+        warn!(
+            path = %canonical.display(),
+            music_dir = %canonical_music_dir.display(),
+            "music stream rejected: path outside music directory"
+        );
+        return None;
+    }
+
+    Some(canonical)
+}
+
+/// Read the music directory from the cached library, or fall back to the
+/// platform default.  This is a best-effort read; errors return the default.
+fn load_music_dir_from_cache() -> std::path::PathBuf {
+    // Reuse the same cache path logic as the app layer.
+    let cache_path = dirs::config_dir()
+        .map(|d| d.join("jarvis").join("music-library.json"));
+
+    if let Some(cache) = cache_path {
+        if let Ok(data) = std::fs::read_to_string(&cache) {
+            #[derive(serde::Deserialize)]
+            struct MusicDirOnly {
+                music_dir: String,
+            }
+            if let Ok(lib) = serde_json::from_str::<MusicDirOnly>(&data) {
+                if !lib.music_dir.is_empty() {
+                    return std::path::PathBuf::from(lib.music_dir);
+                }
+            }
+        }
+    }
+
+    // Fall back: ~/Music (or platform audio dir)
+    dirs::audio_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Music")))
+        .unwrap_or_else(|| std::path::PathBuf::from("Music"))
 }
 
 /// MIME type for audio files.

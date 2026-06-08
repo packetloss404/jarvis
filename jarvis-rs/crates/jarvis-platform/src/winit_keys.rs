@@ -47,7 +47,7 @@ pub fn normalize_winit_key(key: &str) -> String {
 
         _ => {
             // Single character keys: uppercase for consistency
-            if key.len() == 1 {
+            if key.chars().count() == 1 {
                 key.to_uppercase()
             } else {
                 // F1, F2, ..., F12 and other named keys pass through

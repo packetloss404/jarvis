@@ -139,6 +139,13 @@ pub enum RelayResponse {
     #[serde(rename = "member_count")]
     MemberCount { count: usize },
 
+    /// An opaque application frame from a room member, stamped with the
+    /// relay-authenticated sender `member_id`. Consumers MUST use this
+    /// `member_id` as the authoritative sender identity — any `user_id` claimed
+    /// inside `payload` is self-asserted and must be validated against it.
+    #[serde(rename = "member_frame")]
+    MemberFrame { member_id: String, payload: String },
+
     #[serde(rename = "error")]
     Error { message: String },
 }

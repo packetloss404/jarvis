@@ -31,10 +31,19 @@ impl LayoutEngine {
                 second,
             } => {
                 let gap = self.gap as f64;
+                let min = self.min_pane_size;
                 let (a, b) = match direction {
                     Direction::Horizontal => {
                         let available_width = (bounds.width - gap).max(0.0);
-                        let w1 = available_width * ratio;
+                        // ISS-43: clamp ratio so neither child is narrower than
+                        // min_pane_size pixels.
+                        let clamped_ratio = if available_width > 0.0 {
+                            let min_ratio = min / available_width;
+                            ratio.clamp(min_ratio, 1.0 - min_ratio)
+                        } else {
+                            *ratio
+                        };
+                        let w1 = available_width * clamped_ratio;
                         let w2 = (available_width - w1).max(0.0);
                         (
                             Rect {
@@ -53,7 +62,15 @@ impl LayoutEngine {
                     }
                     Direction::Vertical => {
                         let available_height = (bounds.height - gap).max(0.0);
-                        let h1 = available_height * ratio;
+                        // ISS-43: clamp ratio so neither child is shorter than
+                        // min_pane_size pixels.
+                        let clamped_ratio = if available_height > 0.0 {
+                            let min_ratio = min / available_height;
+                            ratio.clamp(min_ratio, 1.0 - min_ratio)
+                        } else {
+                            *ratio
+                        };
+                        let h1 = available_height * clamped_ratio;
                         let h2 = (available_height - h1).max(0.0);
                         (
                             Rect {

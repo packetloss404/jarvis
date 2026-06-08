@@ -26,7 +26,7 @@ impl KeybindRegistry {
             (&config.push_to_talk, Action::PushToTalk),
             (&config.open_assistant, Action::OpenAssistant),
             (&config.new_panel, Action::NewPane),
-            (&config.close_panel, Action::ClosePane),
+            (&config.close_panel, Action::CloseOverlay),
             (&config.toggle_fullscreen, Action::ToggleFullscreen),
             (&config.open_settings, Action::OpenSettings),
             (&config.open_chat, Action::OpenChat),

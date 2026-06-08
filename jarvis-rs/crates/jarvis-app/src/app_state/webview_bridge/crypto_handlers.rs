@@ -85,9 +85,11 @@ impl JarvisApp {
                 return;
             }
         };
+        let channel_secret = self.config.relay.channel_secret.clone();
         match &mut self.crypto {
             Some(svc) => {
-                let handle = svc.derive_room_key(&room);
+                let handle =
+                    svc.derive_room_key_with_secret(&room, channel_secret.as_deref());
                 self.crypto_respond_ok(pane_id, req_id, serde_json::json!({ "keyHandle": handle }));
             }
             None => {

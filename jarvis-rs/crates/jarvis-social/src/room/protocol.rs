@@ -67,6 +67,9 @@ pub enum RoomControl {
     #[serde(rename = "member_count")]
     MemberCount { count: usize },
 
+    #[serde(rename = "member_frame")]
+    MemberFrame { member_id: String, payload: String },
+
     #[serde(rename = "error")]
     Error { message: String },
 }
@@ -88,7 +91,10 @@ pub enum RoomEvent {
     /// Current member count reported by the relay.
     MemberCount { count: usize },
     /// An opaque text frame from another member (application payload).
-    Frame(String),
+    /// `member_id` is the relay-authenticated sender — validated by the relay's
+    /// signed `room_hello` handshake; consumers MUST NOT trust any `user_id`
+    /// inside `text` that does not match this `member_id`.
+    Frame { member_id: String, text: String },
     /// The relay reported a fatal/validation error for this session.
     RelayError(String),
     /// The WebSocket connection was lost (a reconnect attempt will follow).

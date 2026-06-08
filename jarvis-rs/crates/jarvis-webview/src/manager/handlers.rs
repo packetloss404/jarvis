@@ -102,10 +102,7 @@ impl WebViewManager {
         pid: u32,
     ) -> WebViewBuilder<'a> {
         builder.with_navigation_handler(move |url| {
-            if !url.starts_with("https://")
-                && !url.starts_with("http://")
-                && !is_navigation_allowed(&url)
-            {
+            if !url.starts_with("https://") && !is_navigation_allowed(&url) {
                 warn!(
                     pane_id = pid,
                     url = %url,
@@ -183,9 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn http_not_in_allowlist_but_allowed_by_handler() {
-        // is_navigation_allowed only covers non-http/https schemes.
-        // http:// is handled directly in attach_navigation_handler.
+    fn http_non_localhost_blocked_by_allowlist() {
+        // http:// URLs that are not jarvis.localhost must be blocked.
+        // Previously the handler short-circuited on http://, letting any
+        // http:// URL through. Now they go through is_navigation_allowed.
         assert!(!is_navigation_allowed("http://evil.com"));
         assert!(!is_navigation_allowed("http://localhost:8080"));
     }

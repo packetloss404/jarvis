@@ -18,7 +18,14 @@ const MOBILE_WEB_UA =
 
 const INJECT_JS = `
   window.open = function(url) {
-    if (url) window.location.href = url;
+    try {
+      var u = new URL(url);
+      var allowedHosts = ['claude.ai', 'anthropic.com'];
+      var isAllowed = allowedHosts.some(function(h) {
+        return u.hostname === h || u.hostname.endsWith('.' + h);
+      });
+      if (isAllowed) { window.location.href = url; }
+    } catch(e) {}
   };
   true;
 `;
@@ -27,6 +34,20 @@ export default function ClaudeCodeWebView() {
   const webViewRef = useRef<WebView>(null);
   const insets = useSafeAreaInsets();
   const { onNavigationStateChange } = useWebViewAndroidBack(webViewRef);
+
+  const isAllowedWebViewHost = (url: string): boolean => {
+    try {
+      const { hostname } = new URL(url);
+      return (
+        hostname === 'claude.ai' ||
+        hostname.endsWith('.claude.ai') ||
+        hostname === 'anthropic.com' ||
+        hostname.endsWith('.anthropic.com')
+      );
+    } catch {
+      return false;
+    }
+  };
 
   const onNavigationRequest = useCallback((event: WebViewNavigation) => {
     const u = event.url;
@@ -39,6 +60,10 @@ export default function ClaudeCodeWebView() {
       void WebBrowser.openAuthSessionAsync(u, redirect).finally(() => {
         WebBrowser.maybeCompleteAuthSession();
       });
+      return false;
+    }
+    if (!isAllowedWebViewHost(u)) {
+      void Linking.openURL(u);
       return false;
     }
     return true;

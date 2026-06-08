@@ -34,6 +34,7 @@ impl JarvisApp {
             Action::ClosePane => {
                 let closing_id = self.tiling.focused_id();
                 if self.tiling.close_focused() {
+                    self.game_active.remove(&closing_id);
                     self.destroy_webview_for_pane(closing_id);
                     self.sync_webview_bounds();
                     self.needs_redraw = true;
@@ -221,16 +222,21 @@ impl JarvisApp {
                         let focused = self.tiling.focused_id();
                         if let Some(ref registry) = self.webviews {
                             if let Some(handle) = registry.get(focused) {
-                                // Escape text for JS string literal
-                                let escaped = text
-                                    .replace('\\', "\\\\")
-                                    .replace('\'', "\\'")
-                                    .replace('\n', "\\n")
-                                    .replace('\r', "\\r");
+                                // ISS-18: Use serde_json to produce a safe JSON string literal.
+                                // This correctly escapes all characters including U+2028/U+2029
+                                // (line/paragraph separators that break JS string literals).
+                                const MAX_PASTE: usize = 512 * 1024;
+                                // Use floor_char_boundary so we never slice
+                                // mid-UTF-8-sequence (which would panic with
+                                // panic=abort and kill the shell).
+                                let cap = text.floor_char_boundary(MAX_PASTE);
+                                let text_truncated = &text[..cap];
+                                let json_text = serde_json::to_string(text_truncated)
+                                    .unwrap_or_else(|_| "\"\"".to_string());
                                 let js = format!(
                                     concat!(
                                         "(function(){{",
-                                        "var t='{}';",
+                                        "var t={};",
                                         "var a=document.activeElement;",
                                         "if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')){{",
                                         "var s=a.selectionStart||0,e=a.selectionEnd||0;",
@@ -242,7 +248,7 @@ impl JarvisApp {
                                         "}}",
                                         "}})()"
                                     ),
-                                    escaped
+                                    json_text
                                 );
                                 let _ = handle.evaluate_script(&js);
                             }
@@ -251,6 +257,21 @@ impl JarvisApp {
                 }
             }
             Action::OpenURL(ref url) => {
+                // ISS-10: Reject dangerous URI schemes (file://, javascript:, data:, etc.)
+                // URLs without a `:` are bare hostnames — safe (https:// prepended below).
+                // Check the scheme prefix before the first `:` to catch both
+                // `scheme://host` and schemeless `scheme:payload` forms (javascript:, data:).
+                let scheme_ok = if let Some(colon_pos) = url.find(':') {
+                    let scheme = &url[..colon_pos];
+                    matches!(scheme, "https" | "jarvis")
+                } else {
+                    true
+                };
+                if !scheme_ok {
+                    tracing::warn!(%url, "OpenURL rejected: disallowed scheme");
+                    return;
+                }
+
                 // Normalize: auto-prepend https:// if no scheme is provided
                 let normalized = if !url.contains("://") {
                     format!("https://{}", url)

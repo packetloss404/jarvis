@@ -69,8 +69,60 @@ impl JarvisApp {
             std::path::PathBuf::from(path_str)
         };
 
-        // Validate path exists and is a file
-        let metadata = match std::fs::metadata(&expanded) {
+        // Canonicalize the path to resolve symlinks and `..` components, then
+        // enforce that the resolved path stays within the user's home directory.
+        let canonical = match std::fs::canonicalize(&expanded) {
+            Ok(p) => p,
+            Err(e) => {
+                self.read_file_respond(
+                    pane_id,
+                    req_id,
+                    None,
+                    Some(&format!("file not found: {e}")),
+                );
+                return;
+            }
+        };
+
+        let home = match dirs::home_dir() {
+            Some(h) => h,
+            None => {
+                self.read_file_respond(
+                    pane_id,
+                    req_id,
+                    None,
+                    Some("cannot determine home directory"),
+                );
+                return;
+            }
+        };
+
+        let canonical_home = match std::fs::canonicalize(&home) {
+            Ok(h) => h,
+            Err(e) => {
+                self.read_file_respond(
+                    pane_id,
+                    req_id,
+                    None,
+                    Some(&format!("invalid home: {e}")),
+                );
+                return;
+            }
+        };
+
+        if !canonical.starts_with(&canonical_home) {
+            self.read_file_respond(
+                pane_id,
+                req_id,
+                None,
+                Some("path outside home directory"),
+            );
+            return;
+        }
+
+        // Validate path exists and is a file (using the canonical path to
+        // prevent TOCTOU races via symlinks).
+        let metadata = match std::fs::metadata(&canonical) {
             Ok(m) => m,
             Err(e) => {
                 self.read_file_respond(
@@ -93,8 +145,9 @@ impl JarvisApp {
             return;
         }
 
-        // Read the file
-        let bytes = match std::fs::read(&expanded) {
+        // Read the file via the canonical path (not the caller-supplied path)
+        // to prevent TOCTOU via symlinks.
+        let bytes = match std::fs::read(&canonical) {
             Ok(b) => b,
             Err(e) => {
                 self.read_file_respond(pane_id, req_id, None, Some(&format!("read error: {e}")));

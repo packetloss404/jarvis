@@ -33,8 +33,8 @@ pub async fn handle_connection(
         None => return,
     };
 
-    // Validate session ID length.
-    if session_id.len() > limiter.max_session_id_len() || session_id.is_empty() {
+    // Validate session ID: non-empty, bounded length, conservative charset.
+    if !is_valid_member_id(&session_id, limiter.max_session_id_len()) {
         let _ = send_response(
             &mut sink,
             &RelayResponse::Error {
@@ -115,6 +115,24 @@ pub async fn handle_connection(
             _ => {}
         },
         SessionKind::Broadcast => {
+            // Enforce the global session cap. Allow joining an existing session
+            // (e.g. a spectator connecting after the host created it), but
+            // reject creation of a brand-new broadcast session when the server
+            // is at capacity.
+            if !store.exists(&session_id).await
+                && store.count().await >= limiter.max_total_sessions()
+            {
+                tracing::warn!("Total session cap reached, rejecting broadcast session");
+                let _ = send_response(
+                    &mut sink,
+                    &RelayResponse::Error {
+                        message: "server at capacity".into(),
+                    },
+                )
+                .await;
+                return;
+            }
+
             if let Err(e) = store
                 .ensure_session(&session_id, SessionKind::Broadcast)
                 .await
@@ -399,8 +417,19 @@ pub async fn handle_connection(
                             // its own frame. Drop keepalive pings like the bridge does.
                             if !is_relay_keepalive_ping(&text) {
                                 let me = member_id.as_deref().unwrap_or_default();
+                                // Wrap the raw payload in a MemberFrame envelope so
+                                // receivers know the relay-authenticated sender
+                                // member_id without trusting any self-asserted field
+                                // inside the payload itself.
+                                let envelope = serde_json::to_string(
+                                    &RelayResponse::MemberFrame {
+                                        member_id: me.to_string(),
+                                        payload: text.to_string(),
+                                    },
+                                )
+                                .unwrap_or_default();
                                 for peer in store.room_targets_excluding(&session_id, me).await {
-                                    if peer.send(text.to_string()).await.is_err() {
+                                    if peer.send(envelope.clone()).await.is_err() {
                                         tracing::debug!(session = %session_id, "Member channel closed");
                                     }
                                 }
@@ -495,10 +524,10 @@ fn is_valid_member_id(member_id: &str, max_len: usize) -> bool {
 }
 
 fn is_relay_keepalive_ping(text: &str) -> bool {
-    match serde_json::from_str::<serde_json::Value>(text) {
-        Ok(v) => v.get("type").and_then(|t| t.as_str()) == Some("ping"),
-        Err(_) => false,
-    }
+    // Cheap heuristic: the keepalive ping is a small JSON object containing
+    // the string "ping". Avoid a full serde_json parse on every forwarded
+    // frame — this is called in the hot forwarding loop.
+    text.len() < 64 && text.contains("\"ping\"")
 }
 
 /// Read and parse the first message as a RelayHello.
