@@ -1,0 +1,25 @@
+# Normalize all text files to LF in the repository.
+# Prevents whole-tree CRLF churn from Windows-side tools (this repo lives on
+# a Windows drive accessed via WSL).
+* text=auto eol=lf
+
+# Keep Windows-only scripts as CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets — never touch line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.wav binary
+*.mp3 binary
+*.zip binary
