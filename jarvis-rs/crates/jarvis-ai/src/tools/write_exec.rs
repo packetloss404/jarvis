@@ -1,4 +1,4 @@
-//! Write + exec tool executor (A2) — SCAFFOLD.
+//! Write + exec tool executor (A2).
 //!
 //! Owns the two mutating/exec tools that A1 deliberately excluded:
 //! `write_file` and `run_command`. Unlike [`ReadOnlyToolExecutor`], every tool
@@ -18,11 +18,11 @@
 //!    as cwd, a wall-clock timeout, and an output cap. NO `sh -c` / `cmd /c` /
 //!    `shell:true` — literal args can never inject.
 //!
-//! This is the FOUNDATION scaffold: the public API is fixed so downstream
-//! agents fill in the bodies. Both tools currently return a "not yet
-//! implemented" error so the executor is wired but inert and the workspace
-//! builds green. The read-only tools are delegated to [`ReadOnlyToolExecutor`]
-//! so a single executor can serve the whole tool set when write/exec is enabled.
+//! Both tools are fully implemented: `write_file` performs sandbox-jailed,
+//! size-capped writes and `run_command` execs a validated argv (no shell) with
+//! a wall-clock timeout and an output cap. The read-only tools are delegated to
+//! [`ReadOnlyToolExecutor`] so a single executor can serve the whole tool set
+//! when write/exec is enabled.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
